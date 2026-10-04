@@ -114,8 +114,13 @@ export class ReadCache {
  * 单一实例的理由：同一份账号数据可能被两个挂载点消费（本插件在
  * `plugins.bundle.config` 与 `settings.plugins.tab` 各注册了一个面板），
  * 两份缓存会让「刚在设置页刷新过，切回来又是旧的」成为可能。
+ *
+ * `freshMs` 取 30 秒（2026-10-04 定）：切渠道要**秒开**，而一次 CPA 往返约
+ * 60–90ms —— 原来的 2 秒短到「来回点两下页签」就必然穿透，等于没有缓存。
+ * 数据真旧了用户点「刷新」，那个入口常驻（决策见
+ * [`.agents/notes/2026-10-04-channel-switch-read-strategy.md`](../../.agents/notes/2026-10-04-channel-switch-read-strategy.md)）。
  */
-export const readCache = new ReadCache({ freshMs: 2000, staleMs: 60_000 })
+export const readCache = new ReadCache({ freshMs: 30_000, staleMs: 300_000 })
 
 /**
  * 读一个带缓存的 GET。
@@ -138,6 +143,31 @@ export async function cachedGet(
   // 失败不写缓存：否则一次抖动会把错误缓存住整个 stale 窗口
   if (result.ok) readCache.put(key, result)
   return result
+}
+
+/** 正在预取的 key —— 避免同一 key 重复发。 */
+const prefetching = new Set<string>()
+
+/**
+ * 预取一个资源：把结果塞进缓存，让**下一次**渲染同步就能读到。
+ *
+ * 用途是「四个渠道同时加载」：渠道清单到位后就把四个渠道的账号都取回来，
+ * 于是点任何页签都是缓存命中 —— 零请求、零加载态。
+ *
+ * 判据：失败**不算错**。预取是优化，用户没点的渠道取不到不该影响界面，
+ * 真正切到那个渠道时正常重试即可。所以这里吞掉异常。
+ *
+ * 同 key 已在飞就跳过 —— `cachedGet` 本身没有 single-flight，
+ * 而预取和真实渲染可能同时要同一个 key。
+ */
+export function prefetch(key: string, path: string): void {
+  if (readCache.isFresh(key) || prefetching.has(key)) return
+  prefetching.add(key)
+  void cachedGet(key, path)
+    .catch(() => undefined)
+    .finally(() => {
+      prefetching.delete(key)
+    })
 }
 
 /** 写操作后调用：作废受影响的读。 */

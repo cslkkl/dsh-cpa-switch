@@ -58,8 +58,24 @@ export interface UseAsyncResourceOptions<T> {
 export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncResource<T> {
   const { key, path, select } = options
 
-  const [data, setData] = useState<T | undefined>(undefined)
-  const [error, setError] = useState<string | undefined>(undefined)
+  /**
+   * 已取到的值，**连同它属于哪个 key**。
+   *
+   * ⚠️ 必须连 key 一起存：组件不再随 key 重挂载（`Panel` 刻意去掉了 `key`），
+   * 所以切 key 时这个 state **不会**自动归零 —— 它还揣着上一个渠道的数据。
+   * 只存值的话，`data ?? fromCache` 会把**上一个渠道的账号**画在当前页签下
+   * （workbuddy 的账号出现在 trae 页签上）。
+   *
+   * 这就是取消 `key` 的代价：跨渠道的状态必须**自己认领归属**。
+   */
+  const [held, setHeld] = useState<{ key: string; value: T } | undefined>(undefined)
+  /**
+   * 错误同样**带 key**：切渠道后上一个渠道的报错不该继续显示在当前页签上
+   * （那会让人以为「trae 读失败了」，而它其实一次都没试过）。
+   */
+  const [heldError, setHeldError] = useState<{ key: string; message: string } | undefined>(
+    undefined,
+  )
   const [pending, setPending] = useState<boolean>(true)
 
   /**
@@ -87,19 +103,7 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
   const reload = useCallback(
     async (options: { readonly force?: boolean } = {}): Promise<void> => {
       const mine = (seq.current += 1)
-
-      /**
-       * 先用缓存里的旧值把界面填上（若有过），这样「有数据 + 正在重验」
-       * 立刻成立，用户不会看到一帧空白。
-       */
-      const cached = options.force === true ? undefined : readCache.peek<T>(key)
-      if (cached !== undefined) {
-        setData(cached.value)
-        setPending(true)
-        setError(undefined)
-      } else {
-        setPending(true)
-      }
+      setPending(true)
 
       const result = await cachedGet(key, path, {
         force: options.force === true,
@@ -110,12 +114,12 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
 
       if (result === undefined) {
         // 只有被彻底缓存住才算失败；读不出来时保留上一次的数据
-        setError('load-failed')
+        setHeldError({ key, message: 'load-failed' })
         setPending(false)
         return
       }
       if (!result.ok) {
-        setError(String(result.error ?? 'unknown'))
+        setHeldError({ key, message: String(result.error ?? 'unknown') })
         setPending(false)
         return
       }
@@ -124,18 +128,18 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
       try {
         picked = selectRef.current(result)
       } catch (selectError) {
-        setError(String(selectError))
+        setHeldError({ key, message: String(selectError) })
         setPending(false)
         return
       }
       if (picked === undefined) {
-        setError('bad-shape')
+        setHeldError({ key, message: 'bad-shape' })
         setPending(false)
         return
       }
 
-      setData(picked)
-      setError(undefined)
+      setHeld({ key, value: picked })
+      setHeldError(undefined)
       setPending(false)
     },
     [key, path],
@@ -146,12 +150,47 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
     void reload()
   }, [reload])
 
+  /**
+   * **同步**读缓存 —— 这就是「切渠道不闪」的全部秘密。
+   *
+   * 为什么必须在渲染阶段做：`useState` 的初值只在**首次挂载**时求值，之后
+   * 忽略。而「把缓存写进 state」这件事发生在 effect 里 —— 也就是挂载**之后**。
+   * 于是重挂载 / 换 key 的那一帧，`data` 必然是 `undefined`，`loading` 必然为真，
+   * 用户必然看到一帧「读取中…」。缓存明明有值，却晚了一帧才生效（2026-10-04 实机）。
+   *
+   * 所以：只要缓存里有，就**直接用它渲染**，不等 effect。副作用（重验）仍然
+   * 由上面的 effect 负责 —— 渲染阶段不发起请求。
+   */
+  const cached = readCache.peek<ApiResult>(key)
+  const fromCache = cached === undefined ? undefined : toValue<T>(cached.value, selectRef.current)
+
+  /**
+   * 能渲染的值，两个来源都**按 key 认领**：
+   * - `held` 只在还是同一个 key 时才算数（切 key 后它属于上一个渠道）；
+   * - 缓存天然带 key（key 就是查询的一部分），所以直接可用。
+   */
+  const shown = (held !== undefined && held.key === key ? held.value : undefined) ?? fromCache
+
   return {
-    data,
-    error,
-    // 只有「从来没成功过」才算 loading：有数据在手时是 revalidating
-    loading: pending && data === undefined,
-    revalidating: pending && data !== undefined,
+    data: shown,
+    // 错误也要认领 key，否则上一个渠道的报错会挂在当前页签上
+    error: heldError !== undefined && heldError.key === key ? heldError.message : undefined,
+    // 有可渲染的值就**不是** loading —— 哪怕重验还在飞。
+    // 这是「不闪」的第二半：光有值不够，还要**不显示**加载态。
+    loading: shown === undefined && pending,
+    revalidating: shown !== undefined && pending,
     reload,
+  }
+}
+
+/** 从宿主响应里取要渲染的部分；失败返回 `undefined`（不抛给渲染阶段）。 */
+function toValue<T>(
+  result: ApiResult,
+  select: (result: ApiResult) => T | undefined,
+): T | undefined {
+  try {
+    return result.ok ? select(result) : undefined
+  } catch {
+    return undefined
   }
 }
