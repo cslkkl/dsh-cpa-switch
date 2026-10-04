@@ -131,8 +131,6 @@ Adding or removing accounts updates the model list automatically. How it works i
 - **Rate-limited accounts look normal**: the panel showing "enabled" does not mean "usable right
   now"; it only surfaces when a conversation request fails — see the pitfall list in
   [Architecture](docs/ARCHITECTURE.md).
-- **Editing the source requires a rebuild**: the host loads the build output. After `pnpm build`,
-  restart DSH for the host side and refresh the page for the browser side.
 
 ## Documentation
 
@@ -154,6 +152,9 @@ pnpm install
 pnpm build        # tsdown dual-target build → lib/
 pnpm check        # typecheck + lint + format + build + verify:artifacts + test
 ```
+
+Editing the source requires a rebuild: the host loads the build output. After `pnpm build`,
+restart DSH for the host side and refresh the page for the browser side.
 
 ## Acknowledgements
 

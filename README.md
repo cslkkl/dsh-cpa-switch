@@ -96,7 +96,7 @@ target: <本目录绝对路径>
 | `openControlPanel`    | `false`         | CPA 启动时是否同时打开它自带的网页控制台 |
 | `startTimeoutSeconds` | `30`            | 等待 CPA 就绪的最长秒数                  |
 
-## 对话模型（自动注册）
+## 对话模型
 
 装完插件、加完账号，四个渠道的模型会自动出现在 DSH 的模型选择器里：
 
@@ -112,8 +112,6 @@ target: <本目录绝对路径>
 - **下载要能访问 GitHub Release**：直连不通时需要代理。
 - **被限流的号界面看不出**：面板显示"启用"不代表"现在能用"，只有实际对话报错才发现
   —— 详见 [架构说明](docs/ARCHITECTURE.md) 的防错清单。
-- **改了源码要重新构建**：宿主加载的是构建产物，`pnpm build` 之后宿主侧重启 DSH、
-  浏览器侧刷新页面。
 
 ## 文档
 
@@ -135,6 +133,9 @@ pnpm install
 pnpm build        # tsdown 双目标构建 → lib/
 pnpm check        # typecheck + lint + format + build + verify:artifacts + test
 ```
+
+改了源码要重新构建：宿主加载的是构建产物，`pnpm build` 之后宿主侧重启 DSH、
+浏览器侧刷新页面。
 
 ## 致谢
 
