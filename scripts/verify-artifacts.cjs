@@ -96,9 +96,27 @@ check('带 data-plugin-css 注入逻辑', /data-plugin-css/.test(clientSrc))
 const legacyClassNames = ['cpa-wrap', 'cpa-card', 'cpa-grid', 'cpa-sum', 'cpa-toolbar']
 const leaked = legacyClassNames.filter((name) => clientSrc.includes(name))
 check('旧的全局限类名已全部消失', leaked.length === 0, leaked.join(','))
+
+/**
+ * 类名必须是**哈希**的，不是 `cpa-xxx` 这种全局裸名。
+ *
+ * 注入的样式表是全局的，而宿主页面自己也有类名。哈希之后，一次改名或两行改动
+ * 就不可能与宿主的某条规则撞上 —— 而那种撞车会静默地把本插件的卡片改成
+ * 另一个样子。
+ *
+ * ⚠️ **不要断言哈希的具体形状。** `[hash]` 由 lightningcss 从样式表的
+ * **绝对路径**算出，所以同一份源码在不同 checkout 下哈希不同；而且哈希以数字
+ * 开头时 CSS 标识符会被转义成前导下划线（`1gY9Cq` → `_1gY9Cq`）。
+ * 本机 `D:\ProjectSomething` 恰好算出 `Y0b6Da_card`（6 位、字母打头），
+ * 而 CI 的 `C:\Users\runneradmin\work\...\panel.module.css` 算出别的值 ——
+ * 按「字母打头 + 至少 5 位」写断言，就会**本机绿、CI 红**。
+ *
+ * 真正要守的是「存在 `<某个前缀>_<local>` 形状的类名」，而 local 名（`card` /
+ * `grid` / `wrap` …）才是稳定的那一半。断言用不锚定前缀长度与字符集的形式。
+ */
 check(
   '类名是哈希的（CSS Module 已生效）',
-  /[A-Za-z0-9]{5,}_(card|grid|wrap|addCard|summaryCell)/.test(clientSrc),
+  /[\w-]+_(?:card|grid|wrap|addCard|summaryCell|toolbar)\b/.test(clientSrc),
 )
 
 console.log('')

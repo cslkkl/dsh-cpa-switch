@@ -154,6 +154,10 @@ python check-line-endings.py <本仓根> --target lf
 - `lib/client.js` 少导出 `inject` 时插件**不报错、只是不出现** —— 构建后跑 `pnpm verify:artifacts` 确认。
 - **`icon.svg` 与 `locale/*.json` 宿主直读，代码一个字节都不读** —— 坏了没有任何信号，
   只会静默回落成默认图形或包名。XML 注释里出现连续两个连字符会让整份 SVG 解析失败。
+- **产物断言里别写死 CSS Module 的哈希形状** —— `[hash]` 由 lightningcss 从样式表的
+  **绝对路径**算出，不同 checkout 必然不同，且以数字开头时会被转义成前导下划线。
+  只锚 `[local]` 那一半（`card` / `grid` / `wrap` …），否则**本机绿、CI 红**
+  （2026-10-04 实踩：`/[A-Za-z0-9]{5,}_card/` 在 CI 上判红）。
 - **两级读缓存都「坏了也不报错」** —— 合并失效只是慢，漏失效只是数字不对。
   新增改变 CPA 状态的写操作时，宿主侧调 `Operations.invalidateChannel()`、
   浏览器侧调 `invalidateReads()`；判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`。
