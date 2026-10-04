@@ -39,13 +39,14 @@ window.__ModuleLoader__.load({
     const StateDot = primitives.StateDot;
 
     const NS = 'cpa-panel';
+    /** 设置页标签的 id（次要入口 `settings.plugins.tab` 用）。 */
     const TAB_ID = 'cpa-panel';
     /**
      * **包名**，必须与 package.json 的 `name` 逐字一致。
      *
-     * ⚠️ 别拿 `TAB_ID` 当包名用：插件页 `plugins.detail.section` 收到的
-     * `subject.pkg.name` 是**完整包名**（`dsh-cpa-switch`），而标签 id 是短名
-     * （`cpa-panel`）——两者不相等会让区块**静默不渲染**（不报错，极难查）。
+     * 它是 `plugins.bundle.config` 的 **slot key** —— 宿主按 `pkg.name` 派发，
+     * 喂错会让区块**静默不渲染**（不报错，极难查）。
+     * 注意它与 `TAB_ID`（短名 `cpa-panel`）不是同一个字符串。
      */
     const PKG_NAME = 'dsh-cpa-switch';
 
@@ -1172,32 +1173,30 @@ window.__ModuleLoader__.load({
       const t = ctx.locale.bind(NS);
 
       /**
-       * 判断当前详情页是不是本插件自己的。
+       * 插件自己的面板，挂在组合包页面**描述与行之间**（即"包含的组件"上方）。
        *
-       * ⚠️ `subject.pkg` **不是字符串**，而是 `packageRef(pkg)` 的返回：
-       * `{ name, version, installed, enabled, rows }` —— 所以要读 `.name`，
-       * 直接和包名字符串比较会永远为 false（内容就永远不渲染）。
+       * 槽位选择依据（宿主 `dsh-client-ui-plugin-manager` 的 slot-contract）：
+       * - `plugins.bundle.config`（keyed，key = **包名**）→ 描述与行之间 ← 本插件用这个
+       * - `plugins.detail.section`（list）→ 页面自身内容**之下**（组合包页在组件列表之后）
+       *
+       * `plugins.bundle.config` 的 owner props 只有 `view` 与宿主托管的 `form`：
+       * - `view === 'summary'` 时页面只要一句话（官方卡片的摘要位），不是整个面板；
+       * - `view === 'page'` 时渲染完整面板。
+       *
+       * 本面板是实时操作面板（余额/签到/账号），不走宿主的配置表单语义，
+       * 因此不消费 `form`，也就没有"保存/放弃"——与 panel 内容一致。
        */
-      const isMine = (subject) => {
-        if (subject === undefined || subject === null) return false;
-        if (subject.kind !== 'bundle' && subject.kind !== 'row') return false;
-        const name = subject.pkg?.name ?? subject.pkg;
-        return name === PKG_NAME;
-      };
-
-      ctx.slots.inject('plugins.detail.section', () =>
+      ctx.slots.inject('plugins.bundle.config', () =>
         ctx.slots.register(
           {
-            name: 'plugins.detail.section',
-            id: TAB_ID,
-            order: 20,
+            name: 'plugins.bundle.config',
+            key: PKG_NAME,
             locale: NS,
           },
           (seat) => {
-            if (!isMine(seat?.subject)) return null;
-            return React.createElement(Panel, {
-              t: typeof seat?.t === 'function' ? seat.t : t,
-            });
+            const t2 = typeof seat?.t === 'function' ? seat.t : t;
+            if (seat?.view === 'summary') return t2('tab');
+            return React.createElement(Panel, { t: t2 });
           },
         ),
       );
