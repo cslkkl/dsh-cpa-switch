@@ -99,6 +99,14 @@ python check-line-endings.py <本仓根> --target lf
 ## 待办
 
 - [x] ~~**真机验证本轮重构**~~ —— 已通过：面板照常显示、各渠道页签齐全、账号接口返回 200。
+- [ ] **发布 0.3.0（卡权限：需 npm 所有者 `cslkkl` 操作）**
+
+      `package.json` 已是 0.3.0，npm latest 仍是 0.2.0 —— 版本已 bump 但从未发布
+      （2026-10-04 核对）。当前登录用户不是 npm 所有者（`npm whoami` 401、GitHub
+      仓库 `admin: false`），无法发布。
+
+      步骤：所有者本机 `pnpm check` 全绿 → `npm publish`（首次手工；
+      Trusted Publishing 配好后改为 tag 触发）。发布后核对 npm 页面的 files 清单。
 - [ ] **配置 npm Trusted Publishing（需维护者手动操作）**
 
       当前发布是手工 `npm publish`，要改成**绑定本仓库自动发布** —— 免掉本机存 token，
