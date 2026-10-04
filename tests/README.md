@@ -9,7 +9,7 @@
 | `adapters.test.ts`       | `normalizeAccounts` 对四种返回结构的解析、能力表、单位区分；**显示名兜底链**（空串 / 渠道名 / auth_id）          |
 | `routes.test.ts`         | 路由归一化（同 path 合并 / 非法方法剔除）、逐条注册、单条失败不拖垮其余                                          |
 | `state.test.ts`          | 账号意图的 `source` 校验与 `ignored` 剥离、exe 记忆、`localDay`                                                  |
-| `cache.test.ts`          | 读缓存的 TTL / 并发合并 / 前缀失效 / 失败不留缓存；探活记忆与显式作废                                            |
+| `cache.test.ts`          | 读缓存的 TTL / 并发合并 / 前缀失效 / 失败不留缓存；探活记忆与显式作废。**判据在行为上**                          |
 | `read-cache.test.ts`     | 浏览器侧 `ReadCache` 的新鲜 / 陈旧两档、跨 key 隔离与按前缀作废；切渠道的按 key 认领；预取                       |
 | `action-outcome.test.ts` | 写操作返回的**归一**：`summary` 缺失时从 `results` 累加、净增量累加、失败项带名字与原因                          |
 | `action-report.test.ts`  | 批量动作的四种反馈分支、失败明细逐个点名、中英标点（`：` vs `: `）                                               |
