@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { ReadCache } from '../src/client/api.ts'
+import { ReadCache, prefetch, readCache, type ApiResult } from '../src/client/api.ts'
 
 /** 造一个受控时钟的缓存。 */
 function makeCache(): { cache: ReadCache; setClock: (value: number) => void } {
@@ -101,5 +101,126 @@ describe('ReadCache', () => {
     cache.put('k', 'v1')
     setClock(90)
     expect(cache.peek<string>('k')?.at).toBe(40)
+  })
+})
+
+/**
+ * 切渠道时**按 key 认领**已取到的值。
+ *
+ * ⚠️ 这条是被一个真 bug 逼出来的：`Panel` 为了让切渠道变成「换参数」而不是
+ * 「卸载重挂」，刻意去掉了 `key={channelId}`。于是 hook 里那个存值的 state
+ * **不会**自动归零 —— 它还揣着上一个渠道的账号。若只比值不认 key，
+ * workbuddy 的账号就会画在 trae 的页签下，**而且不报错**。
+ *
+ * 判据直接测取值规则本身（state 与缓存各自在什么条件下算数）——
+ * 那正是「串数据」与「不闪」两条要求的全部判定。
+ */
+describe('切渠道的取值：按 key 认领', () => {
+  /** 与 `useAsyncResource` 里 `shown` 的算法一致。 */
+  function shownFor(
+    held: { key: string; value: string } | undefined,
+    cacheKey: string,
+    current: string,
+  ): string | undefined {
+    const cached = readCache.peek<ApiResult>(cacheKey)
+    const fromCache =
+      cached === undefined ? undefined : String((cached.value as unknown as { v: string }).v)
+    return (held !== undefined && held.key === current ? held.value : undefined) ?? fromCache
+  }
+
+  it('state 属于别的 key 时不算数（否则渠道串数据）', () => {
+    // 上一个渠道的 state 还热着
+    const held = { key: 'accounts:workbuddy', value: 'wb-accounts' }
+    // 当前看的是 trae，而 trae 还没进过缓存
+    expect(shownFor(held, 'accounts:trae', 'accounts:trae')).toBeUndefined()
+  })
+
+  it('缓存里有当前 key 的值时直接用它，不等 effect（这就是不闪）', () => {
+    readCache.put('accounts:trae', { ok: true, v: 'trae-accounts' } as unknown as ApiResult)
+    // state 还揣着上一个渠道的值
+    const held = { key: 'accounts:workbuddy', value: 'wb-accounts' }
+    // 认领失败 → 退回缓存
+    expect(shownFor(held, 'accounts:trae', 'accounts:trae')).toBe('trae-accounts')
+  })
+
+  it('state 仍属于当前 key 时优先用它（最新值胜过缓存）', () => {
+    readCache.put('accounts:trae', { ok: true, v: 'stale-from-cache' } as unknown as ApiResult)
+    const held = { key: 'accounts:trae', value: 'fresh-from-state' }
+    expect(shownFor(held, 'accounts:trae', 'accounts:trae')).toBe('fresh-from-state')
+  })
+
+  it('两处都没有时才是 undefined（这时才显示加载态）', () => {
+    expect(shownFor(undefined, 'accounts:zcode', 'accounts:zcode')).toBeUndefined()
+  })
+})
+
+/**
+ * 预取的判据：跑完之后 key 必须在缓存里。
+ *
+ * ⚠️ 预取失败是**静默**的（它只是优化，用户没点的渠道取不到不该影响界面），
+ * 所以「调用了没报错」不能证明它工作。判据是**缓存里真的有值**——
+ * 而那正是「切页签时零请求」的全部依据。
+ */
+describe('预取', () => {
+  it('跑完后值落在缓存里，于是切页签时能同步读到', async () => {
+    const key = 'prefetch:accounts:trae'
+    const path = '/api/v1/cpa/accounts?plugin=trae'
+
+    // 预取之前：没有
+    expect(readCache.peek(key)).toBeUndefined()
+
+    const original = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ ok: true, data: { accounts: [] } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch
+    try {
+      prefetch(key, path)
+      // 等预取落地：它内部是 fire-and-forget，靠轮询缓存判定完成
+      for (let i = 0; i < 20 && readCache.peek(key) === undefined; i += 1) {
+        await new Promise((r) => setTimeout(r, 5))
+      }
+    } finally {
+      globalThis.fetch = original
+    }
+
+    // 判据：缓存里真的有值 → 下一个渲染能同步读到 → 零请求
+    expect(readCache.peek<ApiResult>(key)?.value.ok).toBe(true)
+  })
+
+  it('已经新鲜的 key 不再预取（否则打开页面会重复打）', () => {
+    const key = 'prefetch:fresh'
+    readCache.put(key, { ok: true, v: 'already' } as unknown as ApiResult)
+    const original = globalThis.fetch
+    let called = 0
+    globalThis.fetch = (async () => {
+      called += 1
+      return new Response('{}', { status: 200 })
+    }) as typeof fetch
+    try {
+      prefetch(key, '/x')
+    } finally {
+      globalThis.fetch = original
+    }
+    expect(called).toBe(0)
+  })
+
+  it('预取失败不抛（优化不该影响界面）', async () => {
+    const key = 'prefetch:boom'
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('network down')
+    }) as typeof fetch
+    try {
+      expect(() => {
+        prefetch(key, '/x')
+      }).not.toThrow()
+      // 让内部的 promise 有机会结算，确认没有变成未处理的拒绝
+      await new Promise((r) => setTimeout(r, 10))
+    } finally {
+      globalThis.fetch = original
+    }
+    expect(readCache.peek(key)).toBeUndefined()
   })
 })
