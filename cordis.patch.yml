@@ -3,22 +3,33 @@
 # 格式对齐 DSH 官方 bundle patch：顶层是 loader patch 条目数组；
 # `insert` 在 profile 根上追加插件行。
 #
-# 模型路由**不在这里声明**：由插件运行时注册（见文件末尾说明），
-# 随包静态清单会漂移、且与端口耦合，已废弃。
-#
 # name 必须是 loader 能从 profile 的 node_modules 解析到的模块 id，即本包自身的包名。
 - insert:
     - id: dsh-cpa-switch
       name: dsh-cpa-switch
 #
-# ── CPA Switch 模型路由 ─────────────────────────────────────────────────
+# ── CPA Switch 路由骨架 ─────────────────────────────────────────────────
 #
-# 模型路由**不再随包静态声明**，由插件在运行时注册：
-# CPA 就绪后，插件把实时模型目录（/v1/models + 渠道归属）以
-# `providers.cpa` 推给本组合里休眠的 `llm-pi-ai`（volatile 配置字段，
-# 原子重注册路由，不重启、不写盘）。没有账号时目录为空，路由不存在 ——
-# 加完账号，模型自动出现在对话模型选择器里。
+# **为什么骨架在这里，而模型清单不在**：任何设置写入（切语言、改主题、存模型页配置…）
+# 都会触发 `reconcileProfilePatches`，它整体替换 Include 的 patches
+# （`app-boot/src/index.ts:289`），下游 fiber 全部 dispose + 重建。
+# 重建后从这份 patch 基线重新解析配置 —— **运行时注入的 volatile 值会随之消失**。
+# 骨架声明成静态的，重载后路由仍在；只有模型清单需要插件重推。
 #
-# 因此：baseURL 跟随插件配置的 `port`（不再写死 8317）；
-# 模型目录随账号增减自动跟随（不再漂移）；调用密钥仍走凭据引用
-# `CPA_API_KEY`（插件启动时自动备好）。
+# 这个行属于 `llm-pi-ai` 而不是本插件：bundle patch 与用户 patch 是同一个扁平
+# `PatchOptions[]`，无「只能改自己那行」的限制。
+#
+# **为什么不写 baseURL**：它含用户可配的端口，写死会与设置不符；而且
+# `llm-pi-ai/src/provider.ts:145` 明确 provider 级 `baseURL` 只是展示元数据，
+# 实际请求走 `Model.baseUrl`（由 models 解析出来）。
+#
+# **为什么不写 models**：省略是合法的（`llm-pi-ai/src/config.ts:470` 只在
+# `source.models !== undefined` 时才传入）。骨架 + 空清单是合法状态：
+# 路由存在、模型列表暂空，插件就绪后补上。
+- id: llm-pi-ai
+  config:
+    providers:
+      cpa:
+        displayName: CPA Switch
+        apiKeyEnv: CPA_API_KEY
+        api: openai-completions

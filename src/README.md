@@ -67,6 +67,15 @@
 
 ## 模型路由
 
+- **`route-registry.ts`** —— **保证 CPA 路由可用的唯一入口**。
+  - 导出：`attachRouteRegistry` / `readAliasTable` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `SyncResult`
+  - 一条链：**查 CPA 目录 → 算别名 → 补写配置 → 推 models**
+  - 骨架在 `cordis.patch.yml`（随包发布），清单走 volatile —— **两层缺一不可**
+  - 同名模型按渠道拆行：每渠道一项，id 用该渠道别名、展示名仍是「渠道 · 模型名」
+  - ⚠️ **必须订阅 `app-boot/config-reload`**：宿主每次重建 profile 都 emit 它，
+    而重建会抹掉运行时注入的 volatile 值（`app-boot/src/index.ts:289` → `:300`）。
+    不订阅 = 路由在第一次设置写入后永久消失，2026-10-04 实测（[issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)）
+  - 恢复挂在「配置可能变」这个**语义**上，不是挂在 boot / setup / oauth 这些**时机**上
 - **`model-alias.ts`** —— 同名模型的「渠道 / 模型」唯一别名。
   - 导出：`buildAliasTable` / `aliasFor` / `channelPrefix` / `renderAliasYaml` / 类型 `AliasTable`
   - 不拆的话 CPA 会在所有供给该模型的渠道之间轮询，面板选了哪个渠道都名不副实
@@ -79,11 +88,6 @@
     CPA 的 `/v1/models` 不报容量，渠道插件的能力字段只存在于 dll 内部
   - 校准值按**渠道**存 —— 同一模型名在不同渠道上限可能不同；查不到就留兜底
   - 改后必测：`tests/model-caps.test.ts`
-- **`model-routes.ts`** —— 实时模型目录 → DSH 模型路由（volatile 通道）。
-  - 导出：`attachModelRouteSync` / `readAliasTable` / 类型 `ModelRouteHost` / `ModelRouteDeps`
-  - 同名模型按渠道拆行：每渠道一项，id 用该渠道别名、展示名仍是「渠道 · 模型名」
-  - ⚠️ 推之前要等目录稳定见连续两次计数一致，CPA 启动后凭据分批加载）
-  - ⚠️ 渠道与能力两处查找共用同一张实时表见`readAliasTable`），别各算一次
 
 ## 子目录
 

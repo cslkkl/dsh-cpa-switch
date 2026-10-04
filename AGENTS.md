@@ -193,6 +193,15 @@ python check-line-endings.py <本仓根> --target lf
   ⚠️ 别拿 `plugins/*.dll` 里的字符串当契约 —— 那些大多是 **Go 注释**，
   2026-10-04 就因此差点把正确的映射表当成多余的删掉。实测方式与结果见
   [决策记录](.agents/notes/2026-10-04-upstream-value-translation.md)。
+- **只靠运行时 volatile 注册的 provider 路由会随设置写入消失** —— 任何设置写入
+  （切语言、改主题、存模型页配置）都触发 `reconcileProfilePatches`，它整体替换
+  Include 的 patches（`app-boot/src/index.ts:289`），下游 fiber **全部 dispose + 重建**，
+  重建后从 patch 基线重新解析配置 → 运行时注入的 volatile 值随之消失。
+  表现是「模型选择器全空、重启宿主才恢复、再切一次语言也不会回来」——
+  是销毁重建，不是「没写回」。**修法两层缺一不可**：骨架写进 `cordis.patch.yml`
+  （静态，不受重载影响）+ 订阅 `app-boot/config-reload` 重推清单。
+  ⚠️ 恢复逻辑要挂在「配置可能变」这个**语义**上；挂在 boot / setup / oauth 这些
+  **时机**上就一定会漏掉新路径 —— 2026-10-04 实测，[issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)。
 - **额度/积分不能统一套一套模板** —— 各渠道返回的字段根本不同（2026-10-04 逐渠道实测）：
   workbuddy / qoder / zcode 有 `total_size` + `total_used`，**占比可算**；trae 只有
   `credits_pool_remain`，且 `credits_pool_known` 可能为 false、`total_remain` 直接是 0
