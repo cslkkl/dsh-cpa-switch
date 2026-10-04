@@ -138,6 +138,11 @@ python check-line-endings.py <本仓根> --target lf
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
 - [ ] `providerId` 粒度裁决（按渠道 vs 每单元）。
+- [ ] **账号卡片高度不统一**（需专门讨论方案）—— 四个渠道卡片高度看着突兀，ZCode 最矮
+      （它没有签到/任务按钮）。反复试过没根治：`min-height` / `grid-auto-rows` 都只治标
+      （见 [架构 §4.10](docs/ARCHITECTURE.md) F29：卡片等高靠 `.card` 的 `min-height`，
+      纯视觉属性断言不了，只能真机看）。**不是改个数值能解决** —— 要么按渠道分模板，
+      要么重新想行结构（操作区用固定槽位占位），需要开一轮讨论再动手。
 - [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
 
@@ -188,6 +193,14 @@ python check-line-endings.py <本仓根> --target lf
   ⚠️ 别拿 `plugins/*.dll` 里的字符串当契约 —— 那些大多是 **Go 注释**，
   2026-10-04 就因此差点把正确的映射表当成多余的删掉。实测方式与结果见
   [决策记录](.agents/notes/2026-10-04-upstream-value-translation.md)。
+- **额度/积分不能统一套一套模板** —— 各渠道返回的字段根本不同（2026-10-04 逐渠道实测）：
+  workbuddy / qoder / zcode 有 `total_size` + `total_used`，**占比可算**；trae 只有
+  `credits_pool_remain`，且 `credits_pool_known` 可能为 false、`total_remain` 直接是 0
+  ——**算不出占比**。`adapters.ts` 对 trae 老实标了 `remainKnown` 并把 `used` 置 0，
+  但界面仍无条件按 `used / size` 算百分比并画进度条（`AccountCard.tsx`），
+  于是给 trae 画出**假的 0%**；`PluginPanel` 的合计还跨单位相加（积分 vs token），
+  同样是假数。**改之前先查清各渠道实际返回什么字段，别猜、别硬凑假数据** ——
+  展示形态要按渠道实际能力来：有总额的显示进度/占比，只有剩余的只显示剩余数。
 - 宿主槽位的 error boundary 是**锁存**的：一次抛出带走整块配置区，
   用户只能禁用再启用插件。所以 `PanelBoundary` 是必需的，且必须是**类组件**
   （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的
