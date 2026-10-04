@@ -16,16 +16,18 @@
 
 ## 变更影响路由
 
-| 改了                            | 必须同步                                                                                                      |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts` 路由表           | [README.md](README.md) 的路由表 + [架构 §4.2](docs/ARCHITECTURE.md)                                           |
-| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构 §4.7](docs/ARCHITECTURE.md)）               |
-| `src/adapters.ts`               | [架构 §3](docs/ARCHITECTURE.md)、渠道能力表                                                                   |
-| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）                                                  |
-| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构 §4.7](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts` |
-| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构 §4.9](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                             |
-| `tsdown.config.ts` 的 externals | [架构 §4.5](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                        |
-| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                |
+| 改了                            | 必须同步                                                                                                                                              |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts` 路由表           | [src/README.md](src/README.md) 的路由表 + [架构 §4.2](docs/ARCHITECTURE.md)                                                                           |
+| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构 §4.7](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35） |
+| `src/adapters.ts`               | [架构 §3](docs/ARCHITECTURE.md)、渠道能力表                                                                                                           |
+| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                       |
+| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构 §4.7](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                         |
+| `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构 §4.7](docs/ARCHITECTURE.md)）                                                     |
+| `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构 §4.9](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                  |
+| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构 §4.10](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                                                                    |
+| `tsdown.config.ts` 的 externals | [架构 §4.5](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                |
+| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                        |
 
 ## 常用命令
 
@@ -54,17 +56,17 @@ python check-line-endings.py <本仓根> --target lf
 
 ## 文档地图
 
-| 想知道                       | 去哪                                         |
-| ---------------------------- | -------------------------------------------- |
-| 怎么用、怎么装、配什么       | [README.md](README.md)                       |
-| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                 |
-| 宿主半端各模块               | [src/README.md](src/README.md)               |
-| 浏览器半端各模块             | [src/client/README.md](src/client/README.md) |
-| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)   |
-| 测试覆盖与运行               | [tests/README.md](tests/README.md)           |
-| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)     |
-| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)             |
+| 想知道                       | 去哪                                                          |
+| ---------------------------- | ------------------------------------------------------------- |
+| 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)） |
+| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                  |
+| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                  |
+| 宿主半端各模块               | [src/README.md](src/README.md)                                |
+| 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                  |
+| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                    |
+| 测试覆盖与运行               | [tests/README.md](tests/README.md)                            |
+| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)                      |
+| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                              |
 
 ## 事实来源（只查不抄）
 
@@ -163,6 +165,35 @@ python check-line-endings.py <本仓根> --target lf
   浏览器侧调 `invalidateReads()`；判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`。
 - **`--dsw-alias-bg-layer-N` 只定义到 3** —— 宿主自己的 `fields.module.css`
   引用了不存在的 layer-4，照抄那个引用会得到一条**静默失效**的背景色声明。
+- **切渠道不加 `key`，且已取到的值连 key 一起存** —— 加 `key` = 卸载重挂，
+  缓存的同步读取随之失效（必闪一帧）；不加 `key` 而不认 key，则上一个渠道的账号
+  会画在当前页签下，**不报错**。见 [架构 §4.7.1](docs/ARCHITECTURE.md) 与
+  [决策记录](.agents/notes/2026-10-04-channel-switch-read-strategy.md)。
+- **界面上不拼中文标点** —— `'：'`、`'（'` 在英文下变成 `Current strategy：Round robin`。
+  占位符用 `{名字}`、标点写在文案里、列表分隔符也是文案（[架构 §4.7](docs/ARCHITECTURE.md)）。
+- **提示文案里不加 `✓`/`✗`、不用 Emoji** —— `Toast` 在 `tone="success"` 时自带绿勾；
+  Emoji 不跟随主题色且 13px 下糊。统一走 [report.tsx](src/client/report.tsx)。
+- **卡片等高靠 `.card` 的 `min-height`** —— 不是 `grid-auto-rows`。
+  `margin-top: auto` 只在容器有**确定高度**时吸收空间，而 auto 行高下高度由内容决定，
+  所以只加 grid 属性**无效**（[架构 §4.10](docs/ARCHITECTURE.md) F29，2026-10-04 两轮没修好）。
+  这类纯视觉属性断言不了，只能真机看。
+- **官方 `Switch` 不要包在 `<label>` 里** —— 它是 `<button onClick>`，label 会再转发一次
+  点击 → `onChange` **触发两次**，刚改的状态立刻被改回去。表现是「点一下闪回、关不掉」，
+  而且**后端被写成原值**、界面上看不出变化。`Switch` 自带 `aria-label`，外层用 `<div>` 即可
+  （[架构 §4.10](docs/ARCHITECTURE.md) F31）。账号启用开关与自动签到开关都踩过。
+- **`Switch` 的 `onChange` 给新值，不要取反** —— 它内部是 `onChange(!checked)`。
+  多取一次反等于传回旧值，后端被写回原值，表现「按了没反应」
+  （F32，2026-10-04 **踩了两次**：先修了 label 双触发，漏了这条更基础的）。
+- **写成功后的界面值取后端回读** —— 不取请求值（「我们以为写进去了什么」）、
+  不取意图文件（本地记录，CPA 侧被别的东西改过就过期）。只有回读值权威（F33）。
+- **卡片开关独立成底部行**（`.enableRow` + `margin-top: auto`），不要塞进 `.actions`
+  —— 那里 `flex-wrap` 按**按钮数量**决定换行，渠道能力不同（ZCode 无签到/任务）
+  就把开关甩到不同位置，看着「歪」（2026-10-04 实机）。
+- **上游（CPA）数据不能改，只能适配** —— 它是独立进程，插件只调它的接口。
+  **实测过的值才映射，认不出的原样透传**（[架构 §4.9](docs/ARCHITECTURE.md)）。
+  ⚠️ 别拿 `plugins/*.dll` 里的字符串当契约 —— 那些大多是 **Go 注释**，
+  2026-10-04 就因此差点把正确的映射表当成多余的删掉。实测方式与结果见
+  [决策记录](.agents/notes/2026-10-04-upstream-value-translation.md)。
 - 宿主槽位的 error boundary 是**锁存**的：一次抛出带走整块配置区，
   用户只能禁用再启用插件。所以 `PanelBoundary` 是必需的，且必须是**类组件**
   （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的

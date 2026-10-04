@@ -119,6 +119,31 @@ check(
   /[\w-]+_(?:card|grid|wrap|addCard|summaryCell|toolbar)\b/.test(clientSrc),
 )
 
+/**
+ * 官方 `Switch` 不许被包在 `<label>` 里。
+ *
+ * ⚠️ 这是**结构**断言而不是行为断言，但比行为断言可靠：双触发要真机点击才看得见，
+ * 而 `jsx(Label, { children: jsx(Switch) })` 这个形状在产物里是可直接查的。
+ * `Switch` 渲染 `<button onClick>`，label 的点击会再转发一次 → `onChange` 触发两次
+ * → 刚改的状态被立刻改回去（2026-10-04 实机：账号启用开关与自动签到开关都中过一次）。
+ */
+check('Switch 未被包在 label 里（会双触发）', !/label[^>]*\{[^}]*Switch/.test(clientSrc))
+check('开关行用 div 包裹', /div[^>]*\{[^}]*switchRow|_switchRow/.test(clientSrc))
+
+/**
+ * `Switch` 的 `onChange` 给的是**新值**，调用处不得再取反。
+ *
+ * 它内部是 `onChange(!checked)`，所以 `onChange={(next) => f(!next)}` 等于把旧值
+ * 传回去 —— 后端被写回原值，界面看着「按了没反应」（2026-10-04 踩了两次：
+ * 先修了 label 双触发，漏了这条更基础的，所以它需要一个自己的判据）。
+ *
+ * 判据查**取反模式**，不查具体变量名：`onChange` 的回调里出现 `!` 即判红。
+ */
+check(
+  'Switch 的 onChange 未被取反（onChange 给的是新值）',
+  !/onChange:\s*\(?[\w$]+\)?\s*=>[^}]*!\s*[\w$.]+/.test(clientSrc),
+)
+
 console.log('')
 console.log('=== 真实加载 client.js（模拟宿主）===')
 const vm = require('node:vm')
