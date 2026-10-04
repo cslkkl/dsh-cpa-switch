@@ -68,6 +68,30 @@ describe('aliasFor', () => {
   })
 })
 
+/**
+ * `id` 与 `name` 的分工是本轮改动最容易含糊的地方：
+ * 别名（`wb/glm-5.3`）进请求体，展示名（`WorkBuddy · glm-5.3`）只给人看。
+ * 混了就会出现「用户在选择器里选 WorkBuddy，请求却打到别的渠道」。
+ */
+describe('别名 id 与展示名', () => {
+  it('id 是带前缀的别名，name 才是「渠道 · 模型」', () => {
+    const table = buildAliasTable({ 'glm-5.3': ['workbuddy', 'trae'] })
+    const id = table.aliasOf('glm-5.3', 'workbuddy')
+    const name = 'WorkBuddy · glm-5.3'
+    expect(id).toBe('wb/glm-5.3')
+    expect(id).not.toBe(name)
+    expect(id).toContain('wb/')
+    expect(name).toContain('WorkBuddy')
+  })
+
+  it('resolve 把别名还原回「模型 + 渠道」，供展示名与能力表共用', () => {
+    const table = buildAliasTable({ 'glm-5.3': ['workbuddy', 'trae'] })
+    const r = table.resolve('wb/glm-5.3')
+    expect(r?.model).toBe('glm-5.3')
+    expect(r?.channel).toBe('workbuddy')
+  })
+})
+
 describe('renderAliasYaml', () => {
   const yaml = renderAliasYaml(
     buildAliasTable({ 'glm-5.3': ['workbuddy', 'trae'], 'kimi-k2.6': ['workbuddy', 'trae'] }),

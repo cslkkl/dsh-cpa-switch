@@ -111,7 +111,7 @@ profile 的 `dependencies` 里保留同名条目是**已安装声明**，`dsh.pr
 ## 对话模型（自动注册）
 
 插件把 CPA 的模型目录**运行时注册**进 DSH 的 llm 服务：模型选择器里的
-「CPA 中转站」provider 由插件动态推送，**不是**随包静态声明。
+「CPA Switch」provider 由插件动态推送，**不是**随包静态声明。
 
 - **来源是实时的**：CPA 的 `/v1/models` + 按凭据归属识别渠道（`auth-files/models`），
   加了哪个渠道的号，那个渠道的模型才出现；删了号，模型随之撤下

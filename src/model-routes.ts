@@ -30,7 +30,18 @@ const ROUTE_CHANNEL_LABEL: Record<string, string> = {
 /** 渠道展示顺序（越靠前越优先）。 */
 const ROUTE_CHANNEL_ORDER = ['workbuddy', 'trae', 'qoder', 'zcode', 'kimi', 'mimo'] as const
 
-/** 推给 `llm-pi-ai` 的单个模型行。 */
+/**
+ * 推给 `llm-pi-ai` 的单个模型行。
+ *
+ * **`id` 与 `name` 不是同一个东西的两种写法**：
+ * - `id` —— 真正发出去的（进请求 body 的 `model` 字段）。同名模型用**渠道别名**
+ *   （`wb/glm-5.3`），这是「选了哪个渠道就只用哪个渠道的号」的保证；
+ * - `name` —— 纯展示标签（`WorkBuddy · glm-5.3`），**不参与路由**。
+ *
+ * 所以模型选择器里每个条目只出现一次，用户看到的是 `name`，
+ * 发出去的是 `id`。宿主侧 `resolveEntry` 的 `name: entry.name ?? … ?? entry.id`
+ * 证明它只是标签；`id` 进 body。
+ */
 interface RouteModel {
   readonly id: string
   readonly name: string
@@ -254,7 +265,7 @@ async function buildCpaRouteProfile(
     return a.bare.localeCompare(b.bare)
   })
   return {
-    displayName: 'CPA 中转站',
+    displayName: 'CPA Switch',
     api: 'openai-completions',
     baseURL: `http://127.0.0.1:${String(deps.currentPort())}/v1`,
     apiKeyEnv: CPA_API_KEY_REF,
