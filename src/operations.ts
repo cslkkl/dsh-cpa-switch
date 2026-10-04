@@ -38,6 +38,137 @@ export type OpsSuccess = { readonly ok: true } & Record<string, unknown>
 /** 操作结果。 */
 export type OpsResult = OpsSuccess | OpsFailure
 
+/** 一次批量动作里**失败的那一个**账号。 */
+export interface ActionFailure {
+  /**
+   * 账号的显示名。
+   *
+   * ⚠️ 上游给的名字字段**可能为空**（ZCode 实测 `nickname: ""`），所以这里
+   * 依次退 `name`（凭据文件名）→ `auth_index`。**绝不留空** —— 界面要靠它
+   * 指名道姓地说「哪个号没签成」，空名字等于没报。
+   */
+  readonly nickname: string
+  /** 失败原因：上游的 `reason`，退回 `message`；都没有就空串（界面不猜）。 */
+  readonly reason: string
+}
+
+/**
+ * 一次批量动作（全部签到 / 全部任务）的结果，已归一。
+ *
+ * **为什么需要归一层**：CPA 各渠道的返回形状不同，而**有渠道根本不返回
+ * `summary`**（workbuddy / qoder 实测只有 `results[]`，2026-10-04）。让浏览器
+ * 去猜「哪些字段可选」等于把上游契约复制到每一处调用点。
+ *
+ * 所以：能取到 `summary` 就用它，取不到就从 `results[]` 逐个累加 ——
+ * 两条路给出同一个形状，调用方只认这一种。
+ */
+export interface ActionOutcome {
+  /** 本次涉及的账号数。 */
+  readonly total: number
+  /** 真正完成了动作的（签到成功 / 任务跑完）。 */
+  readonly succeeded: number
+  /** 已经做过、这次被跳过的（`reason: "already"`）。 */
+  readonly already: number
+  /** 失败的个数。 */
+  readonly failed: number
+  /**
+   * 本次动作带来的**额度净增量**（`results[].total_credits` 累加）。
+   *
+   * ⚠️ 取的是「本次拿到多少」，**不是**余额前后差值 —— 余额同时会被任务、
+   * 赠送包等别的动作改动，差值法会把那些算进来。
+   */
+  readonly credits: number
+  /** 逐个失败项（含账号名与原因），供界面指名道姓地报出来。 */
+  readonly failures: readonly ActionFailure[]
+}
+
+/** 从任意值里取一个有限数字；取不到给 0。 */
+function num(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** 从任意值里取一个非空字符串；取不到给空串。 */
+function str(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/** 依次取第一个非空字符串；全空则给 `fallback`。 */
+function firstNonEmpty(...values: readonly unknown[]): string {
+  for (const value of values) {
+    const s = str(value)
+    if (s !== '') return s
+  }
+  return typeof values[values.length - 1] === 'string' ? str(values[values.length - 1]) : ''
+}
+
+/**
+ * 把 CPA 某个写操作的返回归一成 {@link ActionOutcome}。
+ *
+ * ⚠️ **这层不含任何文案** —— 它只回答「发生了什么」，怎么说由浏览器侧的
+ * `report.tsx` 决定（见[架构 §4.9](../../docs/ARCHITECTURE.md) 的分工）。
+ *
+ * 形状来自 2026-10-04 对四个渠道的实测：
+ * ```
+ * { results: [{ success, skipped, reason, message, total_credits, nickname }],
+ *   summary:  { total, success, already, fail, elapsed_ms } }
+ * ```
+ * `summary` 只在部分渠道出现（trae 有，workbuddy / qoder 没有），
+ * 所以两条取值路径都要走通。
+ */
+export function normalizeActionOutcome(payload: unknown): ActionOutcome {
+  const root = (payload ?? {}) as Record<string, unknown>
+  const results = Array.isArray(root.results) ? (root.results as Record<string, unknown>[]) : []
+  const summary =
+    (Array.isArray(root.summary)
+      ? undefined
+      : (root.summary as Record<string, unknown> | undefined)) ?? {}
+
+  const failures: ActionFailure[] = []
+  let credits = 0
+  let succeeded = 0
+  let already = 0
+  let failed = 0
+
+  for (const item of results) {
+    credits += num(item.total_credits)
+    // `skipped` 优先于 `success`：已签到的账号 `success` 也可能是 true
+    if (item.skipped === true || str(item.reason) === 'already') {
+      already += 1
+      continue
+    }
+    if (item.success === true) {
+      succeeded += 1
+      continue
+    }
+    failed += 1
+    failures.push({
+      /**
+       * 名字的四级兜底。**必须落到一个非空值** —— 界面靠它指名道姓，空名字
+       * 等于白报。ZCode 的 `nickname` 实测就是空串，所以这条不是理论风险。
+       */
+      nickname: firstNonEmpty(item.nickname, item.name, item.auth_index, '(unknown)'),
+      reason: firstNonEmpty(item.reason, item.message, ''),
+    })
+  }
+
+  const hasSummary =
+    summary.total !== undefined ||
+    summary.success !== undefined ||
+    summary.already !== undefined ||
+    summary.fail !== undefined
+
+  return {
+    // summary 优先；没有就用 results 累加出来的
+    total: hasSummary ? num(summary.total) : results.length,
+    succeeded: hasSummary ? num(summary.success) : succeeded,
+    already: hasSummary ? num(summary.already) : already,
+    failed: hasSummary ? num(summary.fail) : failed,
+    credits,
+    failures,
+  }
+}
+
 /** 操作层依赖。 */
 export interface OpsDeps {
   /** 每次调用现求值 —— 配置改了立刻生效。 */
@@ -225,6 +356,25 @@ export class Operations {
 
   /**
    * 写操作统一入口：按渠道查白名单路径 + 可选 auth_index。
+   *
+   * ## 语义边界：动作 ≠ 调度
+   *
+   * 「全部签到 / 全部任务」与「启用」是**两件互不相关的事**，别把它们混起来：
+   *
+   * | 动作                       | 管什么           | 范围                       |
+   * | -------------------------- | ---------------- | -------------------------- |
+   * | 全部签到 / 全部任务 / 单号 | 给账号**攒额度** | 本渠道**全部**账号，**含已禁用** |
+   * | 启用开关 / 只用这一个     | 请求**调度**到谁 | 只有启用的号吃流量         |
+   *
+   * 所以 `authIndex === undefined`（全部）时发 `body: '{}'`，由 CPA 签该渠道
+   * **所有**号 —— 包括被禁用的。这是**刻意**的：禁用一个号只是暂时不用它，
+   * 它的每日额度照攒，重新启用时手里还有余额。
+   *
+   * ⚠️ 曾经的错：把「全部签到」改成逐个 `authIndex`、跳过禁用的号。那会把语义
+   * 改坏 —— 用户禁用它恰恰希望它继续攒额度。（2026-10-04 讨论后明确）
+   *
+   * @returns `outcome` 是归一后的结果（见 {@link ActionOutcome}），
+   *   供界面报出「签了几个 / 加了多少」；`data` 是 CPA 的原始返回。
    */
   async action(plugin: string, kind: string, authIndex: string | undefined): Promise<OpsResult> {
     const adapter = PLUGIN_ADAPTERS[plugin as ChannelId]
@@ -242,7 +392,7 @@ export class Operations {
       const data = await this.#deps.cpaFetch(this.#deps.options(), path, { method: 'POST', body })
       // 签到 / 任务会改余额与签到态：写完必须作废，否则紧接着的 `load()` 读到旧值
       this.invalidateChannel(plugin)
-      return { ok: true, data }
+      return { ok: true, data, outcome: normalizeActionOutcome(data) }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
@@ -595,8 +745,28 @@ export class Operations {
       ;(intent as { updatedAt?: string }).updatedAt = new Date().toISOString()
       writeAccountIntent(intent)
 
+      /**
+       * 回读一次，让返回值是 **CPA 真正存下的值**而不是「我们请求的值」。
+       *
+       * 为什么要多这一跳：`disabled: !enabled` 只是把请求取个反 —— 那是**我们以为
+       * 写进去了什么**，不是 CPA 实际存了什么。中间可能隔着校验、规范化，或 CPA
+       * 将来自己改语义。界面上那个开关直接由这个值驱动，所以它必须是权威值。
+       *
+       * 回读失败不当作整体失败：写已经成功了，为一个「确认」而报错会让用户以为
+       * 没生效，反而去重复点击。此时退回「我们请求的值」——最坏是开关慢一次才对上。
+       */
+      const after = (await this.#deps
+        .cpaFetch(this.#deps.options(), '/v0/management/auth-files')
+        .catch(() => undefined)) as { files?: unknown } | undefined
+      const stored = filesOf(after).find((file) => file.name === target.name)
+
       this.invalidateChannel(plugin)
-      return { ok: true, name: target.name, disabled: !enabled }
+      return {
+        ok: true,
+        name: target.name,
+        // 权威值；读不到时退回请求值（见上）
+        disabled: stored === undefined ? !enabled : stored.disabled === true,
+      }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
