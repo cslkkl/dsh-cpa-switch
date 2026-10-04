@@ -1,0 +1,69 @@
+# 日常 CI：推 main 与每个 PR 都跑类型检查、构建与测试。
+#
+# 只读：`permissions: contents: read`，不写回仓库。
+#
+# 安装固定加 `--config.node-linker=hoisted`：本机 pnpm 11 的 symlink 链接器会卡死，
+# CI 用同一种布局，两边装出来的才是同一棵树。
+#
+# `--frozen-lockfile` 是那条「锁文件与清单必须同步」的守卫：对不上直接失败。
+#
+# 平台：单平台。本仓的运行时是 Windows（CPA 以 .exe + .dll 形式提供），
+# 但这一层代码里没有平台专属的编译期分支 —— 平台相关的行为（进程托管、注册表读代理）
+# 都在运行期判定，且靠真机验收覆盖。等有打真实平台 API 的测试再扩矩阵。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    # 整轮上限。默认 6 小时：一旦有步骤挂住（不是失败，是不返回），
+    # 不设限就等于白占一个 runner 半天。本仓全量约 1 分钟。
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          # 版本基线以 .node-version 为唯一来源，避免 CI 与本机漂移。
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --config.node-linker=hoisted
+
+      # 两半各跑一次 —— 它们有不同的 lib/types，合成一次会互相污染。
+      - name: Typecheck (host)
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
+      - name: Typecheck (client)
+        run: pnpm exec tsc --noEmit -p tsconfig.client.json
+
+      - name: Lint
+        run: pnpm exec eslint .
+
+      - name: Format check
+        run: pnpm exec prettier --check "**/*.{ts,json,md,yml,yaml}"
+
+      - name: Build
+        run: pnpm build
+
+      # 产物断言：这两条是「构建成功 ≠ 插件能用」的兜底 ——
+      # `inject` 少一个插件挂不上且**不报错**；缺了导出，宿主静默不显示。
+      # 断言集合住在仓内脚本里（与 `pnpm check` 用的是同一份），避免两处漂移。
+      - name: Verify build artifacts
+        run: pnpm verify:artifacts
+
+      - name: Test
+        run: pnpm test
