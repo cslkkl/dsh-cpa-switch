@@ -30,6 +30,11 @@
   - 导出：`normalizeRoutes` / `registerRoutes` / 类型 `RouteSpec` / `RoutesContext`
   - 兜住宿主路由契约（同 path 只注册一次、方法只有 GET/HEAD/POST）
   - 改后必测：同 path 多条目合并、非法方法被剔除、单条失败不拖垮其余
+- **`cache.ts`** —— 读缓存与端口探活记忆。
+  - 导出：`CpaCache`（类）/ `ProbeCache`（类）
+  - 折叠面板一次点击里的并发读；写操作后按前缀失效（见[架构 §4.6](../docs/ARCHITECTURE.md)）
+  - ⚠️ 两条缓存都**不抛错**，失效坏了只会静默变慢或显示旧值
+  - 改后必测：`tests/cache.test.ts`（并发合并、写后失效、失败不留缓存）
 
 ## 能力模块（有副作用）
 
@@ -44,8 +49,9 @@
 - **`operations.ts`** —— 业务操作集合（本目录最大的模块）。
   - 导出：`Operations`（类）
   - 用类是为了让「CPA 在跑 + 有密钥」这两个前置集中在 `#ready()` / `#running()`
+  - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `invalidateChannel(plugin)`，否则用户看到旧值
   - 被谁依赖：`index.ts` 的 `buildRoutes`
-  - 改后必测：对应路由的返回值形状
+  - 改后必测：对应路由的返回值形状；读路径别再顺带拉没人消费的数据
 
 ## 渠道与网络
 

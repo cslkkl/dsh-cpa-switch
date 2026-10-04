@@ -77,6 +77,30 @@ check(
 // 源码用 JSX 写 —— 产物必然引 jsx-runtime，且同样必须留在外部（内联 React 会致命）。
 check('jsx-runtime 是外部引用（未内联）', /require\(["']react\/jsx-runtime["']\)/.test(clientSrc))
 
+/**
+ * 样式表必须真的被注入。
+ *
+ * CSS Module 靠 import 产生副作用。少 import 一次不会报错，只是面板变成**完全
+ * 没有样式** —— 那种失败静默到用户点开面板才发现，所以在这里钉住。
+ */
+check('带 data-plugin-css 注入逻辑', /data-plugin-css/.test(clientSrc))
+
+/**
+ * 类名必须是**哈希**的，不是 `cpa-xxx` 这种全局裸名。
+ *
+ * 注入的样式表是全局的，而宿主页面自己也有类名。哈希之后，一次改名或两行改动
+ * 就不可能与宿主的某条规则撞上 —— 而那种撞车会静默地把本插件的卡片改成
+ * 另一个样子。断言「旧的 `cpa-` 前缀一条都不剩」正是为了让「样式没生效」
+ * 这类静默失败在这里响起来。
+ */
+const legacyClassNames = ['cpa-wrap', 'cpa-card', 'cpa-grid', 'cpa-sum', 'cpa-toolbar']
+const leaked = legacyClassNames.filter((name) => clientSrc.includes(name))
+check('旧的全局限类名已全部消失', leaked.length === 0, leaked.join(','))
+check(
+  '类名是哈希的（CSS Module 已生效）',
+  /[A-Za-z0-9]{5,}_(card|grid|wrap|addCard|summaryCell)/.test(clientSrc),
+)
+
 console.log('')
 console.log('=== 真实加载 client.js（模拟宿主）===')
 const vm = require('node:vm')
@@ -117,7 +141,13 @@ check('加载后拿到 id', captured && captured.id === 'dsh-cpa-switch', captur
  * `react/jsx-runtime` 是 JSX 的产物：源码用 JSX 写，编译后就是
  * `require('react/jsx-runtime')`。宿主自己的 client.js 也是这么引的，
  * 所以它一定在加载器的模块表里。
+ *
+ * ⚠️ `react.Component` 也必须在这里：error boundary 是**类组件**（React 规定
+ * `getDerivedStateFromError` 没有 hook 等价物），产物在工厂执行时就会
+ * `class extends React.Component` —— 缺了它，本脚本会在加载阶段抛
+ * 「Class extends value undefined」。这正是本脚本存在的意义：形状坏了要**响**。
  */
+class FakeComponent {}
 const HOST_MODULES = {
   react: {
     createElement: () => null,
@@ -125,7 +155,9 @@ const HOST_MODULES = {
     useEffect: () => {},
     useCallback: (f) => f,
     useRef: () => ({ current: null }),
+    useMemo: (f) => f(),
     Fragment: null,
+    Component: FakeComponent,
   },
   'react/jsx-runtime': {
     jsx: () => null,

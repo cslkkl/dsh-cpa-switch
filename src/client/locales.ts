@@ -86,6 +86,9 @@ export const zh = {
   priority: '账号优先级',
   rankFirst: '首选',
   noCredits: '余额未知',
+  panelCrashed: '「%s」这块加载出错了',
+  panelRetry: '重试',
+  refreshing: '刷新中…',
 } as const
 
 /** 文案键。 */
@@ -171,7 +174,10 @@ export const en: Record<LocaleKey, string> = {
   priority: 'Account priority',
   rankFirst: 'First',
   noCredits: 'Balance unknown',
+  panelCrashed: 'The "%s" section failed to load',
+  panelRetry: 'Retry',
+  refreshing: 'Refreshing…',
 }
 
 /** 本地化函数。 */
-export type Translate = (key: LocaleKey) => string
+export type Translate = (key: LocaleKey, ...params: readonly string[]) => string

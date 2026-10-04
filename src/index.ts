@@ -357,7 +357,24 @@ function buildRoutes(deps: RouteDeps): RouteSpec[] {
       methods: ['GET'],
       handle: async () => {
         const config = readConfig()
-        const running = await probePort(config.port)
+        /**
+         * 走 `CpaProcess` 的记忆层，**不要**直接调 `probePort`。
+         *
+         * 面板挂载时 `/status` 与 `/accounts` 几乎同时到达，两者都要回答
+         * 「CPA 在不在跑」。各自探一次 = 两条路径可能给出**相反**的答案
+         * （状态条说「运行中」、账号列表报 `cpa-unavailable`），而且白付一次
+         * TCP 握手。共用记忆后只探一次，两边必然一致。
+         *
+         * 记忆是短的（1.5 秒）且有显式失效点，所以不会把「刚停掉的 CPA」
+         * 继续报成运行中。
+         */
+        const running = await deps.cpaProcess.isListening({
+          port: config.port,
+          exePath: config.exePath,
+          manageLifecycle: config.manageLifecycle,
+          openControlPanel: config.openControlPanel,
+          startTimeoutSeconds: config.startTimeoutSeconds,
+        })
         return json({
           running,
           owned: deps.cpaProcess.owned,
@@ -387,11 +404,19 @@ function buildRoutes(deps: RouteDeps): RouteSpec[] {
         }),
     },
     {
+      /**
+       * 某渠道的账号列表 + 余额。
+       *
+       * `?fresh=1` 绕过宿主侧的读缓存（用户点了「刷新」）。没有它，刷新会命中
+       * 几秒内刚写过的缓存，表现为「点了没反应」。
+       */
       path: '/api/v1/cpa/accounts',
       methods: ['GET'],
       handle: async (request) => {
         const url = new URL(request.url)
-        return json(await ops.accountsOf(url.searchParams.get('plugin') ?? 'workbuddy'))
+        const plugin = url.searchParams.get('plugin') ?? 'workbuddy'
+        const fresh = url.searchParams.get('fresh') === '1'
+        return json(await ops.accountsOf(plugin, fresh))
       },
     },
     {

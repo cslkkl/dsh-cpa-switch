@@ -15,13 +15,16 @@
 
 ## 变更影响路由
 
-| 改了                            | 必须同步                                                               |
-| ------------------------------- | ---------------------------------------------------------------------- |
-| `src/index.ts` 路由表           | [README.md](README.md) 的路由表 + [架构 §4.2](docs/ARCHITECTURE.md)    |
-| `src/adapters.ts`               | [架构 §3](docs/ARCHITECTURE.md)、渠道能力表                            |
-| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）           |
-| `tsdown.config.ts` 的 externals | [架构 §4.5](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物 |
-| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                         |
+| 改了                            | 必须同步                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts` 路由表           | [README.md](README.md) 的路由表 + [架构 §4.2](docs/ARCHITECTURE.md)                                           |
+| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构 §4.6](docs/ARCHITECTURE.md)）               |
+| `src/adapters.ts`               | [架构 §3](docs/ARCHITECTURE.md)、渠道能力表                                                                   |
+| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）                                                  |
+| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构 §4.6](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts` |
+| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构 §4.8](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                             |
+| `tsdown.config.ts` 的 externals | [架构 §4.5](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                        |
+| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                |
 
 ## 常用命令
 
@@ -150,6 +153,15 @@ python check-line-endings.py <本仓根> --target lf
 - `lib/client.js` 少导出 `inject` 时插件**不报错、只是不出现** —— 构建后跑 `pnpm verify:artifacts` 确认。
 - **`icon.svg` 与 `locale/*.json` 宿主直读，代码一个字节都不读** —— 坏了没有任何信号，
   只会静默回落成默认图形或包名。XML 注释里出现连续两个连字符会让整份 SVG 解析失败。
+- **两级读缓存都「坏了也不报错」** —— 合并失效只是慢，漏失效只是数字不对。
+  新增改变 CPA 状态的写操作时，宿主侧调 `Operations.invalidateChannel()`、
+  浏览器侧调 `invalidateReads()`；判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`。
+- **`--dsw-alias-bg-layer-N` 只定义到 3** —— 宿主自己的 `fields.module.css`
+  引用了不存在的 layer-4，照抄那个引用会得到一条**静默失效**的背景色声明。
+- 宿主槽位的 error boundary 是**锁存**的：一次抛出带走整块配置区，
+  用户只能禁用再启用插件。所以 `PanelBoundary` 是必需的，且必须是**类组件**
+  （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的
+  `react` shim 因此必须提供 `Component`，缺了它脚本会在加载阶段抛。
 - 停 CPA 不能依赖插件 shutdown 清理调度器 —— 会 SIGSEGV；走 shutdown 端点 → Ctrl-C → `taskkill /F`。
 - 被限流的号 CPA 仍报 `status: active`（code 6004）：面板「启用」≠「现在能用」。
 - `调研报告归档/` 已 gitignore，是只读历史，不属文档网络、不参与维护。

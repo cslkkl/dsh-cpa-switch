@@ -16,10 +16,10 @@
 
 插件由**两半**组成，运行在完全不同的地方。这不是风格选择，是安全边界。
 
-| 半边       | 入口                  | 运行位置           | 构建形态                   |
-| ---------- | --------------------- | ------------------ | -------------------------- |
-| 宿主半端   | `src/index.ts`        | DSH 主进程（Node） | ESM → `lib/index.js`       |
-| 浏览器半端 | `src/client/index.ts` | 浏览器             | CJS 工厂 → `lib/client.js` |
+| 半边       | 入口                   | 运行位置           | 构建形态                   |
+| ---------- | ---------------------- | ------------------ | -------------------------- |
+| 宿主半端   | `src/index.ts`         | DSH 主进程（Node） | ESM → `lib/index.js`       |
+| 浏览器半端 | `src/client/index.tsx` | 浏览器             | CJS 工厂 → `lib/client.js` |
 
 浏览器半边**永远拿不到管理密钥**。它只调本插件的 `/api/v1/cpa/*`，
 由宿主半边带上密钥去调 CPA。
@@ -42,22 +42,25 @@
 | `routes.ts`      | 路由归一化与注册                                    |
 | `state.ts`       | 状态文件读写（exe 记忆 / 签到 stamp / 账号意图）    |
 | `cpa.ts`         | CPA 管理接口 HTTP 客户端                            |
+| `cache.ts`       | 读缓存与端口探活记忆（见 §4.6）                     |
 | `adapters.ts`    | 四渠道接口差异收敛                                  |
 | `net.ts`         | 带代理支持的 HTTP（下载用）                         |
 | `setup/`         | 环境准备：下载 / 校验 / 解压 / 写配置               |
 
 浏览器半端：
 
-| 模块                       | 职责                                            |
-| -------------------------- | ----------------------------------------------- |
-| `client/index.ts`          | 槽位注册入口                                    |
-| `client/Panel.ts`          | 根组件：状态条 + 引导 + 页签                    |
-| `client/PluginPanel.ts`    | 单渠道面板：汇总 / 工具栏 / 账号网格 / 登录弹窗 |
-| `client/AccountCard.ts`    | 单张账号卡                                      |
-| `client/RoutingSection.ts` | 路由策略（只读）                                |
-| `client/api.ts`            | `/api/v1/cpa/*` 调用封装                        |
-| `client/locales.ts`        | 中英文案                                        |
-| `client/styles.ts`         | 内联样式表                                      |
+| 模块                           | 职责                                            |
+| ------------------------------ | ----------------------------------------------- |
+| `client/index.tsx`             | 槽位注册入口（并 import 样式表）                |
+| `client/Panel.tsx`             | 根组件：状态条 + 引导 + 页签                    |
+| `client/PluginPanel.tsx`       | 单渠道面板：汇总 / 工具栏 / 账号网格 / 登录弹窗 |
+| `client/AccountCard.tsx`       | 单张账号卡                                      |
+| `client/RoutingSection.tsx`    | 路由策略（只读）                                |
+| `client/PanelBoundary.tsx`     | 渲染错误边界（类组件，见 §4.7）                 |
+| `client/use-async-resource.ts` | 带缓存与竞态保护的异步资源 hook（见 §4.6）      |
+| `client/api.ts`                | `/api/v1/cpa/*` 调用封装 + 读缓存               |
+| `client/locales.ts`            | 中英文案                                        |
+| `client/panel.module.css`      | 布局样式（值全部来自宿主 token，见 §4.8）       |
 
 ---
 
@@ -113,6 +116,60 @@
 
 `react` 与 primitives 由宿主注入，**不能打进产物**（见 `tsdown.config.ts` 的 externals）。
 
+### 4.6 读路径有两级缓存，且失效是**事件**
+
+面板每点一次会打 6 条路由（`status` / `plugins` / `setup` / `accounts` /
+`auto-checkin` / `routing`），而每条在宿主侧都要先 `ensure()` 探一次活。
+**没有缓存时，用户看到的「点一下等很久」就是这个乘法。**
+
+| 级         | 位置                                                | 作用                                                    |
+| ---------- | --------------------------------------------------- | ------------------------------------------------------- |
+| 探活记忆   | `cache.ts` `ProbeCache`                             | 折叠**同一次点击**里 6 条路由的探活，只开 1 个 TCP 连接 |
+| 业务读缓存 | `cache.ts` `CpaCache` / 浏览器 `api.ts` `ReadCache` | 复用刚读到的账号、余额、策略                            |
+
+三条必须保住的性质，**都不抛错、只会静默变慢或显示旧值**：
+
+1. **同一 key 的并发合并成一次**（single-flight）。少了它，挂载时同时到的
+   `/accounts` 与 `/auto-checkin` 会各打一次 CPA。
+2. **每个改变 CPA 状态的写操作成功后要失效**。`Operations.invalidateChannel()`
+   是宿主侧的出口；浏览器侧由 `api.ts` 的写函数各自调 `invalidateReads()`。
+   漏一处 = 用户点完签到看到的还是旧余额。
+3. **失败不写缓存**。否则一次抖动会把错误缓存住整个 TTL。
+
+失效用**前缀**而不是精确 key：`account-select` 会改**同渠道全部**账号的启用状态，
+精确失效会漏掉它们。空串前缀表示「不知道影响哪个渠道」，按全部失效处理。
+
+浏览器侧额外是 **stale-while-revalidate**：超出 `freshMs` 但仍在 `staleMs` 内时
+**仍然给得出旧值**，只是后台重验。少了这一条，每次刷新都会把账号网格清成
+「读取中…」—— 那比多等 200ms 更难受。用户点「刷新」时传 `force` 才真绕过。
+
+### 4.7 浏览器半边必须有渲染错误边界
+
+宿主的槽位渲染带自己的 error boundary，而那个 boundary 是**锁存的** ——
+子树抛过一次之后，那块区域在这次挂载的整个生命周期里都没了，用户的唯一退路是
+禁用再启用插件。所以本插件在每个槽位外面包一层 `PanelBoundary`。
+
+它必须是**类组件**：React 规定 error boundary 用 `getDerivedStateFromError` /
+`componentDidCatch`，两者都没有 hook 等价物。这是 `PanelBoundary.tsx` 唯一的
+存在理由，也是 `scripts/verify-artifacts.cjs` 的 shim 里必须提供
+`react.Component` 的原因（缺了它，产物在工厂执行时就会抛）。
+
+### 4.8 样式只能来自宿主 token
+
+`panel.module.css` 里的每个值要么是 `--dsw-*` token，要么是从宿主
+`settings-form/fields.module.css` 抄来的数字。**不写颜色字面量**，明暗两套主题
+因此自动跟随。
+
+⚠️ **`--dsw-alias-bg-layer-N` 只定义到 3**。宿主自己的 `fields.module.css`
+引用了 `--dsw-alias-bg-layer-4`，那个键**不存在** —— 别照抄那个引用。
+
+按钮、开关、标签、状态点、页签、弹窗、Toast 一律用 primitives，不自绘：
+自绘要重做焦点环、禁用态与明暗切换三件事。
+
+类名是**哈希**的（`[hash]_[local]`）。注入的样式表是全局的，而宿主页面自己也有
+类名 —— 哈希之后一次改名就不可能与宿主某条规则撞上，而撞上会静默地把卡片改成
+另一个样子。
+
 ---
 
 ## 5. 防错清单
@@ -136,6 +193,13 @@
 | F13 | 改 `scheduler_mode` 后必须重启 CPA                        | 配置不热加载；`credits` 模式下插件自己选号，`priority` 形同虚设                                                       |
 | F14 | 被限流的号看不出异常                                      | 上游模型级限流（code 6004）下 CPA 仍报 `status: active`。面板「启用」≠「现在能用」                                    |
 | F15 | 浏览器产物里不能混入 React 运行时                         | 内联后产物从 ~80 KB 涨到 ~1 MB，且模块作用域读 `process.env.NODE_ENV` → 浏览器抛 `process is not defined`             |
+| F16 | 探活与读都要合并并发，且写后必须失效                      | 面板一次点击打 6 条路由；不合并则每次开 6 个 TCP 连接，不失效则「签到了但余额没变」。两者都**不报错**                 |
+| F17 | 读路径别再顺带拉没人消费的数据                            | `active`（一次 `/auth-files`）与 `schedulerModes`（四次 `/config`）曾挂在读路径上，界面从不读 —— 纯浪费的往返         |
+| F18 | 刷新要「先用旧值再重验」，不是「先清空再拉」              | 清空版每次刷新把整屏账号网格变成「读取中…」，视觉上比实际耗时更糟                                                     |
+| F19 | 响应要带序号，迟到的旧响应不许覆盖新状态                  | 连点两次刷新时先发的后到，表现为「数字自己跳回去」，无报错                                                            |
+| F20 | 浏览器半边必须包 `PanelBoundary`                          | 宿主槽位 boundary 是**锁存**的：一次抛出带走整块配置区，用户只能禁用再启用插件                                        |
+| F21 | 样式只用 `--dsw-*` token，不写颜色字面量                  | 明暗两套主题才能自动跟随；`--dsw-alias-bg-layer-N` 只到 3（宿主自己引用了不存在的 layer-4）                           |
+| F22 | 产物里不能出现全局限类名（如 `cpa-card`）                 | 注入的样式表是全局的，裸类名会与宿主规则相撞，撞上会静默改样式。类名必须是哈希的                                      |
 
 ---
 

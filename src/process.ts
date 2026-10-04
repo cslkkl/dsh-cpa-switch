@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { managedExePath } from './setup/index.ts'
 import { readExeMemory, writeExeMemory } from './state.ts'
+import { ProbeCache } from './cache.ts'
 
 /** 默认端口。 */
 export const DEFAULT_PORT = 8317
@@ -150,6 +151,40 @@ export class CpaProcess {
   #owned = false
   #starting = false
 
+  /**
+   * 端口探活的记忆层。
+   *
+   * 为什么必须有：面板每点一次会打 6 条路由，每条都先 `ensure()` 一次，
+   * 而 `ensure()` 原本每次都新开一个 TCP 连接。冷启动那条链是串行的，
+   * 于是「点一下等很久」= 6 次握手 + 6 次 CPA 往返。
+   *
+   * 记忆的 TTL 很短（1.5 秒）—— 它只用来**折叠同一次点击里的并发**，
+   * 不承担「缓存运行状态」的职责。真正要停 CPA 时有显式的
+   * {@link invalidateProbe}，见那里的注释。
+   */
+  readonly #probe = new ProbeCache({ probe: probePort })
+
+  /**
+   * 端口探活的当前结论。
+   *
+   * `ensure()` 与 `/status` 都读它，所以「探到了就不在跑」这种不一致不会
+   * 在两条路径上同时出现。
+   */
+  async isListening(options: ProcessOptions): Promise<boolean> {
+    return this.#probe.isListening(options.port)
+  }
+
+  /**
+   * 作废探活记忆。
+   *
+   * 调用点是**已经确知 CPA 不在跑**的那些时刻：`ensure()` 探到 false、
+   * 以及 {@link stopIfOwned}。不清的话，刚停掉的 CPA 会被记忆成「在跑」，
+   * 面板继续显示「运行中」直到 TTL 到期。
+   */
+  invalidateProbe(): void {
+    this.#probe.forget()
+  }
+
   /** 是否为一个已知在跑的进程，且是本插件启动的。 */
   get owned(): boolean {
     return this.#owned
@@ -157,7 +192,9 @@ export class CpaProcess {
 
   /** 确保 CPA 在跑。 */
   async ensure(options: ProcessOptions): Promise<EnsureResult> {
-    if (await probePort(options.port)) return { running: true, owned: this.#owned }
+    if (await this.#probe.isListening(options.port)) return { running: true, owned: this.#owned }
+    // 刚探到端口不通：上面的记忆已经是「false」了，但要留给下面的分支真去起
+    this.#probe.forget()
     if (!options.manageLifecycle)
       return { running: false, owned: false, reason: 'lifecycle-disabled' }
 
@@ -174,6 +211,8 @@ export class CpaProcess {
       this.#child = this.#spawnCpa(exe, options)
       this.#owned = true
       const ok = await waitForPort(options.port, options.startTimeoutSeconds * 1000)
+      // 走的是 waitForPort（轮询），所以这里的结论要重新记进记忆层
+      this.#probe.remember(ok)
       return ok
         ? { running: true, owned: true }
         : { running: false, owned: true, reason: 'start-timeout' }
@@ -216,6 +255,8 @@ export class CpaProcess {
 
   /** 只关自己启的那个。 */
   stopIfOwned(): void {
+    // 先作废探活记忆：关掉之后端口一定不通，而记忆里可能还挂着「在跑」
+    this.#probe.forget()
     if (!this.#owned || this.#child === undefined) return
     try {
       this.#child.kill()

@@ -5,8 +5,11 @@
  */
 
 import type { ReactNode } from 'react'
+import { useState } from 'react'
+import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { act, fmt, selectCpaAccount } from './api.ts'
 import type { Translate } from './locales.ts'
+import css from './panel.module.css'
 
 /** `capabilities` 由宿主上报，决定渲染哪些按钮。 */
 export interface Capabilities {
@@ -38,7 +41,7 @@ export interface CreditsInfo {
 
 /** 一个账号（宿主 `normalizeAccounts` 的输出）。 */
 export interface Account {
-  readonly authIndex: string
+  readonly authIndex: string | undefined
   readonly authId: string
   readonly nickname: string
   readonly disabled: boolean
@@ -47,65 +50,19 @@ export interface Account {
   readonly checkin?: CheckinInfo | undefined
 }
 
-/**
- * 宿主提供的 UI 基础组件。
- *
- * 类型按**实际用到的 props** 收窄，而不是 `Record<string, unknown>` ——
- * 后者会让 JSX 下的 props 检查失去意义（任何键都合法）。
- */
-export interface Primitives {
-  readonly Button: (props: {
-    readonly variant?: string
-    readonly size?: string
-    readonly disabled?: boolean
-    readonly title?: string
-    readonly onClick?: () => void
-    readonly children?: ReactNode
-  }) => ReactNode
-  readonly Switch: (props: {
-    readonly checked?: boolean
-    readonly disabled?: boolean
-    readonly label?: string
-    readonly title?: string
-    readonly onChange?: (next: boolean) => void
-  }) => ReactNode
-  readonly Tag: (props: { readonly tone?: string; readonly children?: ReactNode }) => ReactNode
-  readonly Pill: (props: {
-    readonly active?: boolean
-    readonly onClick?: () => void
-    readonly children?: ReactNode
-  }) => ReactNode
-  readonly StateDot: (props: { readonly state?: string }) => ReactNode
-}
-
-/** React 运行时（宿主注入）。 */
-export interface ReactRuntime {
-  readonly Fragment: unknown
-  readonly useState: <T>(initial: T) => [T, (next: T | ((prev: T) => T)) => void]
-  readonly useEffect: (
-    effect: () => (() => void) | undefined | void,
-    deps?: readonly unknown[],
-  ) => void
-  readonly useCallback: <T>(fn: T, deps?: readonly unknown[]) => T
-  readonly useRef: <T>(initial: T) => { current: T }
-}
-
 /** `AccountCard` 的入参。 */
 export interface AccountCardProps {
   readonly account: Account
   readonly plugin: string
   readonly capabilities: Capabilities
   readonly t: Translate
-  readonly primitives: Primitives
-  readonly React: ReactRuntime
   readonly onToast: (message: string, tone: 'ok' | 'err', detail?: string | undefined) => void
   readonly onReload: () => Promise<void> | void
 }
 
 /** 单张账号卡。 */
 export function AccountCard(props: AccountCardProps): ReactNode {
-  const { account, capabilities, t, primitives, React } = props
-  const { Button, Tag } = primitives
+  const { account, capabilities, t, onToast, onReload } = props
 
   /**
    * 高亮 = **用户选中的这个号**，不做「实际在跑哪个号」的推断。
@@ -115,11 +72,9 @@ export function AccountCard(props: AccountCardProps): ReactNode {
    * 统计失真）。
    */
   const isSelected = !account.disabled
-  const [busy, setBusy] = React.useState('')
+  const [busy, setBusy] = useState('')
 
   const credits = account.credits
-  const remain = credits === null ? undefined : credits.remain
-  const used = credits === null ? undefined : credits.used
   const percent =
     credits !== null && credits.size > 0
       ? Math.round((Number(credits.used ?? 0) / Number(credits.size)) * 100)
@@ -129,12 +84,12 @@ export function AccountCard(props: AccountCardProps): ReactNode {
     setBusy(kind)
     try {
       const result = await act(props.plugin, kind, account.authIndex)
-      props.onToast(
+      onToast(
         t(kind as 'checkin') + (result.ok ? ' ✓' : ' ✗'),
         result.ok ? 'ok' : 'err',
         result.error,
       )
-      if (result.ok) await props.onReload()
+      if (result.ok) await onReload()
     } finally {
       setBusy('')
     }
@@ -144,41 +99,34 @@ export function AccountCard(props: AccountCardProps): ReactNode {
    * 「选择」这个账号。
    *
    * 语义：**选中它，同渠道其余账号全部自动禁用** —— 一次点击把整个渠道收敛到
-   * 单账号，不用逐个点禁用。见宿主的 `accountSelect`。
+   * 单账号，不用逐个点禁用。见 `api.ts` 的 `selectCpaAccount`。
    */
   const selectAccount = async (): Promise<void> => {
     setBusy('select')
     try {
-      const result = await selectCpaAccount(props.plugin, account.authIndex)
-      props.onToast(t('select') + (result.ok ? ' ✓' : ' ✗'), result.ok ? 'ok' : 'err', result.error)
-      if (result.ok) await props.onReload()
+      const result = await selectCpaAccount(props.plugin, account.authIndex ?? '')
+      onToast(t('select') + (result.ok ? ' ✓' : ' ✗'), result.ok ? 'ok' : 'err', result.error)
+      if (result.ok) await onReload()
     } finally {
       setBusy('')
     }
   }
 
-  const meta: string[] = []
-  if (credits !== null && credits.packCount > 0) {
-    meta.push(String(credits.packCount) + ' ' + t('packs'))
-  }
-  if (credits?.plan !== undefined) meta.push(String(credits.plan))
-  if (credits?.remainKnown === false) meta.push(t('remain') + ' ?')
+  const facts: string[] = []
+  if (credits !== null && credits.packCount > 0)
+    facts.push(String(credits.packCount) + ' ' + t('packs'))
+  if (credits?.plan !== undefined) facts.push(String(credits.plan))
+  // 「余量未知」与「余量是 0」是两回事，必须显式说清，否则用户会以为号空了
+  if (credits?.remainKnown === false) facts.push(t('remain') + ' ?')
 
-  /**
-   * 徽标只反映**用户自己的选择**，不做「实际在用哪个号」的推断。
-   *
-   * 曾经这里有个「使用中」标签，按 `recent_requests` 统计标出实际被调度的账号。
-   * 用户明确不要它 ——「用哪个我自己会决定」。而且那个推断本身也不可靠
-   * （被限流 / 缓存命中都会让统计失真）。
-   *
-   * Tag 的 tone 语义：solid=当前选中项、danger=已禁用、outline=只读事实。
-   */
   const streakDays = account.checkin?.streakDays ?? 0
 
   return (
-    <div className={'cpa-card' + (isSelected ? ' sel' : '')}>
-      <div className="cpa-card-head">
-        <span className="cpa-nick">{account.nickname}</span>
+    <div className={css.card + (isSelected ? ' ' + css.selected : '')}>
+      <div className={css.cardHead}>
+        <span className={css.nickname} title={account.nickname}>
+          {account.nickname}
+        </span>
         {account.disabled && <Tag tone="danger">{t('disabled')}</Tag>}
         {account.exhausted && <Tag tone="warning">{t('exhausted')}</Tag>}
         {account.checkin !== undefined && (
@@ -192,27 +140,27 @@ export function AccountCard(props: AccountCardProps): ReactNode {
       </div>
 
       {credits === null ? (
-        <div className="cpa-muted">—</div>
+        <div className={css.muted}>—</div>
       ) : (
-        <div className="cpa-nums">
-          <div className="cpa-num">
-            <span className="cpa-lbl">{t('remain')}</span>
-            <span className="cpa-val">{fmt(remain)}</span>
+        <div className={css.numbers}>
+          <div className={css.number}>
+            <span className={css.label}>{t('remain')}</span>
+            <span className={css.value}>{fmt(credits.remain)}</span>
           </div>
-          <div className="cpa-num">
-            <span className="cpa-lbl">{t('used')}</span>
-            <span className="cpa-val">{fmt(used)}</span>
+          <div className={css.number}>
+            <span className={css.label}>{t('used')}</span>
+            <span className={css.value}>{fmt(credits.used)}</span>
           </div>
         </div>
       )}
 
       {credits !== null && credits.size > 0 && (
-        <div className="cpa-bar">
-          <div className="cpa-fill" style={{ width: String(percent) + '%' }} />
+        <div className={css.meter}>
+          <div className={css.meterFill} style={{ width: String(percent) + '%' }} />
         </div>
       )}
 
-      {meta.length > 0 && <div className="cpa-meta">{meta.join(' · ')}</div>}
+      {facts.length > 0 && <div className={css.facts}>{facts.join(' · ')}</div>}
 
       {/*
        * 「选择」—— 选中它，同渠道其余账号**自动全部禁用**。
@@ -228,7 +176,7 @@ export function AccountCard(props: AccountCardProps): ReactNode {
        * 代价（刻意）：该渠道唯一的号不可用时请求直接失败，**没有兜底** ——
        * 宁可失败，也不要偷偷换号把上游缓存打散、把积分花在别的号上。
        */}
-      <div className="cpa-actions">
+      <div className={css.actions}>
         {capabilities.checkin && (
           <Button
             variant="outline"

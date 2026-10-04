@@ -44,6 +44,9 @@ importers:
       globals:
         specifier: ^17.13.0
         version: 17.13.0
+      lightningcss:
+        specifier: ^1.33.0
+        version: 1.33.0
       prettier:
         specifier: ^3.9.9
         version: 3.9.9

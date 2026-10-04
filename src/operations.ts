@@ -18,9 +18,10 @@ import {
   SCHEDULER_MODE,
   normalizeAccounts,
 } from './adapters.ts'
-import type { ChannelId, NormalizedAccount } from './adapters.ts'
+import type { ChannelId } from './adapters.ts'
 import { readAccountIntent, writeAccountIntent, localDay, readStamp, writeStamp } from './state.ts'
 import type { CpaOptions } from './cpa.ts'
+import { CpaCache } from './cache.ts'
 import type { LoggerLike } from './credentials.ts'
 import type { CpaProcess, EnsureResult } from './process.ts'
 
@@ -61,9 +62,7 @@ interface AuthFile {
   provider?: string
   disabled?: boolean
   priority?: number
-  success?: number
   auth_index?: string
-  recent_requests?: { time?: string; success?: number; failed?: number }[]
 }
 
 /** 从 `auth-files` 响应里取凭据数组。 */
@@ -80,9 +79,49 @@ function filesOf(data: unknown): AuthFile[] {
  */
 export class Operations {
   readonly #deps: OpsDeps
+  /**
+   * 读路径的记忆层。
+   *
+   * 为什么必须有：**面板挂载一次要打 6 条路由**，其中 4 条落在同一个渠道上
+   * （`/accounts`、`/auto-checkin`、以及各自背后的 `ensure()` 探活）。
+   * 没有它，每点一次刷新都是「探活 + 拉 accounts + 拉 credits + 拉 accounts
+   * 再一遍」—— 用户看到的就是「点一下等很久」。
+   *
+   * 失效靠**事件**而不是靠时间：所有写操作成功后会
+   * {@link invalidateChannel}，所以「签到后余额没变」这种不一致不存在；
+   * TTL 只是给「无写操作时连点几下」兜底。
+   */
+  readonly #cache = new CpaCache()
 
   constructor(deps: OpsDeps) {
     this.#deps = deps
+  }
+
+  /**
+   * 作废某个渠道的读缓存。
+   *
+   * ⚠️ **每个改变 CPA 状态的写操作成功后都必须调它**，包括
+   * 签到 / 任务 / 选择账号 / 改调度策略 —— 否则用户点完签到看到的还是旧余额。
+   *
+   * ⚠️ 一个渠道有**两个** key（`accounts:` 与 `autockin:`），所以这里各清一次。
+   * 漏掉 `autockin:` 的话，切换自动签到后开关会一直显示旧值 —— 而它不报错，
+   * 只是「看起来没生效」。
+   *
+   * `plugin` 为空串表示「不知道影响哪个渠道」，按全部失效处理（宁可多打一次
+   * CPA，也不要给出跨渠道的脏数据）。
+   */
+  invalidateChannel(plugin: string): void {
+    if (plugin === '') {
+      this.#cache.invalidate('')
+      return
+    }
+    this.#cache.invalidate(`accounts:${plugin}:`)
+    this.#cache.invalidate(`autockin:${plugin}`)
+  }
+
+  /** 读缓存的命中统计，供诊断用。 */
+  cacheStats(): { readonly hits: number; readonly misses: number } {
+    return this.#cache.stats()
   }
 
   /** 前置检查：CPA 在跑 + 有管理密钥。 */
@@ -116,8 +155,33 @@ export class Operations {
     return this.#deps.processOptions()
   }
 
-  /** 取某个渠道的账号列表（已按统一形状归一化）。 */
-  async accountsOf(plugin: string): Promise<OpsResult> {
+  /**
+   * 取某个渠道的账号列表（已按统一形状归一化）。
+   *
+   * @param plugin - 渠道 id。
+   * @param fresh - `true` 时**绕过缓存**（用户点了「刷新」）。
+   *   不这么做的话，写操作后紧跟的那次 `load()` 会读到写之前的缓存，
+   *   表现为「签到了但余额没变」。
+   */
+  async accountsOf(plugin: string, fresh = false): Promise<OpsResult> {
+    const adapter = PLUGIN_ADAPTERS[plugin as ChannelId]
+    if (adapter === undefined) return { ok: false, error: 'unknown-plugin' }
+
+    const key = `accounts:${plugin}:${String(fresh)}`
+    if (!fresh) {
+      const cached = await this.#cache.read(key, async () => await this.#loadAccounts(plugin))
+      if (cached !== undefined) return cached as OpsResult
+    }
+    return this.#loadAccounts(plugin)
+  }
+
+  /**
+   * 真正去 CPA 取一个渠道的账号 + 余额。
+   *
+   * 拆出来是为了让 {@link accountsOf} 能把「取」与「缓存」分开：
+   * 缓存层需要一个不递归的取数函数。
+   */
+  async #loadAccounts(plugin: string): Promise<OpsResult> {
     const adapter = PLUGIN_ADAPTERS[plugin as ChannelId]
     if (adapter === undefined) return { ok: false, error: 'unknown-plugin' }
 
@@ -133,7 +197,6 @@ export class Operations {
           : Promise.resolve(undefined),
       ])
       const normalized = normalizeAccounts(plugin, base, creditData)
-      const active = await this.activeAuthOf(plugin, normalized)
       const baseRecord = base as
         { server_time?: unknown; schedule?: unknown; checkin_auto?: unknown } | undefined
 
@@ -148,14 +211,6 @@ export class Operations {
           schedule: baseRecord?.schedule,
           autoCheckin: baseRecord?.checkin_auto,
           accounts: normalized,
-          active:
-            active.ok === true
-              ? {
-                  authId: active.activeAuthId,
-                  nickname: active.activeNickname,
-                  since: active.since,
-                }
-              : null,
         },
       }
     } catch (error) {
@@ -164,94 +219,8 @@ export class Operations {
   }
 
   /**
-   * 检测**真实正在被使用**的账号。
-   *
-   * 为什么不直接用插件给的 `selected`：插件面板里的「选用」是它自己记的
-   * 「首选」，**不等于实际调度结果**。真正决定用哪个号的是 CPA 的调度器
-   * （`routing.strategy` + auth 文件的 `priority`），两者会不一致 ——
-   * 面板显示「甲使用中」，实际扣的却是乙的分。
-   *
-   * 数据来源：`/v0/management/auth-files` 的每个凭据带 `recent_requests`
-   * （10 分钟一格的 success/failed）与累计 `success`/`failed`。凭据的 `name`
-   * 与插件账号的 `auth_id` 逐字对应。
-   *
-   * 判定：取**最近一个有请求的时段**，成功数最高的那个号就是「在用」的。
-   * 全部为 0 时返回 null（还没用过，不猜）。
+   * 写操作统一入口：按渠道查白名单路径 + 可选 auth_index。
    */
-  async activeAuthOf(
-    plugin: string,
-    accounts: readonly NormalizedAccount[],
-  ): Promise<{
-    ok: boolean
-    error?: string
-    activeAuthId?: unknown
-    activeNickname?: unknown
-    since?: unknown
-    rows?: unknown
-  }> {
-    try {
-      const data = await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files')
-      const byName = new Map<string, AuthFile>()
-      for (const file of filesOf(data)) {
-        if (file.provider !== plugin) continue
-        byName.set(String(file.name), file)
-      }
-
-      /** 汇总每张时段表的最近活动。 */
-      const lastActive = (
-        file: AuthFile | undefined,
-      ): { time: string; success: number; failed: number } | undefined => {
-        const buckets = Array.isArray(file?.recent_requests) ? file.recent_requests : []
-        for (let i = buckets.length - 1; i >= 0; i -= 1) {
-          const bucket = buckets[i]
-          const success = Number(bucket?.success ?? 0)
-          const failed = Number(bucket?.failed ?? 0)
-          if (success + failed > 0) {
-            return { time: String(bucket?.time ?? ''), success, failed }
-          }
-        }
-        return undefined
-      }
-
-      /** 选「在用」的号：时段越新越优先；同一时段成功数多者胜。 */
-      let winner:
-        { authId: unknown; nickname: string; last: { time: string; success: number } } | undefined
-      const rows: unknown[] = []
-      for (const account of accounts) {
-        const file = byName.get(String(account.authId))
-        const last = lastActive(file)
-        rows.push({
-          authId: account.authId,
-          nickname: account.nickname,
-          last: last ?? null,
-          totalSuccess: Number(file?.success ?? 0),
-        })
-        if (last === undefined) continue
-        if (
-          winner === undefined ||
-          last.time > winner.last.time ||
-          (last.time === winner.last.time && last.success > winner.last.success)
-        ) {
-          winner = { authId: account.authId, nickname: account.nickname, last }
-        }
-      }
-
-      if (winner === undefined) {
-        return { ok: true, activeAuthId: null, activeNickname: null, since: null, rows }
-      }
-      return {
-        ok: true,
-        activeAuthId: winner.authId,
-        activeNickname: winner.nickname,
-        since: winner.last.time,
-        rows,
-      }
-    } catch (error) {
-      return { ok: false, error: messageOf(error) }
-    }
-  }
-
-  /** 写操作统一入口：按渠道查白名单路径 + 可选 auth_index。 */
   async action(plugin: string, kind: string, authIndex: string | undefined): Promise<OpsResult> {
     const adapter = PLUGIN_ADAPTERS[plugin as ChannelId]
     if (adapter === undefined) return { ok: false, error: 'unknown-plugin' }
@@ -266,27 +235,47 @@ export class Operations {
       authIndex === undefined || authIndex === '' ? '{}' : JSON.stringify({ auth_index: authIndex })
     try {
       const data = await this.#deps.cpaFetch(this.#deps.options(), path, { method: 'POST', body })
+      // 签到 / 任务会改余额与签到态：写完必须作废，否则紧接着的 `load()` 读到旧值
+      this.invalidateChannel(plugin)
       return { ok: true, data }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
   }
 
-  /** 读 + 写自动签到开关（只有部分渠道支持）。 */
+  /**
+   * 读 + 写自动签到开关（只有部分渠道支持）。
+   *
+   * ⚠️ `GET` 这条路径**与 `accountsOf` 读的是同一个 `/accounts` 端点**，
+   * 只为拿顶层那个 `checkin_auto` 字段。面板挂载时两条都会跑，于是同一份
+   * 账号列表被拉了两遍。现在 `accountsOf` 的返回里已经带了 `autoCheckin`
+   * （同一个响应同一个字段），客户端优先用它；这条留作兜底与独立诊断，
+   * 并按渠道缓存，省掉重复往返。
+   */
   async autoCheckin(plugin: string, method: 'GET' | 'POST', enabled?: boolean): Promise<OpsResult> {
     const paths = AUTO_CHECKIN_PATHS[plugin as ChannelId]
     if (paths === undefined) return { ok: false, error: 'unsupported' }
+
+    if (method === 'GET') {
+      const cached = await this.#cache.read(`autockin:${plugin}`, async () => {
+        const state = await this.#running()
+        if ('error' in state) return state
+        try {
+          // ⚠️ 从 `/accounts` 顶层读，不是 `/config` —— 详见 adapters.ts 的注释
+          const accountsData = (await this.#deps.cpaFetch(this.#deps.options(), paths.readFrom)) as
+            Record<string, unknown> | undefined
+          return { ok: true as const, enabled: accountsData?.[paths.field] === true }
+        } catch (error) {
+          return { ok: false as const, error: messageOf(error) }
+        }
+      })
+      return cached as OpsResult
+    }
 
     const state = await this.#running()
     if ('error' in state) return state
 
     try {
-      if (method === 'GET') {
-        // ⚠️ 从 `/accounts` 顶层读，不是 `/config` —— 详见 adapters.ts 的注释
-        const accountsData = (await this.#deps.cpaFetch(this.#deps.options(), paths.readFrom)) as
-          Record<string, unknown> | undefined
-        return { ok: true, enabled: accountsData?.[paths.field] === true }
-      }
       if (this.#deps.adminKey() === '') return { ok: false, error: 'no-admin-key' }
 
       // ⚠️ PATCH + 字段名 `checkin_auto`（不是 POST `{enabled}` 到 /checkin/config —— 那路径 404）
@@ -298,6 +287,7 @@ export class Operations {
       const after = (await this.#deps
         .cpaFetch(this.#deps.options(), paths.readFrom)
         .catch(() => undefined)) as Record<string, unknown> | undefined
+      this.invalidateChannel(plugin)
       return { ok: true, enabled: after?.[paths.field] === true }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -360,6 +350,12 @@ export class Operations {
    *
    * CPA 有现成接口 `GET /v0/management/routing/strategy`，返回 `{strategy}`。
    * 取值为 round-robin / weighted-round-robin / fill-first。
+   *
+   * ⚠️ 这里**只读策略本身**。曾经还顺带把四个渠道的 `scheduler_mode` 读一遍
+   * （循环里 4 次串行 `/config`），但界面上从来没有消费它 —— 那是每次面板挂载
+   * 白付的 4 次 CPA 往返。`scheduler_mode` 的影响写在
+   * [架构 §3](../docs/ARCHITECTURE.md)；真要展示就用
+   * `POST /scheduler-mode` 那个显式动作，别混进读路径。
    */
   async routingGet(): Promise<OpsResult> {
     const state = await this.#running()
@@ -370,28 +366,7 @@ export class Operations {
         this.#deps.options(),
         '/v0/management/routing/strategy',
       )) as { strategy?: unknown } | undefined
-
-      /**
-       * 同时读各渠道的 `scheduler_mode`。
-       *
-       * ⚠️ 这个值决定 `priority` 到底有没有用：
-       * - `off` → 内置调度器接管，`fill-first` + `priority` 生效；
-       * - `credits` → **插件自己选号**（挑剩余额度最多的），`priority` 形同虚设。
-       * 只要有一个渠道是 `credits`，那个渠道的账号顺序就完全不受控。
-       */
-      const schedulerModes: Record<string, unknown> = {}
-      for (const plugin of PLUGIN_ORDER) {
-        try {
-          const cfg = (await this.#deps.cpaFetch(
-            this.#deps.options(),
-            PLUGIN_CONFIG_PATH(plugin),
-          )) as { scheduler_mode?: unknown } | undefined
-          schedulerModes[plugin] = cfg?.scheduler_mode ?? null
-        } catch {
-          schedulerModes[plugin] = null
-        }
-      }
-      return { ok: true, strategy: data?.strategy, schedulerModes }
+      return { ok: true, strategy: data?.strategy }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
@@ -423,6 +398,8 @@ export class Operations {
         this.#deps.options(),
         '/v0/management/routing/strategy',
       )) as { strategy?: unknown } | undefined
+      // 空串 = 全部渠道：调度策略是跨渠道的，改它等于改了所有渠道的读结果
+      this.invalidateChannel('')
       return { ok: true, strategy: data?.strategy }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -460,6 +437,7 @@ export class Operations {
         })
         changed.push(plugin)
       }
+      this.invalidateChannel('')
       return { ok: true, changed, skipped, restartRequired: changed.length > 0 }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -568,6 +546,7 @@ export class Operations {
         })
         changed.push({ nickname, priority: next })
       }
+      if (changed.length > 0) this.invalidateChannel(plugin)
       return { ok: true, changed }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -611,6 +590,7 @@ export class Operations {
       ;(intent as { updatedAt?: string }).updatedAt = new Date().toISOString()
       writeAccountIntent(intent)
 
+      this.invalidateChannel(plugin)
       return { ok: true, name: target.name, disabled: !enabled }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -656,6 +636,11 @@ export class Operations {
       }
       ;(intent as { updatedAt?: string }).updatedAt = new Date().toISOString()
       writeAccountIntent(intent)
+      /**
+       * 这一步改了**同渠道全部**账号的启用状态，而账号列表里带 `disabled`。
+       * 不失效的话，用户点完「选择」，界面上仍然是点之前那批启用态。
+       */
+      this.invalidateChannel(plugin)
       return { ok: true, name: target.name, changed }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -713,7 +698,14 @@ export class Operations {
         this.#deps.options(),
         `/v8/management/oauth/status?state=${encodeURIComponent(state)}`,
       )) as { status?: unknown } | undefined
-      return { ok: true, status: data?.status ?? 'unknown', raw: data }
+      const status = data?.status ?? 'unknown'
+      /**
+       * 授权完成时 CPA 自己写好了认证文件 —— 那一刻该渠道的账号列表变了。
+       * 失效在这里做（而不是让前端记得调），因为「完成」是轮询观察到的结果，
+       * 前端不知道 CPA 到底在哪个 tick 落了盘。
+       */
+      if (status !== 'wait') this.invalidateChannel('')
+      return { ok: true, status, raw: data }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
@@ -787,6 +779,8 @@ export class Operations {
       startupCheckinDays: done,
       startupCheckinAt: new Date().toISOString(),
     })
+    // 补签改的是各渠道余额与签到态
+    this.invalidateChannel('')
     return { ok: true, checkedIn: true, results }
   }
 
@@ -838,6 +832,7 @@ export class Operations {
       /** 有实际改动才值得记日志 —— 没改动是常态，别刷屏。 */
       if (fixed.length > 0) {
         this.#deps.logger?.info?.('cpa-panel: 按用户选择恢复了 %d 个账号 %o', fixed.length, fixed)
+        this.invalidateChannel('')
       }
       return { ok: true, restored: fixed }
     } catch (error) {

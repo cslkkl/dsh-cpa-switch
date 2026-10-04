@@ -12,13 +12,19 @@
  */
 
 import type { ReactNode } from 'react'
-import * as React from 'react'
-import * as primitivesModule from '@deepseek-ai/dsh-client-ui-primitives'
+import { PanelBoundary } from './PanelBoundary.tsx'
 import { Panel } from './Panel.tsx'
-import { injectCss } from './styles.ts'
 import { en, zh } from './locales.ts'
 import type { LocaleKey } from './locales.ts'
-import type { Primitives, ReactRuntime } from './AccountCard.tsx'
+
+/**
+ * 样式表在这里 import，而不是在组件里各 import 一次。
+ *
+ * CSS Module 靠 import 产生副作用（注入 style 标签 + 导出类名表）。这个模块
+ * 在工厂执行时就被求值，所以只要 `Panel.tsx` 还 import 着它，样式就一定在
+ * 组件渲染之前到位 —— 不用谁去记得调 `injectCss()`。
+ */
+import './panel.module.css'
 
 /** 本插件那一行的 Loader 条目 id —— 0.1.7 起它就是设置命名空间。 */
 const NS = 'cpa-panel'
@@ -37,7 +43,7 @@ const PKG_NAME = 'dsh-cpa-switch'
 
 /** 槽位注册面。 */
 interface SlotSeat {
-  readonly t?: (key: LocaleKey) => string
+  readonly t?: (key: LocaleKey, ...params: readonly string[]) => string
   readonly view?: string
 }
 
@@ -47,12 +53,12 @@ interface SlotsService {
   register: (options: Record<string, unknown>, component: (seat: SlotSeat) => ReactNode) => void
 }
 
-/** 浏览器半端上下文。 */
+/** 浏览器半边上下文。 */
 interface ClientContext {
   readonly slots: SlotsService
   readonly locale: {
     register: (ns: string, dictionaries: Record<string, unknown>) => void
-    bind: (ns: string) => (key: LocaleKey) => string
+    bind: (ns: string) => (key: LocaleKey, ...params: readonly string[]) => string
   }
   readonly effect: (callback: () => void, label: string) => void
   readonly inject: (deps: string[], callback: (scope: ClientContext) => void) => void
@@ -75,10 +81,6 @@ export const inject = ['slots', 'locale']
  * **不要**自己去找全局的 require：宿主的 `require` 是工厂参数，不是全局。
  */
 export function apply(ctx: ClientContext): void {
-  const react = React as unknown as ReactRuntime
-  const primitives = primitivesModule as unknown as Primitives
-
-  injectCss(PKG_NAME)
   ctx.effect(() => {
     ctx.locale.register(NS, { zh, en })
   }, 'cpa-panel: dictionaries')
@@ -102,7 +104,11 @@ export function apply(ctx: ClientContext): void {
     ctx.slots.register({ name: 'plugins.bundle.config', key: PKG_NAME, locale: NS }, (seat) => {
       const t2 = typeof seat?.t === 'function' ? seat.t : t
       if (seat?.view === 'summary') return t2('tab')
-      return <Panel t={t2} primitives={primitives} React={react} />
+      return (
+        <PanelBoundary label={t2('tab')} t={t2}>
+          <Panel t={t2} />
+        </PanelBoundary>
+      )
     })
   })
 
@@ -116,13 +122,14 @@ export function apply(ctx: ClientContext): void {
         label: () => t('tab'),
         locale: NS,
       },
-      (seat) => (
-        <Panel
-          t={typeof seat?.t === 'function' ? seat.t : t}
-          primitives={primitives}
-          React={react}
-        />
-      ),
+      (seat) => {
+        const t2 = typeof seat?.t === 'function' ? seat.t : t
+        return (
+          <PanelBoundary label={t2('tab')} t={t2}>
+            <Panel t={t2} />
+          </PanelBoundary>
+        )
+      },
     )
   })
 }

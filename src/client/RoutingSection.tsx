@@ -17,44 +17,50 @@
  */
 
 import type { ReactNode } from 'react'
-import { api } from './api.ts'
-import type { ReactRuntime } from './AccountCard.tsx'
+import { useAsyncResource } from './use-async-resource.ts'
 import type { Translate } from './locales.ts'
+import css from './panel.module.css'
 
 /** `RoutingSection` 的入参。 */
 export interface RoutingSectionProps {
   readonly t: Translate
-  readonly React: ReactRuntime
 }
 
 /** 路由状态（只读）。 */
 export function RoutingSection(props: RoutingSectionProps): ReactNode {
-  const { t, React } = props
-  const [strategy, setStrategy] = React.useState<unknown>(null)
+  const { t } = props
 
-  const load = React.useCallback(async () => {
-    const routingResponse = await api('/api/v1/cpa/routing')
-    if (routingResponse.ok) setStrategy(routingResponse.strategy)
-  }, [])
+  /**
+   * 策略值用 `string | undefined` 表达三态：还没读到、读到了（可能为空串）、
+   * 读失败。`null` 当「未读到」会让「读到空串」无法表达。
+   */
+  const strategy = useAsyncResource<string>({
+    key: 'routing',
+    path: '/api/v1/cpa/routing',
+    select: (result) => (result.strategy === undefined ? '' : String(result.strategy)),
+  })
 
-  React.useEffect(() => {
-    void load()
-  }, [load])
-
-  if (strategy === null) return null
+  /**
+   * 还没读到就**什么都不渲染**。
+   *
+   * 旧实现返回 `null` 但同时无条件发请求，于是每次挂载都白付一次往返，
+   * 而这个区块在冷启动时通常还没准备好 —— 于是每次都白付。
+   * 现在它走缓存：第二次进来直接就有。
+   */
+  if (strategy.data === undefined) return null
 
   /** 策略文案：`fill-first` 是推荐值，`round-robin` 带警告，其余原样显示。 */
   const strategyText =
-    strategy === 'fill-first'
+    strategy.data === 'fill-first'
       ? t('strategyFillFirst')
-      : strategy === 'round-robin'
+      : strategy.data === 'round-robin'
         ? t('strategyRoundRobin') + ' ⚠️ ' + t('strategyWarn')
-        : String(strategy)
+        : strategy.data
 
   return (
-    <div className="cpa-section">
-      <div className="cpa-section-title">{t('routing')}</div>
-      <div className="cpa-hint">{t('strategyLabel') + '：' + strategyText}</div>
+    <div className={css.section}>
+      <div className={css.sectionTitle}>{t('routing')}</div>
+      <div className={css.hint}>{t('strategyLabel') + '：' + strategyText}</div>
     </div>
   )
 }

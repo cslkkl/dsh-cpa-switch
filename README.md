@@ -157,7 +157,7 @@ profile 的 `dependencies` 里保留同名条目是**已安装声明**，`dsh.pr
 | `/api/v1/cpa/setup`            | GET/POST | 环境状态 / 一键下载 CPA 与渠道插件                                  |
 | `/api/v1/cpa/status`           | GET      | CPA 运行状态、端口、是否已配密钥                                    |
 | `/api/v1/cpa/plugins`          | GET      | 已装渠道列表与能力                                                  |
-| `/api/v1/cpa/accounts?plugin=` | GET      | 账号 + 余额                                                         |
+| `/api/v1/cpa/accounts?plugin=` | GET      | 账号 + 余额（`&fresh=1` 跳过缓存）                                  |
 | `/api/v1/cpa/models?plugin=`   | GET      | 该渠道可选模型                                                      |
 | `/api/v1/cpa/school`           | GET      | 成长中心（任务 / 奖励）信息                                         |
 | `/api/v1/cpa/action`           | POST     | `{plugin, kind, authIndex}` → 签到 / 任务                           |
@@ -166,7 +166,7 @@ profile 的 `dependencies` 里保留同名条目是**已安装声明**，`dsh.pr
 | `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                     |
 | `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`） |
 | `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                        |
-| `/api/v1/cpa/routing`          | GET/POST | 路由策略 + 各渠道 `scheduler_mode`                                  |
+| `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                    |
 | `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                              |
 | `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                 |
 | `/api/v1/cpa/start`            | POST     | 手动拉起 CPA                                                        |
@@ -176,6 +176,11 @@ profile 的 `dependencies` 里保留同名条目是**已安装声明**，`dsh.pr
 **改路由前必读**：同一 `path` 只能注册一次（多方法合并在一个条目里）、
 方法只有 `GET`/`HEAD`/`POST`。违反任一条会让**所有**路由失效。
 `src/routes.ts` 会归一化兜底，但新增路由仍要走 `RouteSpec`。
+
+**为什么 `routing` 不再返回各渠道 `scheduler_mode`**：它曾顺带循环读四个
+`/config`，而界面从不消费那份数据 —— 每次打开面板白付 4 次 CPA 往返。
+`scheduler_mode` 的影响见[架构 §3](../docs/ARCHITECTURE.md#3-为什么这么分)；
+要归一化它请用显式的 `POST /scheduler-mode`，别混进读路径。
 
 ## 文档
 

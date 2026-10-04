@@ -5,12 +5,15 @@
  */
 
 import type { ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { Button, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api } from './api.ts'
 import { PluginPanel, progressLine } from './PluginPanel.tsx'
 import type { PluginMeta } from './PluginPanel.tsx'
 import { RoutingSection } from './RoutingSection.tsx'
-import type { Account, Primitives, ReactRuntime } from './AccountCard.tsx'
+import { useAsyncResource } from './use-async-resource.ts'
 import type { Translate } from './locales.ts'
+import css from './panel.module.css'
 
 /** 宿主 `GET /status` 的返回。 */
 interface StatusInfo {
@@ -28,36 +31,32 @@ interface StatusInfo {
  * - `{phase:'error', error}` —— 装失败
  */
 type SetupState =
-  (Record<string, unknown> & { ok?: boolean; phase?: string; error?: string }) | null
+  | (Record<string, unknown> & {
+      ok?: boolean
+      phase?: string
+      error?: string
+      missing?: readonly string[]
+      running?: boolean
+      progress?: unknown
+    })
+  | null
 
 /** `Panel` 的入参。 */
 export interface PanelProps {
   readonly t: Translate
-  readonly primitives: Primitives
-  readonly React: ReactRuntime
 }
 
 /** 面板根组件。 */
 export function Panel(props: PanelProps): ReactNode {
-  const { t, primitives, React } = props
-  const { Button, Tag, Pill, StateDot } = primitives
+  const { t } = props
 
-  const [status, setStatus] = React.useState<StatusInfo | null>(null)
-  const [plugins, setPlugins] = React.useState<readonly PluginMeta[]>([])
-  const [active, setActive] = React.useState('workbuddy')
-  /**
-   * 当前渠道面板上报的账号数据。
-   *
-   * 为什么不各拉一次：两边都要 `accounts`，各打一次接口既慢又可能不一致
-   * （余额是实时算的，两次结果未必相同）。由 `PluginPanel` 拉一次、上报上来。
-   */
-  const [, setPluginState] = React.useState<{ accounts: readonly Account[] }>({ accounts: [] })
-  const [setup, setSetup] = React.useState<SetupState>(null)
+  const [status, setStatus] = useState<StatusInfo | null>(null)
+  const [active, setActive] = useState('workbuddy')
+  const [setup, setSetup] = useState<SetupState>(null)
 
-  const refreshSetup = React.useCallback(async () => {
+  const refreshSetup = useCallback(async (): Promise<void> => {
     const result = await api('/api/v1/cpa/setup')
-    if (result.ok) setSetup(result)
-    return result
+    if (result.ok) setSetup(result as SetupState)
   }, [])
 
   /**
@@ -70,7 +69,7 @@ export function Panel(props: PanelProps): ReactNode {
    * 只在 `setup.phase === 'working'` 时轮询 —— 装完（`ok: true`）立刻停，
    * 避免空转；被卸载时也清掉，否则刷新页面会留下僵尸定时器。
    */
-  React.useEffect(() => {
+  useEffect(() => {
     if (setup?.phase !== 'working') return undefined
     const timer = setInterval(() => {
       void (async () => {
@@ -89,35 +88,65 @@ export function Panel(props: PanelProps): ReactNode {
   }, [setup?.phase])
 
   /** 一键准备环境：下载 + 校验 + 解压 + 写配置。 */
-  const runSetup = React.useCallback(async () => {
+  const runSetup = useCallback(async (): Promise<void> => {
     setSetup({ phase: 'working' })
     const result = await api('/api/v1/cpa/setup', { method: 'POST' })
     if (result.ok) {
       const statePart = (result.state ?? {}) as Record<string, unknown>
       setSetup({ ...statePart, ok: true })
-      return result
+      return
     }
     setSetup({ phase: 'error', error: String(result.error ?? 'failed') })
-    return result
   }, [])
 
-  React.useEffect(() => {
+  /**
+   * 渠道清单。
+   *
+   * 它是**静态**的（四条渠道写死在 `adapters.ts`），所以它不值得走缓存 ——
+   * 走的是最普通的一次 `api()`。
+   */
+  const pluginsResource = useAsyncResource<readonly PluginMeta[]>({
+    key: 'plugins',
+    path: '/api/v1/cpa/plugins',
+    select: (result) => {
+      const list = result.plugins
+      return Array.isArray(list) ? (list as PluginMeta[]) : []
+    },
+  })
+
+  const plugins = pluginsResource.data ?? []
+
+  /**
+   * 挂载时的三条读取**并行**。
+   *
+   * 原来是 `await` 串起来的：`status`+`plugins` 之后又 `await refreshSetup()`，
+   * 而账号面板要等 `plugins` 才知道自己是谁。于是「进配置页」的最坏路径是
+   * 四段串行等待。三者互不依赖，并行发出去就是**一段**等待。
+   */
+  useEffect(() => {
+    let cancelled = false
     void (async () => {
-      const [statusResponse, pluginsResponse] = await Promise.all([
-        api('/api/v1/cpa/status'),
-        api('/api/v1/cpa/plugins'),
-      ])
-      setStatus(statusResponse as StatusInfo)
-      const list = Array.isArray(pluginsResponse.plugins)
-        ? (pluginsResponse.plugins as PluginMeta[])
-        : []
-      setPlugins(list)
-      if (list.length > 0 && !list.some((p) => p.id === 'workbuddy')) {
-        setActive(list[0]?.id ?? 'workbuddy')
-      }
-      await refreshSetup()
+      const statusResponse = await api('/api/v1/cpa/status')
+      if (!cancelled) setStatus(statusResponse as StatusInfo)
     })()
+    void refreshSetup()
+    return () => {
+      cancelled = true
+    }
   }, [refreshSetup])
+
+  /**
+   * 渠道清单到位后校正默认页签。
+   *
+   * 依赖 `pluginsResource.data` 而不是 `plugins`：`plugins` 每次渲染都是新
+   * 数组（`?? []`），放进依赖会把这个 effect 变成每帧都跑。
+   */
+  useEffect(() => {
+    const list = pluginsResource.data
+    if (list === undefined || list.length === 0) return
+    // `active` 在依赖里：用陈旧的闭包会导致「点完页签又被拉回去」
+    if (!list.some((p) => p.id === active)) setActive(list[0]?.id ?? 'workbuddy')
+  }, [pluginsResource.data, active])
 
   const start = async (): Promise<void> => {
     const result = await api('/api/v1/cpa/start', { method: 'POST' })
@@ -128,14 +157,15 @@ export function Panel(props: PanelProps): ReactNode {
   const port = String(status?.port)
   /** 环境准备进度那一行（拿不到就为空串，退回只显示通用文案）。 */
   const setupProgress = progressLine(setup?.progress, t)
+  const missing = Array.isArray(setup?.missing) ? (setup?.missing ?? []) : []
 
   return (
-    <div className="cpa-wrap">
+    <div className={css.wrap}>
       {status !== null && (
-        <div className="cpa-status">
+        <div className={css.status}>
           {/* 官方状态点：done=绿、error=红，语义比自绘圆点更准 */}
           <StateDot state={status.running === true ? 'done' : 'error'} />
-          <span>
+          <span className={css.statusText}>
             {(status.running === true ? t('running') : t('stopped')) + ' · 127.0.0.1:' + port}
           </span>
           {status.running !== true && (
@@ -153,7 +183,7 @@ export function Panel(props: PanelProps): ReactNode {
            */}
           {status.running === true && (
             <a
-              className="cpa-link"
+              className={css.link}
               href={'http://127.0.0.1:' + port + '/management.html'}
               target="_blank"
               rel="noreferrer noopener"
@@ -170,20 +200,17 @@ export function Panel(props: PanelProps): ReactNode {
        *
        * 只在**托管目录缺东西**时出现 —— 用户已经自己装好 CPA 的话这块完全不渲染，
        * 不打扰。
-       *
-       * 为什么要它：别人装完这个插件时，机器上既没有 CPA 也没有渠道插件，光有
-       * 管理界面没法用。这里给一条「点一下就有」的路。
        */}
       {setup !== null && setup.ok !== true && (
-        <div className="cpa-setup">
-          <div className="cpa-setup-title">{t('setupTitle')}</div>
-          <div className="cpa-hint">{t('setupIntro')}</div>
+        <div className={css.setup}>
+          <div className={css.setupTitle}>{t('setupTitle')}</div>
+          <div className={css.hint}>{t('setupIntro')}</div>
 
-          {Array.isArray(setup.missing) && setup.missing.length > 0 && (
-            <div className="cpa-hint">
+          {missing.length > 0 && (
+            <div className={css.hint}>
               {t('setupMissing') +
                 '：' +
-                setup.missing
+                missing
                   .map((k: string) =>
                     k === 'cpa'
                       ? t('setupCpa')
@@ -196,19 +223,19 @@ export function Panel(props: PanelProps): ReactNode {
           )}
 
           {setup.phase === 'working' && (
-            <div className="cpa-hint">
+            <div className={css.hint}>
               {t('setupWorking')}
               {/* 有具体进度就附在后面 */}
-              {setupProgress !== '' && <div className="cpa-hint">{setupProgress}</div>}
+              {setupProgress !== '' && <div className={css.hint}>{setupProgress}</div>}
             </div>
           )}
           {setup.phase === 'error' && (
-            <div className="cpa-hint cpa-err">
+            <div className={css.hint + ' ' + css.error}>
               {t('setupFailed') + '：' + String(setup.error ?? '')}
             </div>
           )}
           {setup.phase !== 'working' && setup.phase !== 'error' && (
-            <div className="cpa-setup-actions">
+            <div className={css.setupActions}>
               <Button variant="primary" size="sm" onClick={() => void runSetup()}>
                 {t('setupRun')}
               </Button>
@@ -218,44 +245,43 @@ export function Panel(props: PanelProps): ReactNode {
             </div>
           )}
 
-          <div className="cpa-hint">{t('setupNote')}</div>
+          <div className={css.hint}>{t('setupNote')}</div>
         </div>
       )}
 
-      <div className="cpa-tabs">
-        {plugins.map((plugin) => (
-          // Pill 自带 active 视觉（选中态），比自绘下划线省事且一致
-          <Pill
-            key={plugin.id}
-            active={plugin.id === active}
-            onClick={() => {
-              setActive(plugin.id)
-            }}
-          >
-            {plugin.label}
-          </Pill>
-        ))}
-      </div>
-
-      {activeMeta === undefined ? (
-        <div className="cpa-empty">{t('loading')}</div>
-      ) : (
-        <PluginPanel
-          key={activeMeta.id}
-          plugin={activeMeta.id}
-          meta={activeMeta}
-          t={t}
-          primitives={primitives}
-          React={React}
-          // 上报账号数据给父级
-          onAccounts={setPluginState}
+      {/*
+       * 渠道页签。
+       *
+       * 用官方 `SegmentedControl` 而不是一排 `Pill`：页签要能左右键移动、
+       * 要有「tablist」语义、要跟随主题的选中态。自绘的 Pill 排只能点，
+       * 键盘用户拿不到。
+       */}
+      {plugins.length > 0 && (
+        <SegmentedControl
+          id="cpa-panel-channel"
+          value={active}
+          options={plugins.map((p) => ({ value: p.id, label: p.label }))}
+          onChange={setActive}
+          label={t('tab')}
         />
       )}
 
-      {/* 路由区：跟随当前渠道（每个渠道有各自的账号池） */}
-      {activeMeta !== undefined && (
-        <RoutingSection key={'routing-' + activeMeta.id} t={t} React={React} />
+      {pluginsResource.loading && <div className={css.blank}>{t('loading')}</div>}
+
+      {activeMeta === undefined && !pluginsResource.loading && (
+        <div className={css.blank}>{t('loading')}</div>
       )}
+
+      {/*
+       * 渠道面板用 `key` 强制重挂：切渠道时上一份渠道的状态不该渗进来。
+       * 账号数据本身在 `api.ts` 的共享缓存里，所以重挂不会丢数据。
+       */}
+      {activeMeta !== undefined && (
+        <PluginPanel key={activeMeta.id} plugin={activeMeta.id} meta={activeMeta} t={t} />
+      )}
+
+      {/* 路由区：跟随当前渠道（每个渠道有各自的账号池） */}
+      {activeMeta !== undefined && <RoutingSection key={'routing-' + activeMeta.id} t={t} />}
     </div>
   )
 }

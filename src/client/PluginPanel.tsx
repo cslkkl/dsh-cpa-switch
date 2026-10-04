@@ -5,10 +5,22 @@
  */
 
 import type { ReactNode } from 'react'
-import { act, api, authCancel, authStatus, fmt, startAuth } from './api.ts'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  act,
+  authCancel,
+  authStatus,
+  fmt,
+  invalidateReads,
+  setAutoCheckin,
+  startAuth,
+} from './api.ts'
 import { AccountCard } from './AccountCard.tsx'
-import type { Account, Capabilities, Primitives, ReactRuntime } from './AccountCard.tsx'
+import type { Account, Capabilities } from './AccountCard.tsx'
+import { useAsyncResource } from './use-async-resource.ts'
 import type { Translate } from './locales.ts'
+import css from './panel.module.css'
 
 /** 宿主 `/plugins` 上报的一个渠道。 */
 export interface PluginMeta {
@@ -18,24 +30,13 @@ export interface PluginMeta {
   readonly capabilities: Capabilities
 }
 
-/** Toast 状态。 */
-interface Toast {
+/** Toast 状态。`key` 让同一个文案连着报两次也会重新播放。 */
+interface ToastState {
   readonly text: string
   readonly kind: 'ok' | 'err'
-  readonly detail?: string | undefined
+  /** 递增序号：让重播成为可能（见上）。 */
+  readonly key: number
 }
-
-/** 账号列表加载后的状态。 */
-type PanelState =
-  | { readonly phase: 'loading' }
-  | { readonly phase: 'error'; readonly error: string }
-  | {
-      readonly phase: 'ready'
-      readonly accounts: readonly Account[]
-      readonly remain: number
-      readonly used: number
-      readonly size: number
-    }
 
 /**
  * 添加账号的弹窗状态。
@@ -53,14 +54,13 @@ type LoginState =
   | { readonly phase: 'wait'; readonly url: string; readonly state: string }
   | { readonly phase: 'error'; readonly error: string }
 
-/** 宿主 `GET /setup` 的返回。 */
-interface SetupInfo {
-  readonly ok?: boolean
-  readonly phase?: string
-  readonly error?: string
-  readonly missing?: readonly string[]
-  readonly running?: boolean
-  readonly progress?: unknown
+/** 宿主 `/accounts` 里本插件要用的部分。 */
+interface AccountsPayload {
+  readonly accounts: readonly Account[]
+  /** 顶层 `checkin_auto` —— 与 `/auto-checkin` 是同一个响应同一个字段。 */
+  readonly autoCheckin?: boolean
+  readonly capabilities: Capabilities
+  readonly unit: 'credits' | 'tokens'
 }
 
 /** `PluginPanel` 的入参。 */
@@ -68,9 +68,6 @@ export interface PluginPanelProps {
   readonly plugin: string
   readonly meta: PluginMeta
   readonly t: Translate
-  readonly primitives: Primitives
-  readonly React: ReactRuntime
-  readonly onAccounts: (value: { accounts: readonly Account[] }) => void
 }
 
 /**
@@ -114,18 +111,45 @@ export function progressLine(progress: unknown, t: Translate): string {
 
 /** 一个渠道的面板。 */
 export function PluginPanel(props: PluginPanelProps): ReactNode {
-  const { plugin, meta, t, primitives, React } = props
-  const { Button, Switch } = primitives
+  const { plugin, meta, t } = props
   const capabilities = meta.capabilities
 
-  const [state, setState] = React.useState<PanelState>({ phase: 'loading' })
-  const [auto, setAuto] = React.useState<boolean | null>(null)
-  const [toast, setToast] = React.useState<Toast | null>(null)
-  const [busy, setBusy] = React.useState(false)
-  const [login, setLogin] = React.useState<LoginState>(null)
+  const [toast, setToast] = useState<ToastState | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [login, setLogin] = useState<LoginState>(null)
+  const [autoOverride, setAutoOverride] = useState<boolean | null>(null)
+  /** toast 自增序号。见 {@link ToastState}。 */
+  const toastSeq = useRef(0)
+
+  /**
+   * 账号 + 余额。
+   *
+   * 走共享缓存 + 陈旧重验：切回一个看过的渠道立刻有内容，
+   * 而不是每次都先清空再等。`force` 只在用户主动点刷新时传。
+   */
+  const accountsResource = useAsyncResource<AccountsPayload>({
+    key: 'accounts:' + plugin,
+    path: '/api/v1/cpa/accounts?plugin=' + encodeURIComponent(plugin),
+    select: (result) => {
+      const data = result.data as { accounts?: unknown; autoCheckin?: unknown } | undefined
+      if (data === undefined || typeof data !== 'object') return undefined
+      return {
+        accounts: Array.isArray(data.accounts) ? (data.accounts as Account[]) : [],
+        autoCheckin: data.autoCheckin === true,
+        capabilities,
+        unit: meta.unit,
+      }
+    },
+  })
+
+  const accounts = accountsResource.data?.accounts ?? []
+  /** 用户刚切过开关就以它为准，否则用宿主读到的值。 */
+  const auto = autoOverride ?? accountsResource.data?.autoCheckin ?? false
+
+  const reload = accountsResource.reload
 
   /** 起一次登录。 */
-  const startLogin = React.useCallback(async () => {
+  const startLogin = useCallback(async (): Promise<void> => {
     setLogin({ phase: 'starting' })
     const result = await startAuth(plugin)
     if (!result.ok) {
@@ -142,62 +166,26 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   }, [plugin])
 
   /** 关闭弹窗时顺手取消 CPA 侧的会话，避免留下悬挂状态。 */
-  const closeLogin = React.useCallback(async () => {
-    if (login !== null && 'state' in login && typeof login.state === 'string') {
-      await authCancel(login.state)
-    }
-    setLogin(null)
-  }, [login])
-
-  const load = React.useCallback(async () => {
-    setState({ phase: 'loading' })
-    const accountsResponse = await api('/api/v1/cpa/accounts?plugin=' + encodeURIComponent(plugin))
-
-    if (capabilities.autoCheckin) {
-      const autoResponse = await api(
-        '/api/v1/cpa/auto-checkin?plugin=' + encodeURIComponent(plugin),
-      )
-      setAuto(autoResponse.enabled === true)
-    } else {
-      setAuto(null)
-    }
-
-    if (!accountsResponse.ok) {
-      setState({ phase: 'error', error: String(accountsResponse.error ?? 'unknown') })
-      return
-    }
-
-    const data = accountsResponse.data as { accounts?: Account[] } | undefined
-    const accounts = data?.accounts ?? []
-    let remain = 0
-    let used = 0
-    let size = 0
-    for (const account of accounts) {
-      if (account.credits === null) continue
-      remain += Number(account.credits.remain ?? 0)
-      used += Number(account.credits.used ?? 0)
-      size += Number(account.credits.size ?? 0)
-    }
-    setState({ phase: 'ready', accounts, remain, used, size })
-    // 上报给父级，供「调度」区展示（避免再拉一次接口）
-    props.onAccounts({ accounts })
-  }, [plugin, capabilities.autoCheckin])
-
-  React.useEffect(() => {
-    void load()
-  }, [load])
+  const closeLogin = useCallback(async (): Promise<void> => {
+    setLogin((current) => {
+      if (current !== null && 'state' in current && typeof current.state === 'string') {
+        void authCancel(current.state)
+      }
+      return null
+    })
+  }, [])
 
   /**
    * 轮询登录状态。
    *
-   * ⚠️ 必须放在 `load` 定义**之后** —— 依赖数组里引用了它。放前面会触发
-   * `Cannot access 'load' before initialization`：const 的暂时性死区，是
+   * ⚠️ 必须放在 `reload` 定义**之后** —— 依赖数组里引用了它。放前面会触发
+   * `Cannot access 'reload' before initialization`：const 的暂时性死区，是
    * **运行时报错**而不是编译期，很容易漏掉。
    *
    * CPA 在用户完成授权后会自动写好认证文件，所以这里只要等到状态不再是
    * `wait` 就重新拉账号列表。
    */
-  React.useEffect(() => {
+  useEffect(() => {
     if (login === null || login.phase !== 'wait') return undefined
     const stateValue = login.state
     const timer = setInterval(() => {
@@ -207,126 +195,167 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         if (result.status === 'wait') return
         clearInterval(timer)
         setLogin(null)
-        await load()
+        // 授权刚落地，缓存里那份一定是旧的：强制重取
+        invalidateReads('accounts:' + plugin)
+        await reload({ force: true })
       })()
     }, 2500)
     return () => {
       clearInterval(timer)
     }
-  }, [login, load])
+  }, [login, plugin, reload])
 
-  const runAll = async (kind: string): Promise<void> => {
-    setBusy(true)
-    try {
-      const result = await act(plugin, kind)
-      setToast({
-        text: t(kind as 'checkin') + (result.ok ? ' ✓' : ' ✗'),
-        kind: result.ok ? 'ok' : 'err',
-        detail: result.error,
-      })
-      if (result.ok) await load()
-    } finally {
-      setBusy(false)
-    }
-  }
+  /**
+   * 报一条结果。
+   *
+   * 自增序号是给 Toast 的 `key`：文案相同的两次连着报（比如连点两次签到），
+   * 没有它 React 会认为是同一次渲染，`Toast` 不会重新播放。
+   */
+  const report = useCallback((text: string, kind: 'ok' | 'err', detail?: string): void => {
+    toastSeq.current += 1
+    setToast({
+      text: detail === undefined || detail === '' ? text : `${text}（${detail}）`,
+      kind,
+      key: toastSeq.current,
+    })
+  }, [])
 
-  const toggleAuto = async (next: boolean): Promise<void> => {
-    setBusy(true)
-    try {
-      const result = await api('/api/v1/cpa/auto-checkin?plugin=' + encodeURIComponent(plugin), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ enabled: next }),
-      })
-      if (result.ok) {
-        setAuto(result.enabled === true)
-        setToast({ text: t('autoCheckin') + (result.enabled === true ? ' ✓' : ' ✗'), kind: 'ok' })
-      } else {
-        setToast({ text: t('autoCheckin') + ' ✗', kind: 'err', detail: result.error })
+  const runAll = useCallback(
+    async (kind: string): Promise<void> => {
+      setBusy(true)
+      try {
+        const result = await act(plugin, kind)
+        report(
+          t(kind as 'checkin') + (result.ok ? ' ✓' : ' ✗'),
+          result.ok ? 'ok' : 'err',
+          typeof result.error === 'string' ? result.error : undefined,
+        )
+        if (result.ok) await reload({ force: true })
+      } finally {
+        setBusy(false)
       }
-    } finally {
-      setBusy(false)
-    }
-  }
+    },
+    [plugin, reload, report, t],
+  )
 
-  const showSummary =
-    state.phase === 'ready' &&
-    capabilities.credits &&
-    state.accounts.some((a) => a.credits !== null)
+  const toggleAuto = useCallback(
+    async (next: boolean): Promise<void> => {
+      setBusy(true)
+      // 立刻反映用户的意图：开关的手感不能等一个往返
+      setAutoOverride(next)
+      const result = await setAutoCheckin(plugin, next)
+      setBusy(false)
+      if (!result.ok) {
+        // 写失败就回到宿主读到的真值，别让界面撒谎
+        setAutoOverride(null)
+        report(t('autoCheckin') + ' ✗', 'err', String(result.error ?? ''))
+        return
+      }
+      setAutoOverride(null)
+      report(t('autoCheckin') + ' ✓', 'ok')
+    },
+    [plugin, report, t],
+  )
+
+  const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
+  const totals = accounts.reduce(
+    (acc, account) => {
+      if (account.credits === null) return acc
+      acc.remain += Number(account.credits.remain ?? 0)
+      acc.used += Number(account.credits.used ?? 0)
+      acc.size += Number(account.credits.size ?? 0)
+      return acc
+    },
+    { remain: 0, used: 0, size: 0 },
+  )
 
   return (
     <>
-      {showSummary && state.phase === 'ready' && (
-        <div className="cpa-sum">
-          <div className="cpa-sumc">
-            <span className="cpa-lbl">{t('totalRemain')}</span>
-            <span className="cpa-sumv">{fmt(state.remain)}</span>
+      {/*
+       * 汇总。`revalidating` 只在角落留一行提示 —— **不清空下面的网格**。
+       * 旧实现是先整块清成「读取中…」再拉，用户看到的是页面消失了一下，
+       * 那比多等 200ms 难受得多。
+       */}
+      {showSummary && (
+        <div className={css.summary}>
+          <div className={css.summaryCell}>
+            <span className={css.label}>{t('totalRemain')}</span>
+            <span className={css.summaryValue}>{fmt(totals.remain)}</span>
           </div>
-          <div className="cpa-sumc">
-            <span className="cpa-lbl">{t('totalUsed')}</span>
-            <span className="cpa-sumv">{fmt(state.used)}</span>
+          <div className={css.summaryCell}>
+            <span className={css.label}>{t('totalUsed')}</span>
+            <span className={css.summaryValue}>{fmt(totals.used)}</span>
           </div>
-          <div className="cpa-sumc">
-            <span className="cpa-lbl">{t('totalPool')}</span>
-            <span className="cpa-sumv">{fmt(state.size)}</span>
+          <div className={css.summaryCell}>
+            <span className={css.label}>{t('totalPool')}</span>
+            <span className={css.summaryValue}>{fmt(totals.size)}</span>
           </div>
-          <div className="cpa-sumc">
-            <span className="cpa-lbl">单位</span>
-            <span className="cpa-sumv cpa-unit">
+          <div className={css.summaryCell}>
+            <span className={css.label}>单位</span>
+            <span className={css.summaryUnit}>
               {meta.unit === 'tokens' ? t('unitTokens') : t('unitCredits')}
             </span>
           </div>
         </div>
       )}
 
-      {state.phase === 'ready' && (
-        <div className="cpa-toolbar">
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void load()}>
-            {t('refresh')}
+      {/*
+       * 工具栏一直在（不是只有 `ready` 才渲染）：它是这一块的入口，
+       * 加载中禁用即可。加载完又出现一次会造成一次布局跳动。
+       */}
+      <div className={css.toolbar}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || accountsResource.loading}
+          onClick={() => void reload({ force: true })}
+        >
+          {t('refresh')}
+        </Button>
+        {capabilities.checkin && (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={busy || accountsResource.loading}
+            onClick={() => void runAll('checkin')}
+          >
+            {t('checkinAll')}
           </Button>
-          {capabilities.checkin && (
-            <Button
-              variant="primary"
-              size="sm"
+        )}
+        {/* 全部任务：把每个号的成长中心任务跑一遍 */}
+        {capabilities.tasks && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || accountsResource.loading}
+            onClick={() => void runAll('tasks')}
+          >
+            {t('tasksAll')}
+          </Button>
+        )}
+        {/*
+         * 自动签到开关。
+         *
+         * ⚠️ `Switch` 的 `label` 是**无障碍名，不显示在界面上** —— 只给一个裸开关，
+         * 用户根本不知道它管什么。所以要自己配一行可见文字。
+         */}
+        {capabilities.autoCheckin && (
+          <label className={css.switchRow}>
+            <Switch
+              checked={auto}
               disabled={busy}
-              onClick={() => void runAll('checkin')}
-            >
-              {t('checkinAll')}
-            </Button>
-          )}
-          {/* 全部任务：把每个号的成长中心任务跑一遍 */}
-          {capabilities.tasks && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => void runAll('tasks')}
-            >
-              {t('tasksAll')}
-            </Button>
-          )}
-          {/*
-           * 自动签到开关。
-           *
-           * ⚠️ `Switch` 的 `label` 是**无障碍名，不显示在界面上** —— 只给一个裸开关，
-           * 用户根本不知道它管什么。所以要自己配一行可见文字。
-           */}
-          {capabilities.autoCheckin && (
-            <label className="cpa-switch">
-              <Switch
-                checked={auto === true}
-                disabled={busy}
-                label={t('autoCheckin')}
-                title={t('autoCheckinHint')}
-                onChange={(next) => void toggleAuto(next)}
-              />
-              <span className="cpa-switch-text" title={t('autoCheckinHint')}>
-                {t('autoCheckin')}
-              </span>
-            </label>
-          )}
-        </div>
-      )}
+              label={t('autoCheckin')}
+              title={t('autoCheckinHint')}
+              onChange={(next) => void toggleAuto(next)}
+            />
+            <span className={css.switchText} title={t('autoCheckinHint')}>
+              {t('autoCheckin')}
+            </span>
+          </label>
+        )}
+        {/* 重验提示：安静地在末尾加四个字，不动其它任何布局 */}
+        {accountsResource.revalidating && <span className={css.hint}>{t('refreshing')}</span>}
+      </div>
 
       {/*
        * 账号网格 + 「+ 添加账号」卡片。
@@ -334,46 +363,30 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        * 添加卡片**始终**渲染（空列表时它是唯一入口），所以不用「有账号才画网格」
        * 的分支 —— 空列表也画网格，里面只有添加卡片。
        */}
-      {state.phase === 'ready' && (
-        <div className="cpa-grid">
-          {state.accounts.map((account) => (
+      {accountsResource.loading ? (
+        <div className={css.blank}>{t('loading')}</div>
+      ) : (
+        <div className={css.grid}>
+          {accounts.map((account) => (
             <AccountCard
-              key={account.authIndex}
+              key={account.authIndex ?? account.authId}
               account={account}
               plugin={plugin}
               capabilities={capabilities}
               t={t}
-              primitives={primitives}
-              React={React}
-              onToast={(text, kind, detail) => {
-                setToast({ text, kind, detail })
-              }}
-              onReload={load}
+              onToast={report}
+              onReload={() => reload({ force: true })}
             />
           ))}
-          <button
-            type="button"
-            className="cpa-addcard"
-            onClick={() => {
-              setLogin({ phase: 'idle' })
-            }}
-          >
-            <span className="cpa-addplus">+</span>
+          <button type="button" className={css.addCard} onClick={() => setLogin({ phase: 'idle' })}>
+            <span className={css.addPlus}>+</span>
             <span>{t('addAccount')}</span>
           </button>
         </div>
       )}
 
-      {state.phase === 'loading' && <div className="cpa-empty">{t('loading')}</div>}
-
-      {state.phase === 'error' && (
-        <div className="cpa-empty">{t('loadFailed') + '：' + state.error}</div>
-      )}
-
-      {toast !== null && (
-        <div className={'cpa-toast ' + toast.kind}>
-          {toast.text + (toast.detail === undefined ? '' : '（' + toast.detail + '）')}
-        </div>
+      {accountsResource.error !== undefined && (
+        <div className={css.blank}>{t('loadFailed') + '：' + accountsResource.error}</div>
       )}
 
       {/*
@@ -381,48 +394,68 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        *
        * 流程：本地起一次 CPA 登录会话 → 打开上游授权页 → 轮询直到完成。
        * **不需要用户手动粘贴回调 URL** —— 本机模式下 CPA 自己收回调并保存凭据。
+       *
+       * 用官方 `Modal`：它自带遮罩、Escape、焦点归还与 body portal。
+       * 自绘的固定定位遮罩没有焦点管理，键盘用户会被困在里面。
        */}
-      {login !== null && (
-        <div className="cpa-overlay">
-          <div className="cpa-modal">
-            <div className="cpa-modal-title">{t('addAccount') + ' · ' + meta.label}</div>
-
-            {login.phase === 'wait' && (
-              <>
-                <div className="cpa-hint">{t('loginHint')}</div>
-                <a
-                  className="cpa-loginlink"
-                  href={login.url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  {login.url}
-                </a>
-                <div className="cpa-hint">{t('loginWaiting')}</div>
-              </>
-            )}
-            {login.phase === 'error' && (
-              <div className="cpa-hint">{t('loginFailed') + '：' + login.error}</div>
-            )}
-            {(login.phase === 'idle' || login.phase === 'starting') && (
-              <div className="cpa-hint">{t('loginIntro')}</div>
-            )}
-
-            <div className="cpa-modal-actions">
-              <Button variant="ghost" size="sm" onClick={() => void closeLogin()}>
-                {t('cancel')}
+      <Modal
+        open={login !== null}
+        onClose={() => void closeLogin()}
+        title={t('addAccount') + ' · ' + meta.label}
+        closeLabel={t('cancel')}
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => void closeLogin()}>
+              {t('cancel')}
+            </Button>
+            {(login?.phase === 'idle' || login?.phase === 'error') && (
+              <Button variant="primary" size="sm" onClick={() => void startLogin()}>
+                {t('startLogin')}
               </Button>
-              {(login.phase === 'idle' || login.phase === 'error') && (
-                <Button variant="primary" size="sm" onClick={() => void startLogin()}>
-                  {t('startLogin')}
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
+            )}
+          </>
+        }
+      >
+        {login?.phase === 'wait' && (
+          <>
+            <div className={css.hint}>{t('loginHint')}</div>
+            <a
+              className={css.hint}
+              href={login.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              style={{ wordBreak: 'break-all' }}
+            >
+              {login.url}
+            </a>
+            <div className={css.hint}>{t('loginWaiting')}</div>
+          </>
+        )}
+        {login?.phase === 'error' && (
+          <div className={css.hint + ' ' + css.error}>{t('loginFailed') + '：' + login.error}</div>
+        )}
+        {(login?.phase === 'idle' || login?.phase === 'starting') && (
+          <div className={css.hint}>{t('loginIntro')}</div>
+        )}
+      </Modal>
+
+      {/*
+       * 官方 Toast：自带传送门、淡出与 `onDone` 回调。
+       * 旧实现是一个常驻的 div —— 它不会自己消失，于是「签到成功 ✓」会一直
+       * 挂在面板上，第二次签到时用户看到的还是上一次那句话。
+       */}
+      {toast !== null && (
+        <Toast
+          key={toast.key}
+          text={toast.text}
+          // `exactOptionalPropertyTypes`：`tone` 不接受显式 undefined，
+          // 所以只在成功时给这个键
+          {...(toast.kind === 'ok' ? { tone: 'success' as const } : {})}
+          onDone={() => {
+            setToast(null)
+          }}
+        />
       )}
     </>
   )
 }
-
-export type { SetupInfo }

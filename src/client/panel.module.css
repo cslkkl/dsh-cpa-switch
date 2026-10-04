@@ -1,0 +1,335 @@
+/* The CPA panel's own layout.
+ *
+ * Every value here is either a `--dsw-*` token or a number copied from the
+ * host's own settings surfaces, so the page reads as part of Plugins rather than
+ * as a plugin that styled itself. Sources for the copied numbers:
+ *
+ * - typography: `ui-primitives/lib/settings-form/fields.module.css`
+ *   (label 13/1.5 w500 primary, hint 12/1.5 tertiary, invalid 12/1.5 error).
+ * - radii and focus rings: `--dsw-radius-*`, `--dsw-focus-ring-*`.
+ *
+ * Two conventions worth stating, because breaking them is invisible:
+ *   1. **neutral solid borders are 0.5px**; only state colours keep 1px.
+ *   2. **no colour literal** — the palette is `--dsw-alias-*`, so light and dark
+ *      follow from the tokens instead of from a second set of rules.
+ *
+ * What is NOT here: buttons, switches, tags, state dots, tabs, modal, toast.
+ * Those are primitives (`@deepseek-ai/dsh-client-ui-primitives`); redrawing them
+ * means redoing focus rings, disabled states and theme parity by hand.
+ */
+
+/* ---- The panel --------------------------------------------------------- */
+
+/* The plugin's own rhythm. 12px is the host's field rhythm — the same one the
+   official config cards space their blocks with. */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ---- Status bar -------------------------------------------------------- */
+
+/* One line, tertiary: this is a readout, not a heading. `margin-left: auto`
+   pushes the console link to the far end so the row has a clear anchor. */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.statusText {
+  font-variant-numeric: tabular-nums;
+}
+
+.link {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  text-decoration: none;
+  border-bottom: 1px dashed currentColor;
+}
+
+.link:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ---- Environment setup block ------------------------------------------- */
+
+/* Read as a distinct region rather than another account card: a 3px leading
+   edge is the host's own way of saying "this is a notice, not data". */
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-left: 3px solid var(--dsw-alias-label-secondary);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.setupTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.setupActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+/* ---- Totals ------------------------------------------------------------ */
+
+/* Four equal tiles. `flex: 1` + `min-width` lets them wrap to two rows on a
+   narrow panel instead of squeezing the numbers into unreadable slivers. */
+.summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.summaryCell {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+}
+
+.summaryValue {
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The unit rides under the number it qualifies, so it is tertiary and small
+   rather than competing with the figure. */
+.summaryUnit {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ---- Toolbar ----------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The auto-checkin switch is a settings row, not a button: its label sits to
+   the left of the control and the pair is pushed to the far end so it reads as
+   a different kind of thing from the action buttons. */
+.switchRow {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.switchText {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* ---- Account grid ------------------------------------------------------ */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+/* The add-card is an affordance, so it gets a dashed seat rather than the solid
+   border a real account has: the difference is the only cue that this one is
+   empty. `min-height` matches `.card` so a lone add-card keeps the row's rhythm. */
+.addCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 118px;
+  padding: 12px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.addCard:hover {
+  border-color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
+}
+
+.addPlus {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* ---- Account card ------------------------------------------------------ */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+}
+
+/* The selected account is the one the user picked, so it gets the host's
+   success colour as a ring. `inset` keeps the 1px from eating the layout. */
+.selected {
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-state-success-primary);
+  border-color: transparent;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* `min-width: 0` + ellipsis: a long nickname truncates instead of pushing the
+   tags in its row off the card. Without it, flex items refuse to shrink below
+   their content and the tags wrap onto a second line. */
+.nickname {
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.numbers {
+  display: flex;
+  gap: 16px;
+}
+
+.number {
+  display: flex;
+  flex-direction: column;
+}
+
+.meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--dsw-alias-border-l2);
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+/* Card sub-text: the tertiary 12px tier, with tabular figures so a column of
+   numbers lines up between cards. */
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+/* ---- Shared small parts ------------------------------------------------ */
+
+/* Label above a figure. 12px is the host's hint tier — a label is a hint that
+   happens to sit above something. */
+.label {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.error {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.muted {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Loading and empty share one block: both are "nothing to show yet", and
+   centring them at the same height keeps the panel from jumping when data
+   arrives. */
+.blank {
+  padding: 24px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ---- Read-only sections ------------------------------------------------ */
+
+/* A titled block below the grid. The top rule does the separating so the
+   section title is not carrying a border of its own. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---- Error boundary ---------------------------------------------------- */
+
+.crashed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-left: 3px solid var(--dsw-alias-state-error-primary);
+  border-radius: var(--dsw-radius-md);
+}
