@@ -14,6 +14,10 @@
     <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DeepSeek%20Harness-Plugin-4176E6?style=flat" alt="DeepSeek Harness Plugin"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT 许可证"></a>
   </p>
+
+  <p>
+    <strong><a href="README.md">简体中文</a></strong> · <a href="README_en.md">English</a>
+  </p>
 </div>
 
 看余额、签到、跑任务、切账号 —— 不用再开 CPA 的网页控制台。
@@ -135,71 +139,9 @@ profile 的 `dependencies` 里保留同名条目是**已安装声明**，`dsh.pr
   只有禁用是"根本不参与"。面板的「选择」做的就是这件事。
 - **被限流的号看不出异常**：上游有模型级限流（code 6004），被限的号 CPA 仍显示
   `status: active`，只有实际发请求才暴露。面板显示"启用"不等于"这个号现在能用"。
-- **host 半端改动需要重新构建并重启 DSH**：`pnpm build` 后重启
-  （ESM 按 URL 缓存，界面重挂载不够）；浏览器半边构建后刷新页面即可。
-
-## 文件
-
-源码在 `src/`（TypeScript），构建产物在 `lib/`。**逐模块手册见 [src/README.md](src/README.md)** ——
-下面只列使用者需要知道的几个入口。
-
-| 文件                  | 作用                                                                |
-| --------------------- | ------------------------------------------------------------------- |
-| `src/index.ts`        | 宿主半端入口：生命周期、HTTP 路由、持有密钥                         |
-| `src/adapters.ts`     | 各渠道的接口差异收敛层                                              |
-| `src/setup/`          | 环境准备：下载 CPA 本体与渠道插件（校验 sha256 后解压）             |
-| `src/net.ts`          | 网络层：带代理的 HTTP 客户端（内置 `fetch` 忽略 `HTTPS_PROXY`）     |
-| `src/client/`         | 浏览器半端：面板 UI（构建成 CJS bundle）                            |
-| `src/model-routes.ts` | 模型路由运行时注册（volatile 通道推给 `llm-pi-ai`）                 |
-| `cordis.patch.yml`    | 把本插件插入 profile 的 Loader 行（模型路由不在这里 —— 运行时注册） |
-| `locale/*.json`       | 插件卡片标题与描述（宿主直读）                                      |
-
-## 变更影响路由
-
-| 改动                         | 必须同步                                                           |
-| ---------------------------- | ------------------------------------------------------------------ |
-| 任何源码改动                 | `pnpm build` —— 宿主加载的是 `lib/`，不是 `src/`                   |
-| 路由增删改                   | 同步下面的路由表；新增走 `src/routes.ts` 的 `RouteSpec`            |
-| `src/index.ts` 一类宿主半边  | **重新构建 + 重启 DSH**（ESM 缓存，界面重挂载不够）                |
-| `src/client/` 一类浏览器半边 | 重新构建 + 刷新页面即可                                            |
-| 四渠道差异                   | 本文件的渠道表 + [渠道能力矩阵](README.md#支持四个渠道)            |
-| 配置项增删                   | 本文件配置项列表 + `src/config.ts`                                 |
-| 新增踩坑                     | [AGENTS.md](AGENTS.md) 活跃坑                                      |
-| 契约 / 对外行为              | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) + `package.json` 版本 |
-
-## 内部 HTTP 路由
-
-浏览器半端只调这些路由，**不带任何密钥**：
-
-| 路由                           | 方法     | 作用                                                                |
-| ------------------------------ | -------- | ------------------------------------------------------------------- |
-| `/api/v1/cpa/setup`            | GET/POST | 环境状态 / 一键下载 CPA 与渠道插件                                  |
-| `/api/v1/cpa/status`           | GET      | CPA 运行状态、端口、是否已配密钥                                    |
-| `/api/v1/cpa/plugins`          | GET      | 已装渠道列表与能力                                                  |
-| `/api/v1/cpa/accounts?plugin=` | GET      | 账号 + 余额（`&fresh=1` 跳过缓存）                                  |
-| `/api/v1/cpa/models?plugin=`   | GET      | 该渠道可选模型                                                      |
-| `/api/v1/cpa/school`           | GET      | 成长中心（任务 / 奖励）信息                                         |
-| `/api/v1/cpa/action`           | POST     | `{plugin, kind, authIndex}` → 签到 / 任务                           |
-| `/api/v1/cpa/account-select`   | POST     | `{plugin, authIndex}` → **选择账号**（启用它，同渠道其余自动禁用）  |
-| `/api/v1/cpa/account-enabled`  | POST     | `{plugin, authIndex, enabled}` → 单个启用 / 禁用                    |
-| `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                     |
-| `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`） |
-| `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                        |
-| `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                    |
-| `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                              |
-| `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                 |
-| `/api/v1/cpa/start`            | POST     | 手动拉起 CPA                                                        |
-
-> 上表是路由的**可读索引**；权威事实源是 `src/index.ts` 的 `buildRoutes()`。
-
-**改路由前必读**：同一 `path` 只能注册一次（多方法合并在一个条目里）、
-方法只有 `GET`/`HEAD`/`POST`。违反任一条会让**所有**路由失效。
-`src/routes.ts` 会归一化兜底，但新增路由仍要走 `RouteSpec`。
-
-**为什么 `routing` 不再返回各渠道 `scheduler_mode`**：它曾顺带循环读四个
-`/config`，而界面从不消费那份数据 —— 每次打开面板白付 4 次 CPA 往返。
-`scheduler_mode` 的影响见[架构 §3](../docs/ARCHITECTURE.md#3-为什么这么分)；
-要归一化它请用显式的 `POST /scheduler-mode`，别混进读路径。
+- **改了源码要重新构建**：宿主加载的是 `lib/` 而不是 `src/`。
+  `pnpm build` 之后宿主侧还要重启 DSH、浏览器侧刷新页面即可 —— 细节见
+  [AGENTS.md](AGENTS.md) 活跃坑。
 
 ## 文档
 
@@ -208,10 +150,11 @@ profile 的 `dependencies` 里保留同名条目是**已安装声明**，`dsh.pr
 | 想看什么                                       | 去哪                                         |
 | ---------------------------------------------- | -------------------------------------------- |
 | 为什么这样设计（不变决策、契约边界、防错清单） | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 下一步做什么、当前卡在哪                       | [docs/PLAN.md](docs/PLAN.md)                 |
-| 宿主半端各模块                                 | [src/README.md](src/README.md)               |
-| 浏览器半端                                     | [src/client/README.md](src/client/README.md) |
+| 宿主半边各模块、内部 HTTP 路由表               | [src/README.md](src/README.md)               |
+| 浏览器半边                                     | [src/client/README.md](src/client/README.md) |
 | 环境准备                                       | [src/setup/README.md](src/setup/README.md)   |
+| 测试覆盖与运行                                 | [tests/README.md](tests/README.md)           |
+| 下一步做什么、当前卡在哪                       | [docs/PLAN.md](docs/PLAN.md)                 |
 
 ## 开发
 
@@ -228,6 +171,28 @@ pnpm check        # typecheck + lint + format + build + verify:artifacts + test
 
 改动前建议先读 [AGENTS.md](AGENTS.md) 的「全局规则」与「变更影响路由」；
 它由 agent 自动注入，也是这个仓的维护索引。
+
+## 致谢
+
+本项目站在以下开源项目之上，特此致谢：
+
+| 部分                                                                                                                                      | 参考来源                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **工程骨架与插件机制**：tsdown 双目标构建、双 tsconfig、vitest / eslint / prettier、Cordis 集成、配置 schema、React 面板 UI、生命周期写法 | [dsh-workbuddy-bridge](https://github.com/zlZayn/dsh-workbuddy-bridge)                                                                                                                    |
+| **被管理宿主**：多渠道中转 ProxyAPI、账号 / 签到 / 任务 / 路由管理 API（上游代码）                                                        | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)                                                                                                                               |
+| **渠道协议**：WorkBuddy / Trae / Qoder / ZCode 渠道插件与签到、任务、余额协议                                                             | [cpa-multi-plugins](https://github.com/mmqz/cpa-multi-plugins) · [workbuddy-bridge-0.1.2-source](https://github.com/ki11a-Conton/workbuddy-bridge-0.1.2-source)（WorkBuddy 渠道协议参考） |
+| **宿主平台**                                                                                                                              | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)                                                                                                                       |
+
+> CLIProxyAPI 运行时产物发布自 [cslkkl/CLIProxyAPI](https://github.com/cslkkl/CLIProxyAPI)（`release-windows` 工作流，源码取自上游发布 tag）；开发与调研另参考 [zlZayn/CLIProxyAPI](https://github.com/zlZayn/CLIProxyAPI)（`local-autobrowser` 分支）。二者与上游本质同源，仅存放位置与分支不同。
+
+## 免责声明
+
+本项目仅供个人学习与研究使用，与 WorkBuddy / Trae / Qoder / ZCode 等各平台官方无关，非官方产品。
+
+- 使用本项目产生的账号风险、额度变动及其它后果，均由使用者自行承担
+- 请勿用于商业用途
+- 各渠道平台有权随时调整其服务策略，本项目不保证任何功能的持续可用
+- 因使用本项目造成的任何损失，作者不承担任何责任
 
 ## 贡献
 
