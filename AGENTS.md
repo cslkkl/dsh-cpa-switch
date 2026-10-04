@@ -67,7 +67,7 @@ python check-line-endings.py <本仓根> --target lf
 | 测试覆盖与运行               | [tests/README.md](tests/README.md)                            |
 | 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)                      |
 | 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                              |
-| 上游源码本地参考（只读）     | [reference/README.md](reference/README.md)                    |
+| 上游源码本地参考（只读）     | [docs/UPSTREAM-SOURCE.md](docs/UPSTREAM-SOURCE.md)            |
 
 ## 事实来源（只查不抄）
 
