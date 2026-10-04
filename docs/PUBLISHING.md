@@ -1,0 +1,138 @@
+# dsh-cpa-switch — 发布手册
+
+> 读者：执行发布的人 / agent。
+> 本文件只写**发布流程**；为什么这样设计见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+---
+
+## 0. 现状
+
+**发布是手工的**：`npm publish` 由维护者本机执行，尚无自动发布 workflow。
+把它改成 OIDC 自动发布是待办，见根 [AGENTS.md](../AGENTS.md) 的待办区。
+
+---
+
+## 1. 发版前确认
+
+三条都过才发布。
+
+**① 工作树干净、本地与远端一致**
+
+```powershell
+git status --short --branch
+```
+
+有未提交改动先提交；`ahead` 未推送先推送 —— **发布依赖的是远端状态**，本地全绿不等于远端有。
+
+**② 全量检查通过**
+
+```powershell
+pnpm install --frozen-lockfile --config.node-linker=hoisted
+pnpm check
+```
+
+`pnpm check` = typecheck ×2 → lint → format:check → build → 产物断言 → test。
+**产物断言不可跳过**：它验的是「构建成功 ≠ 插件能用」（`inject` 少一个插件挂不上且不报错）。
+
+**③ 版本号已 bump 且产物是重建过的**
+
+版本号住在 [package.json](../package.json)，**这是唯一事实源**。
+
+```powershell
+pnpm version <patch|minor|major> --no-git-tag-version
+pnpm build          # 必须在 bump 之后
+git add -A
+git commit -m "chore: <版本>"
+```
+
+**顺序不能反**：先 build 后 bump，产物里就是旧版本号 ——
+这类错在 npm 上**不可覆盖**，只能发下一个版本。[tests/version.test.ts](../tests/version.test.ts) 守着这条。
+
+`lib/` **不入库**（`.gitignore` 忽略），所以发布包里没有它 —— 但 `npm publish` 会按
+`package.json` 的 `files`（含 `lib/`）打包，那要求**发布前构建过**。
+
+---
+
+## 2. 版本号语义
+
+| 档位      | 什么时候                                 | 例                |
+| --------- | ---------------------------------------- | ----------------- |
+| **patch** | 修缺陷、等价重构，使用者观察不到差别     | `0.2.0` → `0.2.1` |
+| **minor** | 新增能力，或内部结构变化但对外行为不变   | `0.1.2` → `0.2.0` |
+| **major** | 破坏性变更：改路由、改配置键、改对外契约 | `0.x` 阶段从宽    |
+
+**使用者观察不到变化的改动不发版**（纯文档 / 测试 / CI / 注释）—— 搭下一次发布的车，
+不拿版本号制造升级噪音。
+
+---
+
+## 3. 发布
+
+```powershell
+pnpm pack                    # 先看打包清单（dry-run 语义）
+npm publish --access public
+```
+
+`pnpm pack` 的清单必须含：`lib/index.js`、`lib/client.js`、`lib/index.d.ts`、
+`cordis.patch.yml`、`icon.svg`、`locale/*.json`、`README.md`、`LICENSE`。
+**不含** `src/`、`tests/`、`scripts/` —— 那是开发面，进包只会让体积翻倍。
+
+发布后复核：
+
+```powershell
+npm view dsh-cpa-switch version dist-tags
+```
+
+再装一次确认真能用（**真实用户路径**）：
+
+```powershell
+dsh plugin --profile <profile> add dsh-cpa-switch
+```
+
+重启 DSH，确认插件卡片出现、面板在上方、各渠道页签齐全、账号接口返回 200。
+
+---
+
+## 4. 与 DSH 宿主的版本对应
+
+`engines.dsh` 与各 `@deepseek-ai/dsh-*` 的 peer 范围写在 [package.json](../package.json) ——
+**不要在本文件里重抄**，那必然漂。
+
+要确认「声明的范围还罩得住实际在跑的宿主」：
+
+```powershell
+dsh --version
+```
+
+比 `package.json` 的 `engines.dsh` 下限低就说明声明宽了，需要收紧。
+
+---
+
+## 5. 本地开发装法（`link:`）
+
+本机维护者的 profile 走 `link:` 形态：`node_modules/dsh-cpa-switch` 是指向本仓的 symlink。
+
+**代价**：仓库的 `lib/` 必须**先构建过** —— link 直接读它，没 build 就是缺失或旧产物。
+它不入库，所以 clone 之后第一件事是 `pnpm install && pnpm build`。
+
+**收益**：`pnpm build` 完只需重启 DSH（宿主半只在启动时装载一次），不用再拷文件。
+
+**判据**：
+
+- `(Get-Item <profile>/node_modules/dsh-cpa-switch).LinkType` 是 `SymbolicLink`
+- 重启后插件卡片正常出现
+
+---
+
+## 6. 出事之后
+
+| 症状                                  | 先查                                                                |
+| ------------------------------------- | ------------------------------------------------------------------- |
+| 插件卡片不出现                        | profile 的 `dsh.profile.bundles` 里有没有它；`lib/` 建过没有        |
+| 面板空白、无报错                      | `lib/client.js` 里有没有 `exports.inject`（少了插件挂不上且不报错） |
+| 浏览器控制台 `process is not defined` | React 运行时被内联进产物了 —— 查 `tsdown.config.ts` 的 externals    |
+| 接口 401                              | 管理密钥取不到；查 DSH 凭据库里的凭据引用                           |
+| 接口 404                              | 渠道未启用（`config.yaml` 里逐个渠道要 `enabled: true`）            |
+
+排查完把结论写进根 [AGENTS.md](../AGENTS.md) 的「活跃坑」，或按需开一条
+[决策记录](../.agents/notes/)。
