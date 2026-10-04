@@ -141,8 +141,13 @@ package.
   batches after CPA starts, so reading immediately yields an incomplete catalog.
 - **Display name**: `channel · model` (e.g. `WorkBuddy · deepseek-v4.1-flash`); models whose
   attribution is unknown get a `CPA ·` prefix.
-- **Metadata is not guessed**: context window / output limit / modality fall back to the route
-  defaults (262k / 32k / plain text) until a measured source exists.
+- **Same-named models are split per channel**: when one model is served by several channels (say
+  `glm-5.3` on WorkBuddy / Trae / ZCode at once), each channel gets its own entry — **picking a
+  channel means only that channel's accounts are used**, never round-robined across channels.
+  Without this split the panel says WorkBuddy while requests may land on Trae, and upstream
+  prompt-cache hit rate drops to a coin flip.
+- **Context window**: known values are written per channel (e.g. `deepseek-v4.1-flash` = 1M);
+  ones without a measured source fall back to the route defaults (262k / 32k / plain text).
 
 The calling key uses the `CPA_API_KEY` credential reference (prepared automatically at plugin
 startup; see [Security](#security)).

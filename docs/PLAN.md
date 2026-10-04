@@ -80,31 +80,36 @@ use unique aliases/prefixes**）。
 - 斜杠前缀 id 是 CPA 一等公民（`server_test.go` 用 `vendor/gpt-5.6-sol` 实测
   请求会剥到裸名）。
 
-**卡在哪**：别名配置**没生效**。已排除「键名写错」（`oauth-model-alias` 与
-`oauth.model-alias` 两种形式都试过，都 400 `unknown provider`），
-也排除「插件渠道不支持」（v8.0.7 与 v8.0.13 的 `oauth_model_alias.go` 一致，
-都有 `default: return provider`）。**根因未确认**，下一步：
+**上一轮卡在哪（已解决）**：别名配置当时**没生效**。已排除「键名写错」
+（`oauth-model-alias` 与 `oauth.model-alias` 两种形式都试过），
+也排除「插件渠道不支持」（v8.0.7 与 v8.0.13 的 `oauth_model_alias.go` 一致）。
+**根因是「改完配置就立刻测」** —— 本进程不热重载 `config.yaml`，
+重启后同一份配置立刻生效。别名机制本身一直是对的。
 
-- [ ] 重启 CPA 后复验别名是否生效（当前进程改 `config.yaml` **不触发热重载**，
-      日志无 `config successfully reloaded`，见 [UPSTREAM-SOURCE.md](UPSTREAM-SOURCE.md)）
-- [ ] 验证通过后再改 `src/setup/config.ts`：按实测重叠清单生成 `model-alias` 段
-- [ ] 插件侧 `model-routes.ts` 改用别名当 id，展示名保持「渠道 · 模型名」不变
+- [x] 重启 CPA 后复验别名 —— **通过**：`wb/glm-5.3` 进目录、请求 200；
+      禁用该渠道唯一账号后它 400 而裸 id 仍 200 → 别名只属该渠道、不跨渠道
+- [x] `src/setup/config.ts` 按实时目录生成 `model-alias` 段（写 CPA 起来之前的配置）
+- [x] 插件侧 `model-routes.ts` 用别名当 id，展示名保持「渠道 · 模型名」不变
+- [x] 上下文窗口校准表 `src/model-caps.ts`（262K 是宿主兜底，不是真实能力）
+- [ ] **真机复验**：重建 + 重启 CPA，确认别名在真实会话里生效
 
-**当前重叠清单**（2026-10-04 实测，59 个模型里 11 个重叠；**会随账号变动，用前现查**）：
+**当前重叠清单**（2026-10-04 20:0x 重启后实测，58 个模型里 12 个重叠；
+**会随账号变动，用前现查**）：
 
-| 模型            | 供给渠道               |
-| --------------- | ---------------------- |
-| `auto`          | workbuddy, qoder       |
-| `glm-4.6`       | workbuddy, zcode       |
-| `glm-4.6v`      | workbuddy, zcode       |
-| `glm-4.7`       | workbuddy, zcode       |
-| `glm-5.1`       | workbuddy, zcode       |
-| `glm-5.2`       | workbuddy, trae, zcode |
-| `glm-5.3`       | workbuddy, trae, zcode |
-| `glm-5.3-flash` | workbuddy, zcode       |
-| `glm-5v-turbo`  | workbuddy, zcode       |
-| `kimi-k2.6`     | workbuddy, trae        |
-| `minimax-m3`    | workbuddy, trae        |
+| 模型                  | 供给渠道               |
+| --------------------- | ---------------------- |
+| `auto`                | workbuddy, qoder       |
+| `deepseek-v4.1-flash` | workbuddy, trae        |
+| `glm-4.6`             | workbuddy, zcode       |
+| `glm-4.6v`            | workbuddy, zcode       |
+| `glm-4.7`             | workbuddy, zcode       |
+| `glm-5.1`             | workbuddy, zcode       |
+| `glm-5.2`             | workbuddy, trae, zcode |
+| `glm-5.3`             | workbuddy, trae, zcode |
+| `glm-5.3-flash`       | workbuddy, zcode       |
+| `glm-5v-turbo`        | workbuddy, zcode       |
+| `kimi-k2.6`           | workbuddy, trae        |
+| `minimax-m3`          | workbuddy, trae        |
 
 ### 2.3 上游接口兼容（P1）
 
@@ -112,11 +117,15 @@ use unique aliases/prefixes**）。
       `/v0/management/*`（`auth-files`、`routing/strategy`、`plugins/*`）。
       上游把 v0 定位为 legacy，长期会消失。
       建议先抽一个 `CpaManagementClient`，业务层不再直接拼路径，再按版本 fallback。
-- [ ] **模型元数据（262K 显示）**：容量 / 模态走宿主 `llm-pi-ai` 的硬编码兜底
-      `DEFAULT_CONTEXT_WINDOW = 262144`（`lib/index.js`），**不是 CPA 报的真实能力** ——
-      CPA 的 `/v1/models` 只给 `id` / `object` / `owned_by` 三个字段。
-      模型行支持 `contextWindow`（`entry.contextWindow ?? base ?? defaultContextWindow`），
-      插件现在一个都没写。上游另有 `oauth.settings.<渠道>.max-context-length` 可配。
+- [x] **模型元数据（262K 显示）—— 已修**：`src/model-caps.ts` 落校准表，
+      注册路由时按渠道写 `contextWindow`。**262144 是宿主 `llm-pi-ai` 的
+      `DEFAULT_CONTEXT_WINDOW` 兜底**（`lib/index.js`），不是模型真实能力 ——
+      CPA 的 `/v1/models` 只给 `id` / `object` / `owned_by`，
+      渠道插件的能力字段只存在于 dll 内部、任何接口都不透出（2026-10-04 逐渠道实测）。
+      校准值取自 `dsh-workbuddy-bridge` 的 `FALLBACK_WORKBUDDY_MODELS`（真实源码）
+      与 cpa-multi-plugins `PROTOCOL.md`；未校准的仍留兜底。
+- [ ] **补齐 Trae / Qoder 渠道的校准值**：现在只有 workbuddy 与 zcode 有，
+      trae 的窗口值要从 `trae/upstream` 的 `context_window_tokens.dev` 现查
 - [ ] **`model-routes.ts` 的两次 map + 两次 filter**：第一组是历史遗留的重复过滤，
       等价于只做一次，可清理（无功能影响）。
 

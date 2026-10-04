@@ -52,6 +52,7 @@ export {
   generateApiKey,
   generateSecretKey,
   looksLikeBcrypt,
+  patchModelAlias,
   readSecretKeyFromConfig,
   renderConfig,
   writeConfig,

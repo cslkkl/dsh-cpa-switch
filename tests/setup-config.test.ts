@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { buildAliasTable } from '../src/model-alias.ts'
 import { looksLikeBcrypt, renderConfig } from '../src/setup/config.ts'
 
 /**
@@ -37,6 +38,42 @@ describe('renderConfig', () => {
     for (const id of ['workbuddy', 'trae', 'qoder', 'zcode']) {
       expect(yaml).toContain(`    ${id}:`)
     }
+  })
+})
+
+/**
+ * `oauth.model-alias` 是**跨渠道隔离**的开关：同名模型不拆别名，CPA 会在所有
+ * 供给它的渠道之间轮询（2026-10-04 实测 `glm-5.3` 三渠道轮询，缓存命中率对半）。
+ */
+describe('renderConfig 的 model-alias 段', () => {
+  const aliases = buildAliasTable({ 'glm-5.3': ['workbuddy', 'trae', 'zcode'] })
+  const yaml = renderConfig({ port: 8317, secretKey: 'plain-secret', aliases })
+
+  it('同名模型按渠道各配一个别名', () => {
+    expect(yaml).toContain('alias: "wb/glm-5.3"')
+    expect(yaml).toContain('alias: "trae/glm-5.3"')
+    expect(yaml).toContain('alias: "zcode/glm-5.3"')
+  })
+
+  it('model-alias 挂在 oauth 段下', () => {
+    const oauthIndex = yaml.indexOf('\noauth:\n')
+    const aliasIndex = yaml.indexOf('    model-alias:')
+    expect(oauthIndex).toBeGreaterThanOrEqual(0)
+    expect(aliasIndex).toBeGreaterThan(oauthIndex)
+  })
+
+  it('没给别名表就不写这一段（无同名模型时是多余配置）', () => {
+    const bare = renderConfig({ port: 8317, secretKey: 'x' })
+    expect(bare).not.toContain('model-alias')
+  })
+
+  it('空别名表同样不写', () => {
+    const empty = renderConfig({
+      port: 8317,
+      secretKey: 'x',
+      aliases: buildAliasTable({ 'hy4-preview': ['workbuddy'] }),
+    })
+    expect(empty).not.toContain('model-alias')
   })
 })
 

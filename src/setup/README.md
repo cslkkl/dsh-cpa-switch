@@ -17,10 +17,12 @@
   - exe、`config.yaml`、`plugins/` **刻意同层** —— CPA 的 `plugins.dir` 相对工作目录解析
   - ⚠️ `SOURCES.cpa` **绝不能指向没有 Release 的仓库**（没有兜底）
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
-  - 导出：`renderConfig` / `writeConfig` / `generateSecretKey` / `generateApiKey` /
-    `looksLikeBcrypt` / `readSecretKeyFromConfig`
+  - 导出：`renderConfig` / `patchModelAlias` / `writeConfig` / `generateSecretKey` /
+    `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`
   - ⚠️ 渠道必须**逐个** `enabled: true`；漏了 dll 全部未激活 → 账号接口一律 404
   - ⚠️ `readSecretKeyFromConfig` **必须挡掉 bcrypt 哈希** —— 那是校验用的，拿去当 Bearer 必然 401
+  - ⚠️ 别名表只能在 **CPA 起来之后**才算得出，所以 `renderConfig` 写的那份没有别名；
+    `patchModelAlias` 是起来之后补写的那条路（只追加、找不到 `oauth:` 段就放弃）
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
   - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
     `removeDir` / `inspect` / `humanSize` / 类型

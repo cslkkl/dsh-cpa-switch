@@ -2,9 +2,10 @@
 
 ## 文件
 
-| 脚本                   | 作用                                           | 何时跑                                       |
-| ---------------------- | ---------------------------------------------- | -------------------------------------------- |
-| `verify-artifacts.cjs` | 用宿主加载器协议加载 `lib/` 产物，断言关键契约 | `pnpm build` 之后；`pnpm check` 与 CI 都会跑 |
+| 脚本                    | 作用                                           | 何时跑                                       |
+| ----------------------- | ---------------------------------------------- | -------------------------------------------- |
+| `verify-artifacts.cjs`  | 用宿主加载器协议加载 `lib/` 产物，断言关键契约 | `pnpm build` 之后；`pnpm check` 与 CI 都会跑 |
+| `verify-alias-yaml.mts` | 核对 `oauth.model-alias` 段的 YAML 形状        | 改了别名渲染之后                             |
 
 ### verify-artifacts.cjs
 
@@ -26,6 +27,23 @@ React 被内联，浏览器加载时抛 `process is not defined`。构建「成�
 pnpm build
 pnpm verify:artifacts     # 退出码 0 = 全过，1 = 有断言失败
 ```
+
+### verify-alias-yaml.mts
+
+验**渲染出来的 YAML 形状**，不是函数返回值。
+
+断言三样：顶层 `model-alias:` 只有一个、每个渠道键只出现一次、条目数一个不少。
+
+**为什么需要它**：这层错是**静默**的 —— YAML 同级重复键后者覆盖前者，
+CPA 解析后只剩最后一个渠道的别名，其余**全部丢失且不报错**。而单元断言是找子串，
+单条模型时怎么写都对，只有**多模型**的真实规模才暴露。
+2026-10-04 用 12 个同名模型的实采清单一跑就抓到：写出了 26 条里的 4 条。
+
+```powershell
+node --experimental-strip-types scripts/verify-alias-yaml.mts   # 退出码 0 = 形状正确
+```
+
+它会把渲染结果落到 `%TEMP%\alias-shape-check.yaml`，可直接拿 YAML 解析器复核。
 
 ## 归属与依赖
 

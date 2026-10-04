@@ -6,6 +6,7 @@
 
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { renderAliasYaml, type AliasTable } from '../model-alias.ts'
 import { managedConfigPath, managedCpaDir } from './paths.ts'
 
 /**
@@ -37,6 +38,12 @@ const CHANNEL_PLUGINS = ['workbuddy', 'trae', 'qoder', 'zcode', 'mimo'] as const
 export interface RenderConfigInput {
   readonly port: number
   readonly secretKey: string
+  /**
+   * 同名模型别名表（现算，见 `../model-alias.ts`）。
+   *
+   * 为空则不写 `model-alias` 段 —— 目录里没有同名模型时写了是多余的配置。
+   */
+  readonly aliases?: AliasTable
 }
 
 /**
@@ -49,12 +56,15 @@ export interface RenderConfigInput {
  * - `management.secret-key` 必须设，否则管理接口无鉴权（本插件也调不通）；
  * - `oauth.auth-dir` **指向用户原有的 `~/.cli-proxy-api`** —— 这样本来就用着
  *   CPA 的人，新装的这份能直接看到已有账号，不用重新加号；
+ * - `oauth.model-alias` 把同名模型拆成「渠道 / 模型」唯一值 —— 没有它，
+ *   CPA 会在所有供给该模型的渠道之间轮询，跨渠道消耗别的号（见 `../model-alias.ts`）；
  * - `plugins.enabled: true` + `dir: "plugins"` 让插件机制生效；
  * - `plugins.configs.<渠道>.enabled: true` **逐个**启用渠道，见
  *   {@link CHANNEL_PLUGINS} —— 漏了这段渠道就全不工作。
  */
 export function renderConfig(input: RenderConfigInput): string {
   const channelLines = CHANNEL_PLUGINS.flatMap((id) => [`    ${id}:`, '      enabled: true'])
+  const aliasBlock = input.aliases === undefined ? [] : renderAliasYaml(input.aliases).split('\n')
   return [
     '# 由 dsh-cpa-switch 自动生成 —— 手改会在下次「重新准备环境」时被覆盖。',
     'config-version: 8',
@@ -68,6 +78,7 @@ export function renderConfig(input: RenderConfigInput): string {
     '',
     'oauth:',
     '  auth-dir: "~/.cli-proxy-api"',
+    ...(aliasBlock.length > 0 ? ['', ...aliasBlock] : []),
     '',
     'plugins:',
     '  enabled: true',
@@ -87,6 +98,36 @@ export function writeConfig(content: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * 把 `oauth.model-alias` 段补写进**已有**的配置。
+ *
+ * 为什么需要单独一条路：别名表只能在 **CPA 起来之后**才算得出
+ * （要先知道哪些模型被多个渠道供给），而 `renderConfig` 是在 CPA 起来**之前**
+ * 写配置的。两者时序错开，只能事后补。
+ *
+ * **只追加、不覆盖**：用户可能手改过配置；这里找不到 `oauth:` 段就放弃，
+ * 绝不重写整份文件（那会连密钥哈希带注释一起冲掉）。
+ *
+ * @returns 是否真的改写了文件。
+ */
+export function patchModelAlias(aliases: AliasTable): boolean {
+  if (Object.keys(aliases.overlaps).length === 0) return false
+  let content: string
+  try {
+    content = readFileSync(managedConfigPath(), 'utf8')
+  } catch {
+    return false
+  }
+  const OAUTH_HEAD = /^oauth:[ \t]*$/mu
+  if (!OAUTH_HEAD.test(content)) return false
+  // 已有 model-alias 段就整段替换，避免重复追加。
+  const existing = /^[ \t]+model-alias:[ \t]*\n(?:(?:[ \t]+|-[ \t]|$).*\n)*/mu
+  const patched = content
+    .replace(existing, '')
+    .replace(OAUTH_HEAD, `oauth:\n${renderAliasYaml(aliases)}`)
+  return writeConfig(patched)
 }
 
 /**

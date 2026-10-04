@@ -13,6 +13,8 @@
  */
 
 import type { CpaOptions, CpaRequestInit } from './cpa.ts'
+import { buildAliasTable, channelPrefix as aliasOf, type AliasTable } from './model-alias.ts'
+import { capsOf } from './model-caps.ts'
 import { CPA_API_KEY_REF, type LoggerLike } from './credentials.ts'
 
 /** 渠道显示名（模型展示名的前缀，一眼看出请求会走谁）。 */
@@ -32,6 +34,13 @@ const ROUTE_CHANNEL_ORDER = ['workbuddy', 'trae', 'qoder', 'zcode', 'kimi', 'mim
 interface RouteModel {
   readonly id: string
   readonly name: string
+  /**
+   * 上下文窗口（token）。
+   *
+   * **不写就落宿主兜底 262144** —— 那是显示值，不是模型真实能力。
+   * 只在校准表里有该渠道的条目时才写（见 `model-caps.ts`）。
+   */
+  readonly contextWindow?: number
 }
 
 /** 推给 `llm-pi-ai` 的 provider profile（形状须过其 profile schema）。 */
@@ -146,8 +155,42 @@ function routeOwnerOf(
   return { plugin: undefined, bare: id }
 }
 
+/** 渠道 → 模型，反过来再翻成 模型 → 渠道。别名表要的是后者。 */
+function invertByChannel(
+  byChannel: Readonly<Record<string, readonly string[]>>,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [channel, models] of Object.entries(byChannel)) {
+    for (const model of models) {
+      if (model === '') continue
+      if (out[model] === undefined) out[model] = []
+      out[model].push(channel)
+    }
+  }
+  return out
+}
+
+/**
+ * 实时算别名表：查 CPA 目录 → 找出同名模型 → 按渠道拆别名。
+ *
+ * 供两处共用（同一份事实）：写 `config.yaml` 的 `model-alias` 段、
+ * 以及注册路由时决定每个渠道用哪个 id。
+ *
+ * 查不到就返回**空表**（`overlaps` 为空）—— 那意味着不写别名段、
+ * 注册时全用原名，行为退回本改动之前，不会更坏。
+ */
+export async function readAliasTable(deps: ModelRouteDeps): Promise<AliasTable> {
+  const byChannel = await channelModelsOf(deps)
+  return buildAliasTable(invertByChannel(byChannel))
+}
+
 /**
  * 从 CPA 实时目录构造 `providers.cpa` 的 profile。
+ *
+ * **同名模型按渠道拆行**：一个模型名被多个渠道供给时，每个渠道各注册一行，
+ * id 用该渠道专属的别名（`wb/glm-5.3`）、展示名照旧「WorkBuddy · glm-5.3」。
+ * 不拆的话 CPA 会在所有渠道之间轮询，面板选了哪个渠道就名不副实，
+ * 上游缓存命中率还会对半（见 [model-alias.ts](model-alias.ts)）。
  *
  * 模型行只有 `id` 与展示名 `name` —— 容量 / 模态交给路由默认值（262k / 32k / text）。
  * **不猜**：CPA 报什么就注册什么，元数据等有实测来源后再补。
@@ -160,17 +203,44 @@ async function buildCpaRouteProfile(
   const ids = (catalog.data ?? [])
     .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
     .filter((id): id is string => typeof id === 'string' && id !== '')
-    .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
-    .filter((id): id is string => typeof id === 'string' && id !== '')
   if (ids.length === 0) {
     throw new Error('catalog is empty — caller must treat empty as "no route" before building')
   }
   const byChannel = await channelModelsOf(deps)
-  const rows = ids.map((id) => {
+  const aliases = buildAliasTable(invertByChannel(byChannel))
+
+  const rows: { id: string; bare: string; label: string; channel: string }[] = []
+  for (const id of ids) {
+    // 别名本身可能被 CPA 换回来（目录里就是 `wb/glm-5.3`），先还原成「模型 + 渠道」。
+    const aliased = aliases.resolve(id)
+    if (aliased !== undefined) {
+      const label =
+        ROUTE_CHANNEL_LABEL[aliased.channel] ?? aliasOf(aliased.channel) ?? aliased.channel
+      rows.push({ id, bare: aliased.model, label, channel: aliased.channel })
+      continue
+    }
     const { plugin, bare } = routeOwnerOf(id, byChannel)
+    const channels = aliases.overlaps[bare]
+    if (channels !== undefined && plugin !== undefined) {
+      // 同名模型：每个渠道一行，id 换成该渠道的别名。
+      for (const channel of channels) {
+        const channelAlias = aliases.aliasOf(bare, channel)
+        if (channelAlias === undefined) continue
+        rows.push({
+          id: channelAlias,
+          bare,
+          label: ROUTE_CHANNEL_LABEL[channel] ?? aliasOf(channel) ?? channel,
+          channel,
+        })
+      }
+      continue
+    }
     const label = plugin === undefined ? 'CPA' : (ROUTE_CHANNEL_LABEL[plugin] ?? plugin)
-    return { id, bare, label }
-  })
+    rows.push({ id, bare, label, channel: plugin ?? '' })
+  }
+  if (rows.length === 0) {
+    throw new Error('no routable model after channel split')
+  }
   rows.sort((a, b) => {
     const orderOf = (row: { label: string; bare: string }): number => {
       const index = ROUTE_CHANNEL_ORDER.indexOf(
@@ -188,7 +258,15 @@ async function buildCpaRouteProfile(
     api: 'openai-completions',
     baseURL: `http://127.0.0.1:${String(deps.currentPort())}/v1`,
     apiKeyEnv: CPA_API_KEY_REF,
-    models: rows.map((row) => ({ id: row.id, name: `${row.label} · ${row.bare}` })),
+    models: rows.map((row) => {
+      // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
+      const caps = capsOf(row.channel, row.bare)
+      return {
+        id: row.id,
+        name: `${row.label} · ${row.bare}`,
+        ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
+      }
+    }),
   }
 }
 

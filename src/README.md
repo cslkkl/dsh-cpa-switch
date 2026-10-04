@@ -65,6 +65,26 @@
   - 为什么不用内置 `fetch`：它默认忽略 `HTTPS_PROXY`
   - 改后必测：代理探测优先级、重定向跟随、sha256 边下边算
 
+## 模型路由
+
+- **`model-alias.ts`** —— 同名模型的「渠道 / 模型」唯一别名。
+  - 导出：`buildAliasTable` / `aliasFor` / `channelPrefix` / `renderAliasYaml` / 类型 `AliasTable`
+  - 不拆的话 CPA 会在所有供给该模型的渠道之间轮询，面板选了哪个渠道都名不副实
+  - ⚠️ 别名表**必须用实时目录现算**：渠道目录随账号增减变动，抄死的清单必然过期，
+    而过期意味着「该拆的没拆」—— 静默失效
+  - 改后必测：`tests/model-alias.test.ts`
+- **`model-caps.ts`** —— 模型能力（上下文窗口）校准表。
+  - 导出：`capsOf` / `calibratedChannels` / 类型 `ModelCaps`
+  - ⚠️ **262144 是宿主 `dsh-llm-pi-ai` 的兜底值，不是模型真实能力**；
+    CPA 的 `/v1/models` 不报容量，渠道插件的能力字段只存在于 dll 内部
+  - 校准值按**渠道**存 —— 同一模型名在不同渠道上限可能不同；查不到就留兜底
+  - 改后必测：`tests/model-caps.test.ts`
+- **`model-routes.ts`** —— 实时模型目录 → DSH 模型路由（volatile 通道）。
+  - 导出：`attachModelRouteSync` / `readAliasTable` / 类型 `ModelRouteHost` / `ModelRouteDeps`
+  - 同名模型按渠道拆行：每渠道一项，id 用该渠道别名、展示名仍是「渠道 · 模型名」
+  - ⚠️ 推之前要等目录稳定见连续两次计数一致，CPA 启动后凭据分批加载）
+  - ⚠️ 渠道与能力两处查找共用同一张实时表见`readAliasTable`），别各算一次
+
 ## 子目录
 
 - `setup/` —— 环境准备（下载 / 校验 / 解压 / 写配置）→ [setup/README.md](setup/README.md)

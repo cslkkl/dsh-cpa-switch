@@ -56,18 +56,18 @@ python check-line-endings.py <本仓根> --target lf
 
 ## 文档地图
 
-| 想知道                       | 去哪                                                          |
-| ---------------------------- | ------------------------------------------------------------- |
-| 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)） |
-| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                  |
-| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                  |
-| 宿主半端各模块               | [src/README.md](src/README.md)                                |
-| 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                  |
-| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                    |
-| 测试覆盖与运行               | [tests/README.md](tests/README.md)                            |
-| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)                      |
-| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                              |
-| 上游源码本地参考（只读）     | [docs/UPSTREAM-SOURCE.md](docs/UPSTREAM-SOURCE.md)            |
+| 想知道                       | 去哪                                                           |
+| ---------------------------- | -------------------------------------------------------------- |
+| 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)）  |
+| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                   |
+| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                   |
+| 宿主半端各模块               | [src/README.md](src/README.md)                                 |
+| 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                   |
+| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                     |
+| 测试覆盖与运行               | [tests/README.md](tests/README.md)                             |
+| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)                       |
+| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                               |
+| 上游源码参考（只读，本机）   | [reference/README.md](reference/README.md)（本机目录，不入库） |
 
 ## 事实来源（只查不抄）
 

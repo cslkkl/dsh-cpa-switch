@@ -21,13 +21,14 @@ import { cpaFetch, json } from './cpa.ts'
 import { Config, makeReadConfig } from './config.ts'
 import type { ConfigRefs, PluginConfig } from './config.ts'
 import { AdminKeyStore, ensureApiKey, resolveApiKey } from './credentials.ts'
-import { attachModelRouteSync } from './model-routes.ts'
+import { attachModelRouteSync, readAliasTable } from './model-routes.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import { CpaProcess, probePort } from './process.ts'
 import { Operations } from './operations.ts'
 import type { RouteSpec } from './routes.ts'
 import { PLUGIN_ADAPTERS, PLUGIN_ORDER } from './adapters.ts'
 import { managedExePath, inspect as inspectSetup, prepare as prepareSetup } from './setup/index.ts'
+import { patchModelAlias } from './setup/config.ts'
 import { readAccountIntent, writeExeMemory } from './state.ts'
 import { registerRoutes } from './routes.ts'
 
@@ -128,6 +129,46 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     adminKey: () => adminKey.value,
     logger: ctx.logger,
   })
+
+  /**
+   * CPA 就绪后把别名表补写进托管配置，再推模型路由。
+   *
+   * ⚠️ **顺序不能反**：别名要先落进 `config.yaml`，CPA 下次启动才会按别名
+   * 登记模型目录；路由侧要用**同一张表**注册 id，否则推出去的 id CPA 认不出。
+   *
+   * 这一步失败不致命 —— 退回到「不拆别名」的老行为（跨渠道轮询），
+   * 不会比改动前更差，所以只记日志不抛。
+   */
+  const syncAliasesAndRoutes = async (trigger: string): Promise<void> => {
+    try {
+      const table = await readAliasTable({
+        options,
+        cpaFetch: (opts, path, init) => cpaFetch(opts, path, init),
+        probePort,
+        currentPort: () => readConfig().port,
+        resolveApiKey: () => resolveApiKey({ credentials: ctx.credentials }),
+        adminKey: () => adminKey.value,
+        logger: ctx.logger,
+      })
+      const overlaps = Object.keys(table.overlaps)
+      if (overlaps.length > 0 && patchModelAlias(table)) {
+        ctx.logger?.info?.('cpa-panel: wrote model aliases (%s)', overlaps)
+        /**
+         * 别名是**注册进 CPA 模型目录**的，写完配置不会立刻反映到 `/v1/models`
+         * （本进程不热重载配置）。所以本次推的仍然是旧目录，下次 CPA 重启后才切。
+         * 这条如实记进日志，别让「推了但没生效」看起来像成功。
+         */
+        ctx.logger?.info?.(
+          'cpa-panel: aliases take effect after CPA restart (%s models)',
+          overlaps.length,
+        )
+      }
+    } catch (error) {
+      ctx.logger?.warn?.('cpa-panel: model alias sync failed: %o', error)
+    }
+    const synced = await syncModelRoutes(trigger)
+    ctx.logger?.info?.('cpa-panel: sync model routes %o', synced)
+  }
 
   const ops = new Operations({
     options,
@@ -266,11 +307,10 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
         const result = await ops.runStartupCheckin({ enabled: readConfig().autoCheckinOnStart })
         ctx.logger?.info?.('cpa-panel: startup checkin %o', result)
         /**
-         * CPA 就绪后立即推模型路由 —— 新用户装完插件、CPA 首次跑起来，
+         * CPA 就绪后立即补别名表并推模型路由 —— 新用户装完插件、CPA 首次跑起来，
          * 模型就能出现在选择器里。同步内部已兜错，失败不影响生命周期。
          */
-        const synced = await syncModelRoutes('boot')
-        ctx.logger?.info?.('cpa-panel: sync model routes %o', synced)
+        await syncAliasesAndRoutes('boot')
       } else {
         ctx.logger?.warn?.('cpa-panel: CPA unavailable at startup (%s)', state.reason ?? 'unknown')
       }
@@ -292,7 +332,7 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
         readConfig,
         setup,
         cpaProcess,
-        onSetupDone: () => void syncModelRoutes('setup').catch(() => {}),
+        onSetupDone: () => void syncAliasesAndRoutes('setup').catch(() => {}),
       })
       return registerRoutes(routes, {
         register: (opts) => connectionCtx.connection.fetch.register(opts),
