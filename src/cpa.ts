@@ -23,11 +23,14 @@ export class CpaHttpError extends Error {
   }
 }
 
+/** 单次请求的附加参数；`timeoutMs` 覆盖 `options.timeoutMs`（目录查询等慢接口用）。 */
+export type CpaRequestInit = RequestInit & { timeoutMs?: number }
+
 /** 调用 CPA 管理接口。 */
 export async function cpaFetch(
   options: CpaOptions,
   path: string,
-  init: RequestInit = {},
+  init: CpaRequestInit = {},
 ): Promise<unknown> {
   const url = `http://127.0.0.1:${String(options.port)}${path}`
   const headers: Record<string, string> = {
@@ -38,7 +41,7 @@ export async function cpaFetch(
   const response = await fetch(url, {
     ...init,
     headers,
-    signal: AbortSignal.timeout(options.timeoutMs ?? 20000),
+    signal: AbortSignal.timeout(init.timeoutMs ?? options.timeoutMs ?? 20000),
   })
   const text = await response.text()
 

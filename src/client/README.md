@@ -22,7 +22,7 @@
   - ⚠️ 高亮判定是 `!disabled`（= 用户的选择），**不做「实际在跑哪个号」的推断**
 - **`RoutingSection.tsx`** —— 路由策略，**只读**。
   - 拖动排序已删除：控制用哪个号有更直接的手段（禁用 / 记忆选择）
-- **`PanelBoundary.tsx`** —— 渲染错误边界。**必须是类组件**（见[架构 §4.7](../../docs/ARCHITECTURE.md)）
+- **`PanelBoundary.tsx`** —— 渲染错误边界。**必须是类组件**（见[架构 §4.9](../../docs/ARCHITECTURE.md)）
 - **`use-async-resource.ts`** —— 带缓存与竞态保护的异步资源 hook。
   - 解决两件事：不因刷新清空界面；迟到的旧响应不覆盖新状态
 - **`api.ts`** —— `/api/v1/cpa/*` 调用封装 + **共享读缓存**（`ReadCache`）。
@@ -37,7 +37,7 @@
   - `Translate` 可带变参：`t('panelCrashed', name)` 供边界显示是哪一块坏了
 - **`panel.module.css`** —— 布局样式。
   - 每个值要么是 `--dsw-*` token，要么抄自宿主 `settings-form/fields.module.css`
-  - ⚠️ 不写颜色字面量；`--dsw-alias-bg-layer-N` **只到 3**（见[架构 §4.8](../../docs/ARCHITECTURE.md)）
+  - ⚠️ 不写颜色字面量；`--dsw-alias-bg-layer-N` **只到 3**（见[架构 §4.9](../../docs/ARCHITECTURE.md)）
   - 按钮 / 开关 / 标签 / 状态点 / 页签 / 弹窗 / Toast 一律 primitives，不自绘
 
 ## 归属与依赖

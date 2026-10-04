@@ -42,7 +42,7 @@
 | `routes.ts`      | 路由归一化与注册                                    |
 | `state.ts`       | 状态文件读写（exe 记忆 / 签到 stamp / 账号意图）    |
 | `cpa.ts`         | CPA 管理接口 HTTP 客户端                            |
-| `cache.ts`       | 读缓存与端口探活记忆（见 §4.6）                     |
+| `cache.ts`       | 读缓存与端口探活记忆（见 §4.7）                     |
 | `adapters.ts`    | 四渠道接口差异收敛                                  |
 | `net.ts`         | 带代理支持的 HTTP（下载用）                         |
 | `setup/`         | 环境准备：下载 / 校验 / 解压 / 写配置               |
@@ -56,11 +56,11 @@
 | `client/PluginPanel.tsx`       | 单渠道面板：汇总 / 工具栏 / 账号网格 / 登录弹窗 |
 | `client/AccountCard.tsx`       | 单张账号卡                                      |
 | `client/RoutingSection.tsx`    | 路由策略（只读）                                |
-| `client/PanelBoundary.tsx`     | 渲染错误边界（类组件，见 §4.7）                 |
-| `client/use-async-resource.ts` | 带缓存与竞态保护的异步资源 hook（见 §4.6）      |
+| `client/PanelBoundary.tsx`     | 渲染错误边界（类组件，见 §4.8）                 |
+| `client/use-async-resource.ts` | 带缓存与竞态保护的异步资源 hook（见 §4.7）      |
 | `client/api.ts`                | `/api/v1/cpa/*` 调用封装 + 读缓存               |
 | `client/locales.ts`            | 中英文案                                        |
-| `client/panel.module.css`      | 布局样式（值全部来自宿主 token，见 §4.8）       |
+| `client/panel.module.css`      | 布局样式（值全部来自宿主 token，见 §4.9）       |
 
 ---
 
@@ -116,7 +116,20 @@
 
 `react` 与 primitives 由宿主注入，**不能打进产物**（见 `tsdown.config.ts` 的 externals）。
 
-### 4.6 读路径有两级缓存，且失效是**事件**
+### 4.6 模型路由只走 volatile 更新通道
+
+- 模型路由由插件运行时推给 `llm-pi-ai` 的 `providers.cpa`（volatile 配置字段）：
+  对它所在 loader entry 做**只含 volatile 差异**的 `entry.update()`，loader 在
+  原进程内提交并广播 `loader/volatile-update`，llm-pi-ai 原子重注册路由 ——
+  不重启、不写盘。随包静态清单已废弃（会漂移、且与端口耦合）。
+- **只动 `cpa` 一个键**：推送前合并既有 `providers`，用户自声明的其它 provider
+  原样保留；混入非 volatile 变更会让 update 退化成整体重载。
+- **推送前等目录稳定**：CPA 启动后凭据分批加载，`/v1/models` 从空慢慢变多 ——
+  连续两次计数一致才推；目录为空（无账号）则撤下路由
+  （`llm-pi-ai` 拒绝空 models 的手工路由）。
+- 触发点：CPA 就绪（boot / 环境准备完成）与 OAuth 加号完成；幂等，无变化即零动作。
+
+### 4.7 读路径有两级缓存，且失效是**事件**
 
 面板每点一次会打 6 条路由（`status` / `plugins` / `setup` / `accounts` /
 `auto-checkin` / `routing`），而每条在宿主侧都要先 `ensure()` 探一次活。
@@ -143,7 +156,7 @@
 **仍然给得出旧值**，只是后台重验。少了这一条，每次刷新都会把账号网格清成
 「读取中…」—— 那比多等 200ms 更难受。用户点「刷新」时传 `force` 才真绕过。
 
-### 4.7 浏览器半边必须有渲染错误边界
+### 4.8 浏览器半边必须有渲染错误边界
 
 宿主的槽位渲染带自己的 error boundary，而那个 boundary 是**锁存的** ——
 子树抛过一次之后，那块区域在这次挂载的整个生命周期里都没了，用户的唯一退路是
@@ -154,7 +167,7 @@
 存在理由，也是 `scripts/verify-artifacts.cjs` 的 shim 里必须提供
 `react.Component` 的原因（缺了它，产物在工厂执行时就会抛）。
 
-### 4.8 样式只能来自宿主 token
+### 4.9 样式只能来自宿主 token
 
 `panel.module.css` 里的每个值要么是 `--dsw-*` token，要么是从宿主
 `settings-form/fields.module.css` 抄来的数字。**不写颜色字面量**，明暗两套主题
@@ -169,8 +182,6 @@
 类名是**哈希**的（`[hash]_[local]`）。注入的样式表是全局的，而宿主页面自己也有
 类名 —— 哈希之后一次改名就不可能与宿主某条规则撞上，而撞上会静默地把卡片改成
 另一个样子。
-
----
 
 ## 5. 防错清单
 
@@ -193,13 +204,16 @@
 | F13 | 改 `scheduler_mode` 后必须重启 CPA                        | 配置不热加载；`credits` 模式下插件自己选号，`priority` 形同虚设                                                       |
 | F14 | 被限流的号看不出异常                                      | 上游模型级限流（code 6004）下 CPA 仍报 `status: active`。面板「启用」≠「现在能用」                                    |
 | F15 | 浏览器产物里不能混入 React 运行时                         | 内联后产物从 ~80 KB 涨到 ~1 MB，且模块作用域读 `process.env.NODE_ENV` → 浏览器抛 `process is not defined`             |
-| F16 | 探活与读都要合并并发，且写后必须失效                      | 面板一次点击打 6 条路由；不合并则每次开 6 个 TCP 连接，不失效则「签到了但余额没变」。两者都**不报错**                 |
-| F17 | 读路径别再顺带拉没人消费的数据                            | `active`（一次 `/auth-files`）与 `schedulerModes`（四次 `/config`）曾挂在读路径上，界面从不读 —— 纯浪费的往返         |
-| F18 | 刷新要「先用旧值再重验」，不是「先清空再拉」              | 清空版每次刷新把整屏账号网格变成「读取中…」，视觉上比实际耗时更糟                                                     |
-| F19 | 响应要带序号，迟到的旧响应不许覆盖新状态                  | 连点两次刷新时先发的后到，表现为「数字自己跳回去」，无报错                                                            |
-| F20 | 浏览器半边必须包 `PanelBoundary`                          | 宿主槽位 boundary 是**锁存**的：一次抛出带走整块配置区，用户只能禁用再启用插件                                        |
-| F21 | 样式只用 `--dsw-*` token，不写颜色字面量                  | 明暗两套主题才能自动跟随；`--dsw-alias-bg-layer-N` 只到 3（宿主自己引用了不存在的 layer-4）                           |
-| F22 | 产物里不能出现全局限类名（如 `cpa-card`）                 | 注入的样式表是全局的，裸类名会与宿主规则相撞，撞上会静默改样式。类名必须是哈希的                                      |
+| F16 | Windows 解压**显式用 System32 的 bsdtar**，不裸调 `tar`   | PATH 里有 Git 的 GNU tar 时它读不了 zip，解压静默失败（曾让 CPA 装不出来）                                            |
+| F17 | 补装 / 同步的**网络异常必须就地吞掉**，只记日志           | 放任冒出去会拖死整个 DSH 宿主（fatal load failure，实测一次 release 查询失败就整个 web 端没了）                       |
+| F18 | 探活与读都要合并并发，且写后必须失效                      | 面板一次点击打 6 条路由；不合并则每次开 6 个 TCP 连接，不失效则「签到了但余额没变」。两者都**不报错**                 |
+| F19 | 一个渠道的**两个**读 key 都要作废                         | `accounts:<id>:` 与 `autockin:<id>` 形状不同，只清前者 = 切换自动签到后开关一直显示旧值                               |
+| F20 | 读路径别再顺带拉没人消费的数据                            | `active`（一次 `/auth-files`）与 `schedulerModes`（四次 `/config`）曾挂在读路径上，界面从不读 —— 纯浪费的往返         |
+| F21 | 刷新要「先用旧值再重验」，不是「先清空再拉」              | 清空版每次刷新把整屏账号网格变成「读取中…」，视觉上比实际耗时更糟                                                     |
+| F22 | 响应要带序号，迟到的旧响应不许覆盖新状态                  | 连点两次刷新时先发的后到，表现为「数字自己跳回去」，无报错                                                            |
+| F23 | 浏览器半边必须包 `PanelBoundary`                          | 宿主槽位 boundary 是**锁存**的：一次抛出带走整块配置区，用户只能禁用再启用插件                                        |
+| F24 | 样式只用 `--dsw-*` token，不写颜色字面量                  | 明暗两套主题才能自动跟随；`--dsw-alias-bg-layer-N` 只到 3（宿主自己引用了不存在的 layer-4）                           |
+| F25 | 产物里不能出现全局限类名（如 `cpa-card`）                 | 注入的样式表是全局的，裸类名会与宿主规则相撞，撞上会静默改样式。类名必须是哈希的                                      |
 
 ---
 

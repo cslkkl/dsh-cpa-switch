@@ -112,23 +112,33 @@ export function verify(downloaded: Downloaded, expectedDigest: string): VerifyRe
   return actual === expected ? { ok: true, actual } : { ok: false, expected, actual }
 }
 
-/** 用系统 tar 解压 zip（Windows 10+ 自带 bsdtar）。 */
+/**
+ * 用系统 tar 解压 zip（Windows 10+ 自带 bsdtar）。
+ *
+ * ⚠️ Windows 上**显式优先 System32 的 bsdtar**，不裸调 `tar`：
+ * 装了 Git 的机器 PATH 里常有 `/usr/bin/tar`（GNU tar），它**读不了 zip**
+ * （`This does not look like a tar archive`）—— 装机路径依赖用户 shell 的
+ * PATH 顺序，曾让解压静默失败、CPA 装不出来。找不到 bsdtar 才退回 PATH。
+ */
 export function extract(
   zipPath: string,
   destDir: string,
 ): Promise<{ ok: boolean; error?: string }> {
   mkdirSync(destDir, { recursive: true })
+  const bsdtar =
+    process.platform === 'win32'
+      ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+      : ''
+  const tarBin = bsdtar !== '' && existsSync(bsdtar) ? bsdtar : 'tar'
   return new Promise((resolve) => {
-    const child = spawn('tar', ['-xf', zipPath, '-C', destDir], {
+    const child = spawn(tarBin, ['-xf', zipPath, '-C', destDir], {
       stdio: 'ignore',
       windowsHide: true,
     })
-    child.on('error', (error) => {
-      resolve({ ok: false, error: error.message })
-    })
-    child.on('close', (code) => {
-      resolve(code === 0 ? { ok: true } : { ok: false, error: `tar 退出码 ${String(code)}` })
-    })
+    child.on('error', (error) => resolve({ ok: false, error: error.message }))
+    child.on('close', (code) =>
+      resolve(code === 0 ? { ok: true } : { ok: false, error: `tar 退出码 ${String(code)}` }),
+    )
   })
 }
 

@@ -49,6 +49,11 @@ export interface OpsDeps {
   /** 当前管理密钥（空串表示未配置）。 */
   readonly adminKey: () => string
   readonly logger?: LoggerLike | undefined
+  /**
+   * 账号集合可能发生变化的回调（OAuth 授权完成后由 `authStatus` 触发）。
+   * 模型路由依赖账号集合，宿主用它安排一次重推。
+   */
+  readonly onAccountsChanged?: (() => void) | undefined
 }
 
 /** 把任意抛出物转成错误串。 */
@@ -699,12 +704,20 @@ export class Operations {
         `/v8/management/oauth/status?state=${encodeURIComponent(state)}`,
       )) as { status?: unknown } | undefined
       const status = data?.status ?? 'unknown'
+
       /**
-       * 授权完成时 CPA 自己写好了认证文件 —— 那一刻该渠道的账号列表变了。
-       * 失效在这里做（而不是让前端记得调），因为「完成」是轮询观察到的结果，
-       * 前端不知道 CPA 到底在哪个 tick 落了盘。
+       * 授权完成的**同一个时刻**要通知两方，所以合并成一次判定：
+       *
+       * 1. 作废读缓存 —— CPA 自己写好了认证文件，那一刻账号列表变了。
+       *    放在这里而不是让前端记得调，是因为「完成」是轮询**观察**到的结果，
+       *    前端不知道 CPA 到底在哪个 tick 落了盘。
+       * 2. `onAccountsChanged` —— 模型目录可能随账号变化，宿主用它安排重推。
+       *    不阻塞响应。
        */
-      if (status !== 'wait') this.invalidateChannel('')
+      if (status !== 'wait') {
+        this.invalidateChannel('')
+        this.#deps.onAccountsChanged?.()
+      }
       return { ok: true, status, raw: data }
     } catch (error) {
       return { ok: false, error: messageOf(error) }

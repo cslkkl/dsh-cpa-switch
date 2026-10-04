@@ -20,7 +20,8 @@
 import { cpaFetch, json } from './cpa.ts'
 import { Config, makeReadConfig } from './config.ts'
 import type { ConfigRefs, PluginConfig } from './config.ts'
-import { AdminKeyStore, ensureApiKey } from './credentials.ts'
+import { AdminKeyStore, ensureApiKey, resolveApiKey } from './credentials.ts'
+import { attachModelRouteSync } from './model-routes.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import { CpaProcess, probePort } from './process.ts'
 import { Operations } from './operations.ts'
@@ -114,6 +115,20 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     }
   }
 
+  /**
+   * 模型路由同步：CPA 就绪后把实时模型目录推给 DSH 的 llm 服务（volatile 通道），
+   * 用户装完插件、加完账号即可在对话中直接选用。机制见 `model-routes.ts`。
+   */
+  const syncModelRoutes = attachModelRouteSync(ctx, {
+    options,
+    cpaFetch: (opts, path, init) => cpaFetch(opts, path, init),
+    probePort,
+    currentPort: () => readConfig().port,
+    resolveApiKey: () => resolveApiKey({ credentials: ctx.credentials }),
+    adminKey: () => adminKey.value,
+    logger: ctx.logger,
+  })
+
   const ops = new Operations({
     options,
     cpaFetch: (opts, path, init) => cpaFetch(opts, path, init),
@@ -121,6 +136,8 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     processOptions,
     adminKey: () => adminKey.value,
     logger: ctx.logger,
+    /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */
+    onAccountsChanged: () => void syncModelRoutes('oauth').catch(() => {}),
   })
 
   // ── 生命周期 effect ────────────────────────────────────────────────────
@@ -203,7 +220,16 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
           'cpa-panel: environment incomplete (%o), preparing before start',
           missing,
         )
-        await autoInstallIfNeeded()
+        /**
+         * ⚠️ 必须包 try/catch：下载环节的网络抖动（代理 TLS 断连等）会在这里
+         * 抛出 —— 放任它冒出去会**拖死整个 DSH 宿主**（fatal load failure）。
+         * 补装失败只该意味着「这次没装上、面板提示重试」，绝不是「宿主崩了」。
+         */
+        try {
+          await autoInstallIfNeeded()
+        } catch (error) {
+          ctx.logger?.warn?.('cpa-panel: auto install at boot failed: %o', error)
+        }
         if (stopped) return
       }
 
@@ -217,9 +243,14 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
        * 此时上面的 preflight 已经放过，得靠这里再兜一次。
        */
       if (!state.running && state.reason === 'exe-not-found') {
-        const installed = await autoInstallIfNeeded()
+        /** 同上：兜底补装的网络异常也必须就地吞掉，只记日志。 */
+        try {
+          const installed = await autoInstallIfNeeded()
+          if (installed) state = await cpaProcess.ensure(processOptions())
+        } catch (error) {
+          ctx.logger?.warn?.('cpa-panel: auto install retry failed: %o', error)
+        }
         if (stopped) return
-        if (installed) state = await cpaProcess.ensure(processOptions())
       }
 
       if (stopped) return
@@ -234,6 +265,12 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
         ctx.logger?.info?.('cpa-panel: restore account intent %o', restored)
         const result = await ops.runStartupCheckin({ enabled: readConfig().autoCheckinOnStart })
         ctx.logger?.info?.('cpa-panel: startup checkin %o', result)
+        /**
+         * CPA 就绪后立即推模型路由 —— 新用户装完插件、CPA 首次跑起来，
+         * 模型就能出现在选择器里。同步内部已兜错，失败不影响生命周期。
+         */
+        const synced = await syncModelRoutes('boot')
+        ctx.logger?.info?.('cpa-panel: sync model routes %o', synced)
       } else {
         ctx.logger?.warn?.('cpa-panel: CPA unavailable at startup (%s)', state.reason ?? 'unknown')
       }
@@ -249,7 +286,14 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
   // ── HTTP 路由 ──────────────────────────────────────────────────────────
   ctx.inject(['connection'], (connectionCtx) => {
     connectionCtx.effect(() => {
-      const routes: RouteSpec[] = buildRoutes({ ops, adminKey, readConfig, setup, cpaProcess })
+      const routes: RouteSpec[] = buildRoutes({
+        ops,
+        adminKey,
+        readConfig,
+        setup,
+        cpaProcess,
+        onSetupDone: () => void syncModelRoutes('setup').catch(() => {}),
+      })
       return registerRoutes(routes, {
         register: (opts) => connectionCtx.connection.fetch.register(opts),
         logger: connectionCtx.logger ?? ctx.logger,
@@ -265,6 +309,8 @@ interface RouteDeps {
   readonly readConfig: () => PluginConfig
   readonly setup: SetupState
   readonly cpaProcess: CpaProcess
+  /** 环境准备成功后的回调（CPA 可能是这次拉起的）—— 推模型路由用。 */
+  readonly onSetupDone: () => void
 }
 
 /** 读请求体，失败当空对象（前端有时不带 body）。 */
@@ -279,7 +325,7 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
 
 /** 组装路由表。 */
 function buildRoutes(deps: RouteDeps): RouteSpec[] {
-  const { ops, adminKey, readConfig, setup } = deps
+  const { ops, adminKey, readConfig, setup, onSetupDone } = deps
 
   return [
     {
@@ -339,6 +385,8 @@ function buildRoutes(deps: RouteDeps): RouteSpec[] {
           if (result.ok) {
             writeExeMemory(managedExePath())
             if (adminKey.value === '') adminKey.adopt(secretKey, 'auto-install')
+            /** 环境刚备好（CPA 可能是这次拉起的）—— 立即推模型路由。 */
+            onSetupDone()
           }
           return json(result)
         } catch (error) {
