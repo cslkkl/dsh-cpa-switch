@@ -60,20 +60,57 @@
     `PLUGIN_CONFIG_PATH` / `SCHEDULER_MODE` / `normalizeAccounts` / 类型
   - 上层只看统一形状；新增渠道只改这里
   - 改后必测：`normalizeAccounts` 对四种返回结构的解析
-- **`net.ts`** —— 带代理支持的 HTTP见下载用）。
+- **`net.ts`** —— 带代理支持的 HTTP（下载用）。
   - 导出：`detectProxy` / `getJson` / `downloadTo` / `describeProxy`
   - 为什么不用内置 `fetch`：它默认忽略 `HTTPS_PROXY`
   - 改后必测：代理探测优先级、重定向跟随、sha256 边下边算
 
 ## 子目录
 
-- `setup/` —— 环境准备见下载 / 校验 / 解压 / 写配置）→ [setup/README.md](setup/README.md)
-- `client/` —— 浏览器半端 → [client/README.md](client/README.md)
+- `setup/` —— 环境准备（下载 / 校验 / 解压 / 写配置）→ [setup/README.md](setup/README.md)
+- `client/` —— 浏览器半边 → [client/README.md](client/README.md)
+
+## 内部 HTTP 路由
+
+浏览器半边只调这些路由，**不带任何密钥**。宿主半边是唯一持有密钥的一侧。
+
+| 路由                           | 方法     | 作用                                                                |
+| ------------------------------ | -------- | ------------------------------------------------------------------- |
+| `/api/v1/cpa/setup`            | GET/POST | 环境状态 / 一键下载 CPA 与渠道插件                                  |
+| `/api/v1/cpa/status`           | GET      | CPA 运行状态、端口、是否已配密钥                                    |
+| `/api/v1/cpa/plugins`          | GET      | 已装渠道列表与能力                                                  |
+| `/api/v1/cpa/accounts?plugin=` | GET      | 账号 + 余额（`&fresh=1` 跳过缓存）                                  |
+| `/api/v1/cpa/models?plugin=`   | GET      | 该渠道可选模型                                                      |
+| `/api/v1/cpa/school`           | GET      | 成长中心（任务 / 奖励）信息                                         |
+| `/api/v1/cpa/action`           | POST     | `{plugin, kind, authIndex}` → 签到 / 任务                           |
+| `/api/v1/cpa/account-select`   | POST     | `{plugin, authIndex}` → **选择账号**（启用它，同渠道其余自动禁用）  |
+| `/api/v1/cpa/account-enabled`  | POST     | `{plugin, authIndex, enabled}` → 单个启用 / 禁用                    |
+| `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                     |
+| `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`） |
+| `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                        |
+| `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                    |
+| `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                              |
+| `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                 |
+| `/api/v1/cpa/start`            | POST     | 手动拉起 CPA                                                        |
+
+> 上表是**可读索引**；权威事实源是 [index.ts](index.ts) 的 `buildRoutes()`。
+
+**改路由前必读**：同一 `path` 只能注册一次（多方法合并在一个条目里）、
+方法只有 `GET`/`HEAD`/`POST`。违反任一条会让**所有**路由失效。
+[routes.ts](routes.ts) 会归一化兜底，但新增路由仍要走 `RouteSpec`。
+契约边界见 [架构 §4.3](../docs/ARCHITECTURE.md)。
+
+**为什么 `routing` 不读各渠道 `scheduler_mode`**：它曾顺带循环读四个 `/config`，
+而界面从不消费那份数据 —— 每次打开面板白付 4 次 CPA 往返。
+要归一化它请用显式的 `POST /scheduler-mode`，别混进读路径。
 
 ## 变更影响路由
 
-- 改路由表 → 同步根 [README.md](../README.md) 的路由表
-- 改对外契约 → 同步 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 与 `package.json` 版本
+- 改路由表 → 同步本文件的路由表
+- 改对外契约 → 同步 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 与 `package.json` 版本
+- 改 `operations.ts` → 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段
+- 改渠道差异 → 同步根 [../README.md](../README.md) 的渠道能力矩阵
+- 改配置项 → 同步根 [../README.md](../README.md) 的配置表
 - 新增模块 → 回填本文件
 
 ## 参考

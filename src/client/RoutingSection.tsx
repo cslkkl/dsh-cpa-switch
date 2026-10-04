@@ -4,7 +4,7 @@
  * **这里不再有「账号使用顺序」的拖动排序。**
  *
  * 为什么删掉：用户控制用哪个账号已经有两个更直接的手段 ——
- * 1. 账号卡上的「启用 / 禁用」：禁用 = 根本不参与调度，没有降级空间；
+ * 1. 账号卡上的启用开关：关掉 = 根本不参与调度，没有降级空间；
  * 2. 插件会记住用户的选择并在启动时恢复。
  *
  * 而 `priority` 只是「尽量先用高的」，首选号不可用时会降级到别人 ——
@@ -17,6 +17,7 @@
  */
 
 import type { ReactNode } from 'react'
+import { IconWarningOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useAsyncResource } from './use-async-resource.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
@@ -33,6 +34,9 @@ export function RoutingSection(props: RoutingSectionProps): ReactNode {
   /**
    * 策略值用 `string | undefined` 表达三态：还没读到、读到了（可能为空串）、
    * 读失败。`null` 当「未读到」会让「读到空串」无法表达。
+   *
+   * 还没读到就**什么都不渲染** —— 冷启动时这个区块通常还没准备好，画一个空壳
+   * 只是噪音。它走缓存，第二次进来直接就有。
    */
   const strategy = useAsyncResource<string>({
     key: 'routing',
@@ -40,27 +44,37 @@ export function RoutingSection(props: RoutingSectionProps): ReactNode {
     select: (result) => (result.strategy === undefined ? '' : String(result.strategy)),
   })
 
-  /**
-   * 还没读到就**什么都不渲染**。
-   *
-   * 旧实现返回 `null` 但同时无条件发请求，于是每次挂载都白付一次往返，
-   * 而这个区块在冷启动时通常还没准备好 —— 于是每次都白付。
-   * 现在它走缓存：第二次进来直接就有。
-   */
   if (strategy.data === undefined) return null
 
-  /** 策略文案：`fill-first` 是推荐值，`round-robin` 带警告，其余原样显示。 */
-  const strategyText =
-    strategy.data === 'fill-first'
-      ? t('strategyFillFirst')
-      : strategy.data === 'round-robin'
-        ? t('strategyRoundRobin') + ' ⚠️ ' + t('strategyWarn')
-        : strategy.data
+  /**
+   * 策略文案。`round-robin` 那行带一个**警告三角图标**而不是 Emoji ——
+   * Emoji 在不同系统上是不同字形，13px 下糊成一团，也不跟随主题色
+   * （2026-10-04 用户实机指出）。
+   */
+  const warn = strategy.data === 'round-robin'
+  const strategyText = strategy.data === 'fill-first' ? t('strategyFillFirst') : strategy.data
 
   return (
     <div className={css.section}>
       <div className={css.sectionTitle}>{t('routing')}</div>
-      <div className={css.hint}>{t('strategyLabel') + '：' + strategyText}</div>
+      {/*
+       * Two lines, not one. The warning **explains** the strategy above it; run
+       * together they read as a single phrase with three things at the same level
+       * and no hierarchy (2026-10-04, maintainer's report).
+       */}
+      <div className={css.readout}>
+        <span className={css.readoutLabel}>
+          {t('strategyValue', { label: t('strategyLabel'), value: strategyText })}
+        </span>
+        {warn && (
+          <div className={css.warnRow}>
+            <span className={css.warnIcon} aria-hidden="true">
+              <IconWarningOutlineRegular />
+            </span>
+            <span>{t('strategyWarn')}</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

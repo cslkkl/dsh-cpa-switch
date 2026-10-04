@@ -379,6 +379,47 @@ export interface NormalizedAccount {
 }
 
 /**
+ * 账号的显示名。
+ *
+ * 兜底链有两处**不是** `??` 能解决的：
+ *
+ * 1. **空串**。ZCode 实测 `nickname: ""`（2026-10-04）—— `'' ?? x` 的结果是 `''`，
+ *    所以整条链根本走不到，卡片顶部直接空掉、比别的卡矮一截。
+ * 2. **渠道名当昵称没意义**。`label` 在 qoder / workbuddy / zcode 上恒等于渠道名
+ *    本身（实测 `label: "qoder"`），拿它兜底等于在卡片上写「Qoder」。
+ *
+ * 所以：空串与非空都要判；`label` 只在**不是渠道名**时采用；最后退到
+ * `auth_id`（去掉 `.json`）—— 那是凭据文件名，稳定、可读、每个账号唯一。
+ */
+function displayName(account: AccountPayload): string {
+  const nickname = typeof account.nickname === 'string' ? account.nickname.trim() : ''
+  if (nickname !== '') return nickname
+
+  const label = typeof account.label === 'string' ? account.label.trim() : ''
+  if (label !== '' && !isChannelName(label)) return label
+
+  const authId = typeof account.auth_id === 'string' ? account.auth_id.trim() : ''
+  if (authId !== '') return authId.replace(/\.json$/u, '')
+
+  return typeof account.auth_index === 'string' ? account.auth_index : ''
+}
+
+/**
+ * 这个 `label` 是不是就是渠道名本身。
+ *
+ * 判据：与该渠道的展示名（`PLUGIN_ADAPTERS[id].label`，如 `zcode` → `ZCode`）
+ * 或渠道 id 相同。相等即认为它不标识**某个账号**。
+ */
+function isChannelName(label: string): boolean {
+  const lower = label.toLowerCase()
+  for (const id of PLUGIN_ORDER) {
+    const adapter = PLUGIN_ADAPTERS[id]
+    if (adapter.label.toLowerCase() === lower) return true
+  }
+  return (PLUGIN_ORDER as readonly string[]).includes(lower)
+}
+
+/**
  * 把某渠道的账号列表 + 余额合并成统一形状。
  *
  * @param plugin - 渠道 id。
@@ -412,7 +453,7 @@ export function normalizeAccounts(
     return {
       authIndex: account.auth_index,
       authId: account.auth_id,
-      nickname: account.nickname ?? account.label ?? account.auth_index ?? '',
+      nickname: displayName(account),
       disabled: account.disabled === true,
       exhausted: account.exhausted === true,
       plan: account.plan,

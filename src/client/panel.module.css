@@ -132,13 +132,40 @@
 
 /* The auto-checkin switch is a settings row, not a button: its label sits to
    the left of the control and the pair is pushed to the far end so it reads as
-   a different kind of thing from the action buttons. */
+   a different kind of thing from the action buttons.
+
+   ⚠️ No `cursor: pointer` here: the row is a `<div>`, and the only interactive
+   part is the `Switch` button (which brings its own cursor). Pointing at the
+   text would promise a click that does nothing — and that is exactly the bug
+   that `cursor: pointer` on a `<label>` used to hide. */
 .switchRow {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
+}
+
+/* The account card's enable switch gets its **own bottom row**, below
+   `.actions`. `margin-top: auto` pins it to the card's bottom, so its position
+   depends only on the card's height — not on how many action buttons this
+   channel happens to have.
+
+   Sharing `.actions` with the buttons let `flex-wrap` decide which row the
+   switch landed in, and channels differ in button count (ZCode has neither
+   check-in nor tasks), so its switch sat visibly lower than the others
+   (2026-10-04). */
+.enableRow {
+  margin-top: auto;
+  padding-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.enableText {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .switchText {
@@ -148,15 +175,30 @@
 
 /* ---- Account grid ------------------------------------------------------ */
 
+/* Every card in a row is the same height.
+ *
+ * `min-height` is the mechanism that actually works, and `grid-auto-rows: 1fr`
+ * is kept for the case where a row has a taller card than this floor. Reason it
+ * used to fail: `margin-top: auto` on `.actions` only absorbs slack when the
+ * container has a **definite** height — under `grid-auto-rows: auto` the height
+ * comes from the content, so there was no slack to absorb and a channel with
+ * fewer actions (ZCode has neither check-in nor tasks) rendered visibly shorter
+ * (2026-10-04, two rounds: the first attempt only added the grid property).
+ *
+ * 148px is the tallest card the current content can produce: head + numbers +
+ * meter + facts + actions, with the 12px padding on both sides. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-auto-rows: 1fr;
   gap: 12px;
 }
 
 /* The add-card is an affordance, so it gets a dashed seat rather than the solid
    border a real account has: the difference is the only cue that this one is
-   empty. `min-height` matches `.card` so a lone add-card keeps the row's rhythm. */
+   empty. `min-height` is a floor for the empty-channel case (no accounts, so
+   the row has no sibling to match) — `grid-auto-rows: 1fr` on the container
+   stretches it to match the others when there are any. */
 .addCard {
   display: flex;
   flex-direction: column;
@@ -194,6 +236,8 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px;
+  /* Floor so a card with less content still matches its row. See `.grid`. */
+  min-height: 148px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
 }
@@ -319,6 +363,46 @@
 .sectionTitle {
   font-size: 14px;
   font-weight: 600;
+}
+
+/* A label and its value on one line; a warning may follow **on its own line**.
+   `align-items: baseline` aligns text to text — an inline SVG has no baseline to
+   share, so the icon is a separate line-level flex item sized by the line height
+   instead (see `.warnIcon`). */
+.readout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.readoutLabel {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The warning sits on its own, indented line: it explains the strategy above,
+   it is not part of the strategy's name. Lining them up in one row read as
+   "轮换⚠每个请求换号…" — three things at one level with no hierarchy
+   (2026-10-04, maintainer's report). */
+.warnRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+/* The icon shares the text's line box instead of being nudged by hand.
+   `height: 1.5em` makes the box exactly one line of the 12px/1.5 readout, so
+   `align-items: center` lands the glyph on the line's optical centre with no
+   magic offset. A previous `-0.25em` nudge was a guess and read as "sticking
+   out" (2026-10-04, two rounds). `flex: none` keeps wrapping from squashing it. */
+.warnIcon {
+  display: inline-flex;
+  align-items: center;
+  height: 1.5em;
+  flex: none;
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 /* ---- Error boundary ---------------------------------------------------- */

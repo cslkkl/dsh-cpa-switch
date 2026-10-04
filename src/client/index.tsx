@@ -14,7 +14,7 @@
 import type { ReactNode } from 'react'
 import { PanelBoundary } from './PanelBoundary.tsx'
 import { Panel } from './Panel.tsx'
-import { en, zh } from './locales.ts'
+import { en, makeTranslate, zh } from './locales.ts'
 import type { LocaleKey } from './locales.ts'
 
 /**
@@ -43,7 +43,13 @@ const PKG_NAME = 'dsh-cpa-switch'
 
 /** 槽位注册面。 */
 interface SlotSeat {
-  readonly t?: (key: LocaleKey, ...params: readonly string[]) => string
+  /**
+   * 宿主给的翻译函数，形状与我们的 `Translate` 一致（key + 具名占位符）。
+   *
+   * 之所以再包一层而不是直接用：宿主传进来的那个**只保证 key→字符串**，
+   * 它的实参形状我们不依赖 —— 统一由 {@link makeTranslate} 处理插值。
+   */
+  readonly t?: (key: LocaleKey) => string
   readonly view?: string
 }
 
@@ -58,7 +64,7 @@ interface ClientContext {
   readonly slots: SlotsService
   readonly locale: {
     register: (ns: string, dictionaries: Record<string, unknown>) => void
-    bind: (ns: string) => (key: LocaleKey, ...params: readonly string[]) => string
+    bind: (ns: string) => (key: LocaleKey) => string
   }
   readonly effect: (callback: () => void, label: string) => void
   readonly inject: (deps: string[], callback: (scope: ClientContext) => void) => void
@@ -84,7 +90,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     ctx.locale.register(NS, { zh, en })
   }, 'cpa-panel: dictionaries')
-  const t = ctx.locale.bind(NS)
+  const t = makeTranslate(ctx.locale.bind(NS))
 
   /**
    * 插件自己的面板，挂在组合包页面**描述与行之间**（即「包含的组件」上方）。
@@ -102,7 +108,7 @@ export function apply(ctx: ClientContext): void {
    */
   ctx.slots.inject('plugins.bundle.config', () => {
     ctx.slots.register({ name: 'plugins.bundle.config', key: PKG_NAME, locale: NS }, (seat) => {
-      const t2 = typeof seat?.t === 'function' ? seat.t : t
+      const t2 = makeTranslate(typeof seat?.t === 'function' ? seat.t : ctx.locale.bind(NS))
       if (seat?.view === 'summary') return t2('tab')
       return (
         <PanelBoundary label={t2('tab')} t={t2}>
@@ -123,7 +129,7 @@ export function apply(ctx: ClientContext): void {
         locale: NS,
       },
       (seat) => {
-        const t2 = typeof seat?.t === 'function' ? seat.t : t
+        const t2 = makeTranslate(typeof seat?.t === 'function' ? seat.t : ctx.locale.bind(NS))
         return (
           <PanelBoundary label={t2('tab')} t={t2}>
             <Panel t={t2} />
