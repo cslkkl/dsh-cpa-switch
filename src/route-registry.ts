@@ -292,14 +292,20 @@ async function buildCpaRouteProfile(
 /**
  * 等目录稳定：CPA 启动后凭据**分批加载**，`/v1/models` 从空慢慢变多 ——
  * 立刻读会拿到残缺目录。连续两次计数一致才认为稳定；到上限仍为空视为无可用模型。
+ *
+ * 读取间隔**指数退避**：冷启动从 250ms 起，逐轮翻倍到 4s 封顶 —— 既不拖慢
+ * 已稳定的读取，也不放大冷启动的轮询量。**不许退回固定间隔**：固定 4s 意味着
+ * 每次宿主重载后的重推都白等一轮（目录早就稳定了），用户看到的就是
+ * 「切个语言，模型要两三秒才回来」（2026-10-04 实测，见 issue #9）。
  */
-async function readStableCatalog(
+export async function readStableCatalog(
   deps: RouteRegistryDeps,
 ): Promise<{ data?: unknown[] } | undefined> {
   const apiKey = await deps.resolveApiKey()
   const bearer = apiKey !== '' ? apiKey : deps.adminKey()
   const deadline = Date.now() + 120000
   let previous = -1
+  let delayMs = 250
   while (Date.now() < deadline) {
     const fetched = (await deps.cpaFetch(deps.options(), '/v1/models', {
       headers: { authorization: `Bearer ${bearer}` },
@@ -308,7 +314,8 @@ async function readStableCatalog(
     const count = (fetched.data ?? []).length
     if (count > 0 && count === previous) return fetched
     previous = count
-    await new Promise((resolve) => setTimeout(resolve, 4000))
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    delayMs = Math.min(delayMs * 2, 4000)
   }
   return undefined
 }
