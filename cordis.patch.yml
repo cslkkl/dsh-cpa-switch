@@ -33,153 +33,153 @@
 #
 # ⚠️ baseURL 与插件配置项 `port` 耦合，固定在默认端口 8317。
 - id: llm-pi-ai
-  name: "@deepseek-ai/dsh-llm-pi-ai"
+  name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
     providers:
       cpa:
-        displayName: "CPA 中转站"
+        displayName: 'CPA 中转站'
         api: openai-completions
         baseURL: http://127.0.0.1:8317/v1
         apiKeyEnv: CPA_API_KEY
         models:
           - id: minimax-m3
-            name: "WorkBuddy · minimax-m3"
-            input: [ text, image ]
+            name: 'WorkBuddy · minimax-m3'
+            input: [text, image]
           - id: deepseek-v4-flash
-            name: "WorkBuddy · deepseek-v4-flash"
-            input: [ text, image ]
+            name: 'WorkBuddy · deepseek-v4-flash'
+            input: [text, image]
           - id: auto
-            name: "WorkBuddy · auto"
-            input: [ text, image ]
+            name: 'WorkBuddy · auto'
+            input: [text, image]
           - id: deepseek-v3-2-volc
-            name: "WorkBuddy · deepseek-v3-2-volc"
-            input: [ text, image ]
+            name: 'WorkBuddy · deepseek-v3-2-volc'
+            input: [text, image]
           - id: deepseek-v4.1-flash
-            name: "WorkBuddy · deepseek-v4.1-flash"
-            input: [ text, image ]
+            name: 'WorkBuddy · deepseek-v4.1-flash'
+            input: [text, image]
           - id: hunyuan-2.0-thinking
-            name: "WorkBuddy · hunyuan-2.0-thinking"
+            name: 'WorkBuddy · hunyuan-2.0-thinking'
           - id: hy3-x
-            name: "WorkBuddy · hy3-x"
-            input: [ text, image ]
+            name: 'WorkBuddy · hy3-x'
+            input: [text, image]
           - id: deepseek-v4-pro
-            name: "WorkBuddy · deepseek-v4-pro"
-            input: [ text, image ]
+            name: 'WorkBuddy · deepseek-v4-pro'
+            input: [text, image]
           - id: kimi-k2.8-preview
-            name: "WorkBuddy · kimi-k2.8-preview"
-            input: [ text, image ]
+            name: 'WorkBuddy · kimi-k2.8-preview'
+            input: [text, image]
           - id: kimi-k2.7
-            name: "WorkBuddy · kimi-k2.7"
-            input: [ text, image ]
+            name: 'WorkBuddy · kimi-k2.7'
+            input: [text, image]
           - id: hunyuan-chat
-            name: "WorkBuddy · hunyuan-chat"
+            name: 'WorkBuddy · hunyuan-chat'
           - id: hy3
-            name: "WorkBuddy · hy3"
-            input: [ text, image ]
+            name: 'WorkBuddy · hy3'
+            input: [text, image]
           - id: default
-            name: "WorkBuddy · default"
-            input: [ text, image ]
+            name: 'WorkBuddy · default'
+            input: [text, image]
           - id: kimi-k3-1
-            name: "WorkBuddy · kimi-k3-1"
-            input: [ text, image ]
+            name: 'WorkBuddy · kimi-k3-1'
+            input: [text, image]
           - id: kimi-k2.6
-            name: "WorkBuddy · kimi-k2.6"
-            input: [ text, image ]
+            name: 'WorkBuddy · kimi-k2.6'
+            input: [text, image]
           - id: hy4-preview
-            name: "WorkBuddy · hy4-preview"
-            input: [ text, image ]
+            name: 'WorkBuddy · hy4-preview'
+            input: [text, image]
           - id: hy4-preview-f
-            name: "WorkBuddy · hy4-preview-f"
-            input: [ text, image ]
+            name: 'WorkBuddy · hy4-preview-f'
+            input: [text, image]
           - id: space-bunny
-            name: "WorkBuddy · space-bunny"
-            input: [ text, image ]
+            name: 'WorkBuddy · space-bunny'
+            input: [text, image]
           - id: kimi-k2.5
-            name: "WorkBuddy · kimi-k2.5"
-            input: [ text, image ]
+            name: 'WorkBuddy · kimi-k2.5'
+            input: [text, image]
           - id: Trae/Doubao-Seed-Evolving
-            name: "Trae · Trae/Doubao-Seed-Evolving"
-            input: [ text, image ]
+            name: 'Trae · Trae/Doubao-Seed-Evolving'
+            input: [text, image]
           - id: Trae/kimi-k2.6
-            name: "Trae · Trae/kimi-k2.6"
-            input: [ text, image ]
+            name: 'Trae · Trae/kimi-k2.6'
+            input: [text, image]
           - id: Trae/qwen3.8-max
-            name: "Trae · Trae/qwen3.8-max"
-            input: [ text, image ]
+            name: 'Trae · Trae/qwen3.8-max'
+            input: [text, image]
           - id: Trae/Doubao-Seed-2.1-Turbo
-            name: "Trae · Trae/Doubao-Seed-2.1-Turbo"
-            input: [ text, image ]
+            name: 'Trae · Trae/Doubao-Seed-2.1-Turbo'
+            input: [text, image]
           - id: Trae/DeepSeek-V4-Flash-Official
-            name: "Trae · Trae/DeepSeek-V4-Flash-Official"
+            name: 'Trae · Trae/DeepSeek-V4-Flash-Official'
           - id: Trae/qwen-3.7-plus
-            name: "Trae · Trae/qwen-3.7-plus"
-            input: [ text, image ]
+            name: 'Trae · Trae/qwen-3.7-plus'
+            input: [text, image]
           - id: Trae/glm-5.3
-            name: "Trae · Trae/glm-5.3"
+            name: 'Trae · Trae/glm-5.3'
           - id: Trae/kimi-k2.7-code
-            name: "Trae · Trae/kimi-k2.7-code"
-            input: [ text, image ]
+            name: 'Trae · Trae/kimi-k2.7-code'
+            input: [text, image]
           - id: Trae/step-5-preview
-            name: "Trae · Trae/step-5-preview"
-            input: [ text, image ]
+            name: 'Trae · Trae/step-5-preview'
+            input: [text, image]
           - id: Trae/glm-5.2
-            name: "Trae · Trae/glm-5.2"
+            name: 'Trae · Trae/glm-5.2'
           - id: Trae/Doubao-Seed-2.1-Pro
-            name: "Trae · Trae/Doubao-Seed-2.1-Pro"
-            input: [ text, image ]
+            name: 'Trae · Trae/Doubao-Seed-2.1-Pro'
+            input: [text, image]
           - id: Trae/DeepSeek-V4-Pro-Official
-            name: "Trae · Trae/DeepSeek-V4-Pro-Official"
+            name: 'Trae · Trae/DeepSeek-V4-Pro-Official'
           - id: Trae/kimi-k3
-            name: "Trae · Trae/kimi-k3"
-            input: [ text, image ]
+            name: 'Trae · Trae/kimi-k3'
+            input: [text, image]
           - id: Trae/deepseek-v4.1-flash
-            name: "Trae · Trae/deepseek-v4.1-flash"
-            input: [ text, image ]
+            name: 'Trae · Trae/deepseek-v4.1-flash'
+            input: [text, image]
           - id: Trae/minimax-m3
-            name: "Trae · Trae/minimax-m3"
-            input: [ text, image ]
+            name: 'Trae · Trae/minimax-m3'
+            input: [text, image]
           - id: q37fmodel
-            name: "Qoder · q37fmodel"
-            input: [ text, image ]
+            name: 'Qoder · q37fmodel'
+            input: [text, image]
           - id: dmodel
-            name: "Qoder · dmodel"
-            input: [ text, image ]
+            name: 'Qoder · dmodel'
+            input: [text, image]
           - id: kmodel_latest
-            name: "Qoder · kmodel_latest"
-            input: [ text, image ]
+            name: 'Qoder · kmodel_latest'
+            input: [text, image]
           - id: kmodel
-            name: "Qoder · kmodel"
-            input: [ text, image ]
+            name: 'Qoder · kmodel'
+            input: [text, image]
           - id: qmodel_38max
-            name: "Qoder · qmodel_38max"
-            input: [ text, image ]
+            name: 'Qoder · qmodel_38max'
+            input: [text, image]
           - id: qmodel_latest
-            name: "Qoder · qmodel_latest"
-            input: [ text, image ]
+            name: 'Qoder · qmodel_latest'
+            input: [text, image]
           - id: qfmodel
-            name: "Qoder · qfmodel"
-            input: [ text, image ]
+            name: 'Qoder · qfmodel'
+            input: [text, image]
           - id: mmodel
-            name: "Qoder · mmodel"
-            input: [ text, image ]
+            name: 'Qoder · mmodel'
+            input: [text, image]
           - id: gfmodel
-            name: "Qoder · gfmodel"
-            input: [ text, image ]
+            name: 'Qoder · gfmodel'
+            input: [text, image]
           - id: gm51model
-            name: "Qoder · gm51model"
-            input: [ text, image ]
+            name: 'Qoder · gm51model'
+            input: [text, image]
           - id: qmodel
-            name: "Qoder · qmodel"
-            input: [ text, image ]
+            name: 'Qoder · qmodel'
+            input: [text, image]
           - id: dfmodel
-            name: "Qoder · dfmodel"
-            input: [ text, image ]
+            name: 'Qoder · dfmodel'
+            input: [text, image]
           - id: gmodel
-            name: "Qoder · gmodel"
-            input: [ text, image ]
+            name: 'Qoder · gmodel'
+            input: [text, image]
           - id: glm-5.3-flash
-            name: "ZCode · glm-5.3-flash"
-            input: [ text, image ]
+            name: 'ZCode · glm-5.3-flash'
+            input: [text, image]
           - id: glm-5.3
-            name: "ZCode · glm-5.3"
-            input: [ text, image ]
+            name: 'ZCode · glm-5.3'
+            input: [text, image]

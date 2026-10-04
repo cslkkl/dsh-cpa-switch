@@ -1,132 +1,78 @@
-# dsh-cpa-switch 实施计划
+# dsh-cpa-switch 待办与下一步
 
-> 读者：接手实施的开发者与 agent。
-> 状态：**插件已发布可用（`0.1.2`），S0–S7 全量重构未启动、且已判定不必启动。**
-> 设计依据见 `../调研报告归档/核心文档集/`；本文件只写「什么时候做什么」，不重复设计细节。
->
-> **先读这条再往下**：§2 那张 S0–S7 总序是**蓝图设想**，不是已批准的路线图。
-> [蓝图实施评估](BLUEPRINT-ASSESSMENT.md) 的结论是**不要全量开工** ——
-> 其中 **S1 宿主瘦身已明确放弃**，因为自建 CPA 产物（见下）已经拿到了同样的收益，
-> 且不必动上游源码。本文件保留 S0–S7 供追溯，**不要按它排期**。
+> 读者：接手维护的开发者与 agent。
+> 本文件只写「现在什么状态、下一步做什么」，不重复设计理由（见 [ARCHITECTURE.md](ARCHITECTURE.md)）。
 
 ---
 
-## 1. 当前进度
+## 1. 当前状态
 
-| 阶段 | 状态 | 说明 |
-|---|---|---|
-| P0 现有插件 | ✅ 已发布 | 手写 JS 版可用：余额、签到、切账号、OAuth 加号、进程托管 |
-| P1 调研 | ✅ 完成 | 五仓库源码对照，39 份散文档收敛为核心文档集 |
-| P2 设计 | ✅ 完成 | 架构、删留清单、插件规格、宿主补丁规格、验证手册 |
-| P3 校验 | ✅ 完成 | 锚点双轮校验 + 就绪度审计 |
-| P4 开工前准备 | ⛔ **已作废** | 见 §3；阻塞项随「不全量开工」一并失效 |
-| S0–S7 实施 | ⛔ **不启动** | 见 §2 与 [评估结论](BLUEPRINT-ASSESSMENT.md) |
+**已发布可用。** 最新版本经真实用户路径验收：装完插件自动下载 CPA、生成密钥、
+拉起服务，面板显示「运行中」，各渠道页签齐全。当前版本号现查
+[package.json](../package.json) 或 [npm](https://www.npmjs.com/package/dsh-cpa-switch)。
 
-**插件当前实际状态**（比上表任何一行都更重要）：
+代码已完成 TypeScript 化与模块拆分，两半都有构建链与类型门禁。
 
-- npm 已发布 **`dsh-cpa-switch@0.1.2`**，`latest` 指向它。
-  用户装法：`dsh plugin --profile <profile> add dsh-cpa-switch`。
-- **用户只装这一个插件就能用** —— 不需要自备 CLIProxyAPI 本体、渠道 dll 或管理密钥，
-  插件首次启动会自动下载、生成密钥、拉起服务。
-- CPA 产物改由自家 Release 托管：`cslkkl/CLIProxyAPI` 的 `v8.0.13-lp`，
-  由上游发布 tag 直接构建，**产物与上游官方一致**，只是换了个下载源。
-  这替代了 S1「宿主瘦身」想达到的目的，且无需维护上游源码补丁。
-- 工程化形态仍是**手写 JS**（`index.js` / `adapters.js` / `setup.js` / `net.js` / `client.js`），
-  没有 TS、没有单元测试框架；防线靠 `../scripts/` 下八个契约检查脚本。
-  §2 的 S4「DSH 工程化」是**可选**的改进方向，不是开工前提。
+| 项            | 状态                                                                  |
+| ------------- | --------------------------------------------------------------------- |
+| 宿主半端      | TypeScript，`lib/index.js`（ESM）                                     |
+| 浏览器半端    | TypeScript JSX，`lib/client.js`（CJS 工厂）                           |
+| 类型检查      | `pnpm typecheck` 两半各一次，全绿                                     |
+| Lint / Format | `pnpm lint` / `pnpm format:check`                                     |
+| 测试          | vitest，见 [tests/README.md](../tests/README.md)                      |
+| 产物断言      | `pnpm verify:artifacts`，见 [scripts/README.md](../scripts/README.md) |
+| CI            | [ci.yml](../.github/workflows/ci.yml)，只读，含产物断言               |
+| 本地钩子      | [.pre-commit-config.yaml](../.pre-commit-config.yaml)                 |
 
 ---
 
-## 2. 实施阶段总序
+## 2. 下一步（按优先级）
 
-阶段划分与验收编号沿用核心文档集的 S0–S7 口径，验收标准以 [06-实施验证与发布手册](../调研报告归档/核心文档集/06-实施验证与发布手册.md) 的 V 编号为唯一事实源。
+### 2.1 真机验证本轮重构（最高）
 
-| 阶段 | 做什么 | 验收引用 | 依赖 |
-|---|---|---|---|
-| **S0 准备** | 基线冻结、五仓库按 SHA 取快照、构建链验证（Go 1.26 + MinGW） | V4 | — |
-| **S1 宿主瘦身** | 删删除面（含 R13 内置 provider 族整删），每删一组 `go build` | V8、X1 | S0 |
-| **S2 宿主补丁** | 原子写×3、`/readyz`、`/shutdown`、key→unit 捷径、v0 收敛 | V1–V3、V6、V7、V9–V11、X2、X3 | S1 |
-| **S3 插件集清理+构建** | 删 mimo/dist，改 release.yml/build.sh，重编 4 dll 出 zip + SHA-256 | V31、V21–V30 | S0 |
-| **S4 DSH 工程化** | package.json / tsconfig×2 / tsdown / vitest；`index.js`→`index.ts`、`adapters.js`→`adapters.ts` | V12–V13 | S1 端点形态 |
-| **S5 首启与托管** | `units.ts` / `process.ts` / `bootstrap.ts` | V14–V18 | S2、S4 |
-| **S6 UI 养号版** | `client.js` 改造：Modal / token / 单元行 / schema 表单 | V19、U1–U6 | S4、S5 |
-| **S7 端到端与发布** | 三条链联调 + exe、dll、插件包发布 | V20 及回归 | S2、S3、S6 |
+`lib/` 已重建，但**尚未在真实 DSH 里跑过**。重启 DSH 后确认：
 
-**并行关系**：S3 只依赖 S0，可与 S1/S2 并行；S4 只依赖 S1 的端点形态契约；S5 必须等 S2 与 S4。
+- [ ] 插件页出现本插件卡片（标题与图标正常，没回落成包名）
+- [ ] 面板在「包含的组件」**上方**
+- [ ] 四个渠道页签齐全，账号接口返回 200
+- [ ] 签到 / 任务 / 选择账号仍可用
 
----
+### 2.2 补测试
 
-## 3. 开工前必改（阻塞项）
+现有 3 个文件覆盖无副作用模块，可继续：
 
-> **⚠️ 先读 [蓝图实施评估](BLUEPRINT-ASSESSMENT.md)** —— 它对本节的「方案甲」与
-> 「后端小改授权」两项给出**不建议现在做**的意见，并建议把 S3/S4 拆出来单独做、
-> 推迟 S1。本节保留为原计划的阻塞项清单，是否开清以评估意见为准。
+- [ ] `src/setup/config.ts` —— `looksLikeBcrypt` 挡住哈希、渠道逐个启用
+- [ ] `src/credentials.ts` —— 「沿用优先」三步取值（需 mock 凭据服务）
+- [ ] `src/index.ts` 的路由表 —— 断言 path 唯一、方法合法（结构断言，不打网络）
 
-审计（[12-实施就绪度审计报告](../调研报告归档/核心文档集/12-实施就绪度审计报告.md)）判定：**骨架可信、可进入实施**，但下列项需先清。
+### 2.3 收尾项
 
-### 3.1 需人工拍板（阻塞）
-
-- [ ] **方案甲 单元锁定机制**：每单元 key + `pinned_auth_id`（宿主约 10 行小改，走 `model_execution.go` AuthID 捷径）。技术已双轮验证，但涉及宿主新代码注入位语义，需人工点头。
-- [ ] **后端小改授权**：包 2 需动 Go 宿主源码（原子写×3、`/readyz`、`/shutdown`、key→unit、v0 收敛）。
-
-其余拍板项已按默认落定（zcode 保留 / 养号默认值 / 账号入口 / 发布责任），见 [00-决策与需求演进 §5](../调研报告归档/核心文档集/00-决策与需求演进.md)。
-
-### 3.2 三处契约缺口（阻塞）
-
-| # | 缺口 | 建议落点 |
-|---|---|---|
-| G1 | `unitMapping` 写端点 + 每单元 apiKey 注册通道未定义 | `PUT /v8/management/units`（幂等覆盖）；apiKey 走 access manager keys 注入 |
-| G2 | exe / dll 下载 URL + SHA256 来源未固化 | GitHub Releases latest + 配套 `SHA256SUMS` 清单，实施时实测固化 |
-| G3 | `secretKey` 回显渠道二选一未定 | 写 DSH 凭据库 + 面板回显双写，需 credentials 写权限 |
-
-### 3.3 文档一致性欠账（不阻塞，开工前顺手）
-
-审计列出的清单里，下列项**经本次复核已修**，不再列为欠账：
-
-- 99 索引分册名过期、`06` 误标"待落盘" → 已改。
-- `04` 旧 config 字段名 → 已是 `remote-management.secret-key`。
-- peer 计数 22 → 已是 21（`02`/`03`/`00` 均正确）。
-- `adapters.js` 312 行 → 已是实测值。
-
-仍待处理：
-
-- [ ] `12-实施就绪度审计报告.md` 自身已过时（其"未落地"判定与实际不符）→ 加一行落地状态说明。
-- [ ] M8：`providerId` 粒度分歧（按渠道 vs 每单元）待裁决。
-- [ ] 建议项 S1–S6（节号指向微偏、状态注记）逐条校正。
-
-> 处理上述第 1 项时不要顺手改 `12` 的原始分册内容 —— 它是校验留痕，只加注记。
+- [ ] 重新设计 `icon.svg` —— 当前是**过渡版**，方向「人物 + 环绕切换箭头」，
+      几何已对齐官方 36 格配方
+- [ ] `providerId` 粒度裁决（按渠道 vs 每单元）
+- [ ] 按需补 `CONTRIBUTING` 与发布手册（若走 tag 触发的自动发布）
+- [ ] 分支保护由维护者在平台设置里开启（不属 agent 操作范围）
 
 ---
 
-## 4. 本仓待办（与 S0–S7 并行）
+## 3. 已知局限
 
-现状本仓缺工程治理件。这些不阻塞 S0，但应在 S4 之前补齐，否则 TS 化无处落地。
+见 [ARCHITECTURE.md §7](ARCHITECTURE.md)。要点：
 
-- [ ] `.node-version` 声明 Node 版本基线（对齐 CI 与文档徽章）。
-- [ ] 锁文件：单一锁文件（`package-lock.json`），不允许无锁安装。
-- [ ] ESLint + Prettier 项目本地安装（`eslint` / `prettier` / `eslint-config-prettier`）。
-- [ ] `scripts` 入口统一：`dev` / `build` / `start` / `lint` / `format` / `typecheck` / `test`。
-- [ ] 本地钩子（pre-commit）：按 diff 增量检查，代码→模块测试，文档→链接/行尾。
-- [ ] 只读 CI（GitHub Actions）：frozen 安装 → typecheck → lint → prettier --check → test。
-- [ ] `AGENTS.md`（各可维护目录）+ `README.md` 双件补齐。
-- [ ] **重新设计 `icon.svg`**：现图标质量不达标，需重做为插件图标（`package.json` 的 `icon` 字段指向它，插件卡片直接展示）。
+- 仅 Windows；无 Docker；DSH 宿主零改动。
+- `scheduler_mode` 改为 `off` 后**必须重启 CPA** 才生效（配置不热加载）。
+- 被限流的号 CPA 仍报 `status: active`（code 6004）—— 面板「启用」≠「现在能用」。
 
 ---
 
-## 5. 已知风险与边界
+## 4. 交接须知
 
-- **上游时效**：渠道私有协议（qoder / trae CN / zcode）时效性见 [11-渠道时效核查](../调研报告归档/核心文档集/11-渠道时效核查与风险清单.md)，未实测项一律标"未验证"。
-- **仅 Windows**：无跨平台计划。
-- **§3 未清前不进 S0**：带着三处契约缺口开工，实施 agent 会分叉出与文档不符的实现。
-- **验证点未跑不得宣称完成**：状态列一律实测后回填，未验证标"未验证"。
+上下文压缩或换人接手时，按此顺序恢复：
 
----
+1. 根 [AGENTS.md](../AGENTS.md) —— 规则、命令、活跃坑。
+2. 本文件 —— 当前状态与下一步。
+3. [ARCHITECTURE.md](ARCHITECTURE.md) —— 为什么这样设计、防错清单。
+4. 按改动范围进对应子目录手册：`src/README.md`、`src/client/README.md`、`src/setup/README.md`。
 
-## 6. 交接须知
-
-上下文压缩或换 agent 后，按此顺序恢复：
-
-1. 本文件（当前进度与下一步）。
-2. [99-入口索引](../调研报告归档/核心文档集/99-入口索引.md)（系统定位 + 五仓库坐标 + 文档地图）。
-3. [00-决策与需求演进](../调研报告归档/核心文档集/00-决策与需求演进.md)（已锁定方向）。
-4. 按阶段进对应分册（`03-实施任务书` → 各包依赖的 `02`/`04`/`05`/`09`）。
+**验证入口固定为 `pnpm check`**（typecheck + lint + format + build + test），
+不要只看构建通过。

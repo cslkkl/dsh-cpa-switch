@@ -1,6 +1,6 @@
 {
   "name": "dsh-cpa-switch",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "DeepSeek Harness 插件：在 DSH 里管理 CLIProxyAPI 的账号 —— 余额、签到、任务、切换账号，并让 CPA 随 DSH 启停。",
   "license": "MIT",
@@ -16,25 +16,35 @@
     "url": "git+https://github.com/cslkkl/dsh-cpa-switch.git"
   },
   "icon": "./icon.svg",
+  "types": "./lib/index.d.ts",
   "exports": {
-    ".": "./index.js",
-    "./client": "./client.js",
-    "./setup": "./setup.js",
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./lib/client.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
-    "index.js",
-    "adapters.js",
-    "client.js",
-    "setup.js",
-    "net.js",
+    "lib/",
     "cordis.patch.yml",
     "icon.svg",
     "locale/*.json",
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.{ts,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,json,md,yml,yaml}\"",
+    "test": "vitest run",
+    "verify:artifacts": "node scripts/verify-artifacts.cjs",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm verify:artifacts && pnpm test"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -60,6 +70,18 @@
     "@deepseek-ai/schemastery": "^3.18.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.4"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.9",
+    "react": "^19.3.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^4.1.11"
   }
 }

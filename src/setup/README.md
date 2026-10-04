@@ -1,0 +1,47 @@
+# setup/ — 环境准备模块手册
+
+把 CPA 本体与渠道插件下载到本地，让「装插件 → 扫码 → 用」走通。
+
+用户装完插件时，机器上通常**既没有 CPA 也没有渠道插件** —— 光有管理界面没法用。
+
+## 文件
+
+- **`index.ts`** —— 主流程 `prepare()` + 统一再导出。
+  - 导出：`prepare` / 类型 `PrepareInput` / `PrepareResult` / `SetupStep`
+  - 流程：逐来源「已有则跳过 → 查 release → 下载 → 校验 sha256 → 解压」→ 写配置
+  - ⚠️ **只补缺件，绝不重下**：判据是 exe 存在 / dll 数 > 0，刻意宽松而不是比版本
+  - ⚠️ 配置只在**文件不存在**时写 —— 用户手改过的不能被覆盖
+- **`paths.ts`** —— 路径布局与下载源。
+  - 导出：`SOURCES` / `runtimeDir` / `managedCpaDir` / `managedExePath` /
+    `managedConfigPath` / `managedPluginsDir` / 类型 `SourceKey`
+  - exe、`config.yaml`、`plugins/` **刻意同层** —— CPA 的 `plugins.dir` 相对工作目录解析
+  - ⚠️ `SOURCES.cpa` **绝不能指向没有 Release 的仓库**（没有兜底）
+- **`config.ts`** —— `config.yaml` 生成与密钥派生。
+  - 导出：`renderConfig` / `writeConfig` / `generateSecretKey` / `generateApiKey` /
+    `looksLikeBcrypt` / `readSecretKeyFromConfig`
+  - ⚠️ 渠道必须**逐个** `enabled: true`；漏了 dll 全部未激活 → 账号接口一律 404
+  - ⚠️ `readSecretKeyFromConfig` **必须挡掉 bcrypt 哈希** —— 那是校验用的，拿去当 Bearer 必然 401
+- **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
+  - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
+    `removeDir` / `inspect` / `humanSize` / 类型
+  - 解压用系统 `tar`（Windows 10+ 自带 bsdtar）—— 不引 zip 依赖，插件保持零 npm 依赖
+  - `inspect()` 返回的 `ok` 含义是「**环境齐不齐**」，与路由层的 `ok`（查询成功没）不是一件事
+
+## 归属与依赖
+
+- 被谁依赖：`src/index.ts`（`prepare` / `inspect` / `managedExePath`）、
+  `src/process.ts`（`managedExePath`）、`src/credentials.ts`（`readSecretKeyFromConfig` / 生成密钥）
+- 依赖方向：`setup/` 内部三段互相独立；对外只暴露 `index.ts` 的再导出
+
+## 变更影响路由
+
+- 改下载源 → `SOURCES` + [架构 §7](../../docs/ARCHITECTURE.md) 的范围边界
+- 改 `config.yaml` 字段 → 与 CPA 上游 `internal/config` 对照后同步本文件
+- 改 `prepare` 的跳过判据 → 同步 [架构 §5](../../docs/ARCHITECTURE.md) 的 F5
+- 新增文件 → 回填本文件
+
+## 参考
+
+- 为什么这么设计 → [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
+- 在这里工作的约束 → [AGENTS.md](AGENTS.md)
+- 根索引 → [../../AGENTS.md](../../AGENTS.md)

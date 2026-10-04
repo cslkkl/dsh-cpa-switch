@@ -1,0 +1,77 @@
+/**
+ * 配置 schema 与读取。
+ *
+ * @module dsh-cpa-switch/config
+ */
+
+import z from '@deepseek-ai/schemastery'
+
+/**
+ * 配置 schema。
+ *
+ * **全部字段 `.volatile()`**，两条理由缺一不可：
+ * 1. 只有 volatile 字段进得了设置表单；漏一个，那个字段就在卡片里消失（不报错）。
+ * 2. 写入路径按 volatile 逐路径放行，非 volatile 路径会被宿主直接拒掉。
+ *
+ * 副作用是好的：全字段 volatile ⇒ Loader 判「只有 volatile 变了」⇒ 改配置
+ * 永不重挂，`apply` 只跑一次，值一律现读。
+ */
+export const Config = z.object({
+  adminKey: z.string().role('secret').default('').volatile(),
+  adminKeyRef: z.string().role('credential-ref').default('CPA_ADMIN_KEY').volatile(),
+  port: z.natural().min(1).max(65535).default(8317).volatile(),
+  exePath: z.string().default('').volatile(),
+  manageLifecycle: z.boolean().default(true).volatile(),
+  autoCheckinOnStart: z.boolean().default(true).volatile(),
+  /**
+   * 是否让 CPA 在启动时自动打开浏览器指向它自带的管理控制台。
+   *
+   * 默认 **false**：本插件已经提供了面板，再弹一个浏览器标签页是纯噪音，
+   * 而且每次 DSH 重启都会弹。置 true 则透传（不加 `-no-browser`）。
+   */
+  openControlPanel: z.boolean().default(false).volatile(),
+  startTimeoutSeconds: z.natural().min(3).max(180).default(30).volatile(),
+})
+
+/** 配置读取面：每个字段一个 `get()`。 */
+export interface ConfigRefs {
+  adminKey: { get: () => string }
+  adminKeyRef: { get: () => string }
+  port: { get: () => number }
+  exePath: { get: () => string }
+  manageLifecycle: { get: () => boolean }
+  autoCheckinOnStart: { get: () => boolean }
+  openControlPanel: { get: () => boolean }
+  startTimeoutSeconds: { get: () => number }
+}
+
+/** 当前生效的纯值配置。 */
+export interface PluginConfig {
+  readonly adminKey: string
+  readonly adminKeyRef: string
+  readonly port: number
+  readonly exePath: string
+  readonly manageLifecycle: boolean
+  readonly autoCheckinOnStart: boolean
+  readonly openControlPanel: boolean
+  readonly startTimeoutSeconds: number
+}
+
+/**
+ * 造一个配置读取器。
+ *
+ * **不许把结果缓存进字段**：全字段 volatile ⇒ Loader 改值不重挂本插件，
+ * 所以 `apply` 只跑一次，而值随时可能变。每次调用都重新取。
+ */
+export function makeReadConfig(refs: ConfigRefs): () => PluginConfig {
+  return () => ({
+    adminKey: refs.adminKey.get(),
+    adminKeyRef: refs.adminKeyRef.get(),
+    port: refs.port.get(),
+    exePath: refs.exePath.get(),
+    manageLifecycle: refs.manageLifecycle.get(),
+    autoCheckinOnStart: refs.autoCheckinOnStart.get(),
+    openControlPanel: refs.openControlPanel.get(),
+    startTimeoutSeconds: refs.startTimeoutSeconds.get(),
+  })
+}

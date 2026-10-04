@@ -1,6 +1,13 @@
-# 依赖目录：本地开发用的 junction 指向 DSH profile 的共享依赖，
-# 不属于本项目源码，绝不能提交。
+# 依赖目录
 node_modules/
+
+# 构建产物
+lib/
+dist/
+*.tgz
+
+# 调研与规划归档：本地保留、不进版本库，不属文档网络
+调研报告归档/
 
 # 编辑器 / 系统噪音
 .DS_Store
@@ -8,3 +15,8 @@ Thumbs.db
 *.log
 *.bak
 *.bak-*
+
+# 工具缓存
+.eslintcache
+coverage/
+*.tsbuildinfo
