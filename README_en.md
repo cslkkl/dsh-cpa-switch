@@ -20,40 +20,35 @@
   </p>
 </div>
 
-Check balances, check in, run tasks, switch accounts — without opening CPA's own web console.
+Check balances, check in, run tasks and switch accounts — manage CLIProxyAPI (CPA) accounts
+inside DSH, without opening its own web console.
 
 Install the plugin and you are done: the CPA binary, the channel plugins, the config and the
 admin key are all prepared by the plugin itself.
 
 > [!NOTE]
-> **The admin key never leaves the host.** The browser half only calls the plugin's own
-> `/api/v1/cpa/*`; the host attaches the key when talking to CPA. The browser can neither see
-> nor obtain it.
+> **The key never leaves the host**: every action in the panel is performed by the plugin on
+> your behalf. The admin key only lives on the host side — the web page can never see it.
 
 ## What it does
 
-Open **Plugins → CPA panel** in DSH. Each of the four channels gets its own tab:
+Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own tab:
 
-- **Account balances**: available / used / pool / package count. Tokens and credits are
-  counted separately and never summed together.
-- **One-click actions**: check in all, run all tasks, refresh; each account can also be
-  checked in / run individually.
-- **Enable / disable accounts and converge in one click**: every account has an enable
-  toggle for individual control, and "Use only this one" disables every other account in
-  the same channel at once — one channel spends its credits from a single account, no
-  toggling each one down.
-- **Add an account**: the "+ Add account" tile at the end of each channel's list opens the OAuth
-  authorization page. Finish in the browser — no callback URL copying.
-- **Remembers your choice**: the account you picked is still the one in use after a DSH restart.
-- **Auto check-in switch**: reads and writes CPA's `checkin_auto`.
-- **Process lifecycle**: CPA starts with DSH (an already-running instance is reused), and DSH
-  only stops the instance it started itself.
-- **Startup top-up**: CPA's own 09:00 / 21:00 timers are missed while DSH is not running, so
-  the plugin performs one catch-up run at startup.
-- **Models registered into the conversation**: once CPA is ready, the four channels' models
-  appear in DSH's model picker as `channel · model` (see [below](#models-for-conversation)) —
-  install the plugin, add an account, and use them straight away, with no config file to edit and
-  no script to run.
+- **See account balances**: available / used / quota pool / package count; tokens and credits
+  are shown separately and never summed together.
+- **Check in all / run all tasks**: one click per channel; each account can also be operated
+  individually.
+- **Enable / disable accounts**: every account has a toggle, and "Use only this one" disables
+  every other account in the same channel at once.
+- **Add an account**: the "+ Add account" entry at the end of each channel's list opens the
+  OAuth page — finish the login in your browser and you are done.
+- **Remembers your choice**: after a DSH restart, the account you picked is still the one in use.
+- **Automatic check-in**: toggled per channel; check-ins missed while DSH was not running are
+  caught up when the plugin starts.
+- **Process hosting**: CPA starts with DSH (an already-running instance is reused) and stops
+  with it.
+- **Models registered automatically**: once the plugin is installed and an account is added,
+  the four channels' models appear in DSH's model picker on their own.
 
 ### The four channels
 
@@ -64,26 +59,22 @@ Open **Plugins → CPA panel** in DSH. Each of the four channels gets its own ta
 | Qoder     | single   | credits      | ✅       | —     |
 | ZCode     | single   | **token**    | —        | —     |
 
-**Degrades by capability**: a capability the plugin does not support is not rendered at all —
-no button that "does nothing when clicked".
+**Degrades by capability**: features a channel does not support are not rendered — no button
+that "does nothing when clicked".
 
 ## Security
 
-**The admin key lives only in the host half and is never sent to the browser.** The browser only
-calls the plugin's own `/api/v1/cpa/*`; the host attaches the key when calling CPA, and CPA only
-listens on `127.0.0.1`. See [Architecture §4.1](docs/ARCHITECTURE.md).
+The admin key only lives on the host side and is never sent to the browser — details in
+[Architecture §4.1](docs/ARCHITECTURE.md).
 
 ## Requirements
 
-Only **DSH** (DeepSeek Harness). This plugin **does not bundle CPA**; it is CPA's management UI.
+Only **DSH** (DeepSeek Harness). The CPA binary, the channel plugins and the admin key are not
+yours to prepare — the plugin downloads and configures them on first start; an existing CPA on
+the machine is reused, never overwritten.
 
-The CPA binary, the channel plugins (`workbuddy.dll` and friends) and the admin key **are not
-yours to prepare** — on first start the plugin does all of it in one pass: download → verify
-sha256 → extract → generate config → generate the admin key. Downloads go through the system
-proxy (the built-in `fetch` ignores `HTTPS_PROXY`, hence `src/net.ts`).
-
-An **existing CPA on the machine is reused, never overwritten** (detected by "exe exists / dll
-count > 0").
+Downloading needs access to GitHub Releases; configure a proxy where a direct connection does
+not work.
 
 ## Install
 
@@ -102,82 +93,46 @@ plugin_manager action: install_bundle
 target: <absolute path to this directory>
 ```
 
-Either way, the plugin must end up as a **real directory under the profile's `node_modules/`**
-(not a symlink). A same-named entry in the profile's `dependencies` is the _installed
-declaration_; the one in `dsh.profile.bundles` is the _load declaration_ — both are required.
-
-**Why `link:` pointing outside the profile tree does not work**: DSH's runtime resolution scopes
-links by **real directory**. A link outside the profile makes the plugin's `@deepseek-ai/*`
-imports fall back to native Node resolution, and `profiles/node_modules` is not in their ancestor
-chain → `ERR_MODULE_NOT_FOUND` → the plugin shows as "not running".
+The plugin must be installed under the chosen profile's `node_modules/`. If it does not show up
+or shows as "not running", see the active pitfalls in [AGENTS.md](AGENTS.md).
 
 ## Configuration
 
-| Field                 | Default         | Meaning                                                   |
-| --------------------- | --------------- | --------------------------------------------------------- |
-| `adminKey`            | empty           | CPA admin key; empty falls back to a credential reference |
-| `adminKeyRef`         | `CPA_ADMIN_KEY` | Reference name in the credential store                    |
-| `port`                | `8317`          | Port CPA listens on                                       |
-| `exePath`             | empty           | Path to the CPA executable; empty probes common locations |
-| `manageLifecycle`     | `true`          | Whether this plugin starts and stops CPA                  |
-| `autoCheckinOnStart`  | `true`          | Whether to run a catch-up check-in at startup             |
-| `openControlPanel`    | `false`         | Let CPA open its own console window on start              |
-| `startTimeoutSeconds` | `30`            | Longest wait for CPA to become ready                      |
+| Field                 | Default         | Meaning                                                       |
+| --------------------- | --------------- | ------------------------------------------------------------- |
+| `adminKey`            | empty           | CPA admin key; leave empty to use the credential reference    |
+| `adminKeyRef`         | `CPA_ADMIN_KEY` | Reference name in the credential store                        |
+| `port`                | `8317`          | Port CPA listens on                                           |
+| `exePath`             | empty           | Path to the CPA executable; leave empty to probe common spots |
+| `manageLifecycle`     | `true`          | Whether the plugin starts and stops CPA                       |
+| `autoCheckinOnStart`  | `true`          | Run one catch-up check-in at startup                          |
+| `openControlPanel`    | `false`         | Also open CPA's own web console when it starts                |
+| `startTimeoutSeconds` | `30`            | Longest wait for CPA to become ready                          |
 
 ## Models for the conversation
 
-The plugin **registers CPA's model catalog at runtime** with DSH's llm service: the
-`CPA` provider in the model picker is pushed by the plugin, **not** declared statically in the
-package.
+Once the plugin is installed and an account is added, the four channels' models appear in DSH's
+model picker on their own:
 
-- **The source is live**: CPA's `/v1/models` plus per-credential channel attribution
-  (`auth-files/models`). A channel's models appear only once you have an account on that channel,
-  and disappear when the account is removed.
-- **Mechanism**: `llm-pi-ai`'s `providers` is a volatile config field — the plugin performs a
-  volatile update on it (committed in-process, routes re-registered atomically), **with no DSH
-  restart and nothing written on the DSH side**. Providers you declared yourself on the Models
-  page are left untouched.
-- **Triggers**: CPA becoming ready (startup / setup finished), an OAuth account being added, and
-  host config reloads (settings writes such as switching language or theme invalidate the
-  runtime-injected model list; the plugin listens for the reload and re-pushes automatically).
-  The catalog is pushed only once it settles on "same count twice in a row" — credentials load in
-  batches after CPA starts, so reading immediately yields an incomplete catalog.
-- **Display name**: `channel · model` (e.g. `WorkBuddy · deepseek-v4.1-flash`); models whose
-  attribution is unknown get a `CPA ·` prefix.
-- **Same-named models are split per channel**: when one model is served by several channels (say
-  `glm-5.3` on WorkBuddy / Trae / ZCode at once), each channel gets its own entry — **picking a
-  channel means only that channel's accounts are used**, never round-robined across channels.
-  Without this split the panel says WorkBuddy while requests may land on Trae, and upstream
-  prompt-cache hit rate drops to a coin flip.
-- **Context window**: known values are written per channel (e.g. `deepseek-v4.1-flash` = 1M);
-  ones without a measured source fall back to the route defaults (262k / 32k / plain text).
+- Models are shown as `channel · model` (e.g. `WorkBuddy · deepseek-v4.1-flash`), so you can see
+  at a glance which channel a request will use.
+- When one model is served by several channels, each channel gets its own entry — **picking a
+  channel means only that channel's accounts are used**, never round-robined across your other
+  accounts.
 
-The calling key uses the `CPA_API_KEY` credential reference (prepared automatically at plugin
-startup; see [Security](#security)).
+Adding or removing accounts updates the model list automatically. How it works is described in
+[Architecture §4.6](docs/ARCHITECTURE.md).
 
 ## Known limitations
 
 - **Windows only**: CPA currently ships as a Windows executable plus DLL plugins.
-- **CPA's behavior is still governed by its own config**: the plugin generates the
-  configuration it needs to run (routing aliases, listen address, port); everything else stays
-  under CPA's `config.yaml`.
-- **Downloading CPA needs access to GitHub Releases**: a proxy is needed where a direct connection
-  does not work — the plugin prefers `HTTPS_PROXY` / `ALL_PROXY` and similar environment
-  variables, then falls back to the Windows system proxy (**only effective while the system proxy
-  is switched on**; configuring just the server address with the master switch off is not
-  readable).
-- **`disabled` is the only reliable "single account" mechanism**: `priority` merely means "prefer
-  the higher one", and `fill-first` takes "the first usable credential" — both fall back to
-  another account when the preferred one is unavailable. Only being disabled means "not taking
-  part at all", which is what the panel's "Use only this one" does.
-  Cross-channel selection is already pinned by model aliases (one id per channel for same-named
-  models); converging a channel to a single account still relies on disabling.
-- **Rate-limited accounts look normal**: upstream has model-level rate limits (code 6004), and a
-  limited account still reports `status: active` in CPA. It only shows up once a real request is
-  made — the panel showing "enabled" does not mean "this account works right now".
-- **Editing the source requires a rebuild**: the host loads `lib/`, not `src/`. After
-  `pnpm build`, restart DSH for the host half and refresh the page for the browser half — see the
-  active pitfalls in [AGENTS.md](AGENTS.md).
+- **Downloading needs access to GitHub Releases**: a proxy is required where a direct connection
+  does not work.
+- **Rate-limited accounts look normal**: the panel showing "enabled" does not mean "usable right
+  now"; it only surfaces when a conversation request fails — see the pitfall list in
+  [Architecture](docs/ARCHITECTURE.md).
+- **Editing the source requires a rebuild**: the host loads the build output. After `pnpm build`,
+  restart DSH for the host side and refresh the page for the browser side.
 
 ## Documentation
 
@@ -194,19 +149,11 @@ The maintainer documentation map lives in [AGENTS.md](AGENTS.md). Common entry p
 
 ## Development
 
-`lib/` is a build artifact and is **not tracked** — build it first after cloning:
-
 ```powershell
 pnpm install
 pnpm build        # tsdown dual-target build → lib/
 pnpm check        # typecheck + lint + format + build + verify:artifacts + test
 ```
-
-The host loads `lib/`, so **changed source only takes effect after a rebuild**; the
-`src/index.ts` side also needs a DSH restart, while the `src/client/` side only needs a refresh.
-
-Read the "Global rules" and "Change impact routing" sections of [AGENTS.md](AGENTS.md) before
-editing — it is injected into agents automatically and is this repo's maintainer index.
 
 ## Acknowledgements
 
