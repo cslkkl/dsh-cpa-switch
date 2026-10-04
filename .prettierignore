@@ -1,0 +1,8 @@
+# prettier 不该碰的东西（与 .pre-commit-config.yaml 的 exclude 保持一致）
+# 注：node_modules 与 reference/ 本就被 .gitignore 覆盖（prettier 3 跳过 gitignore 内目录），
+# 这里显式写一遍是防 .gitignore 将来变动时格式检查静默扩大扫描面。
+node_modules/
+lib/
+reference/
+调研报告归档/
+pnpm-lock.yaml
