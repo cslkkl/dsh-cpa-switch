@@ -97,7 +97,7 @@ python check-line-endings.py <本仓根> --target lf
 
 ## 待办
 
-- [ ] **真机验证本轮重构**：重启 DSH 后确认面板照常显示、各渠道页签齐全、账号接口返回 200。
+- [x] ~~**真机验证本轮重构**~~ —— 已通过：面板照常显示、各渠道页签齐全、账号接口返回 200。
 - [ ] **配置 npm Trusted Publishing（需维护者手动操作）**
 
       当前发布是手工 `npm publish`，要改成**绑定本仓库自动发布** —— 免掉本机存 token，
@@ -132,20 +132,13 @@ python check-line-endings.py <本仓根> --target lf
       **验证**：推一个 patch tag（如 `v0.2.1`），确认 Actions 自动发布成功。
       验证通过后，从 npm 移除手工 token、从 GitHub Secrets 删掉相关的项。
 
-- [ ] **设置上游仓库 topics（需维护者操作，agent 无 admin 权限）**
-
-      地址：https://github.com/cslkkl/dsh-cpa-switch → 右上角齿轮 → Topics
-
-      ```
-      deepseek-harness dsh dsh-plugin plugin typescript ai-agent agent-harness ai deepseek llm cliproxyapi cpa account-management
-      ```
-
-      前 10 个取自同工作区另几个插件的公共集，后 3 个是本插件特有。
+- [x] ~~**设置上游仓库 topics**~~ —— 维护者已设（清单见仓库 About 面板，不在此复制）。
 
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
 - [ ] `providerId` 粒度裁决（按渠道 vs 每单元）。
-- [ ] 补测试：`src/setup/config.ts` 的 `looksLikeBcrypt` 挡哈希、`src/credentials.ts` 的沿用优先三步取值。
+- [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
+      `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
 
 ## 活跃坑
 

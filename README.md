@@ -5,8 +5,8 @@
 <h1 align="center">dsh-cpa-switch</h1>
 
 <div align="center">
-  <p><strong>把 CLIProxyAPI 的账号管理搬进 DSH</strong></p>
-  <p><em>CLIProxyAPI account management inside DeepSeek Harness</em></p>
+  <p><strong>在 DSH 里管好你的 AI 渠道账号</strong></p>
+  <p><em>余额、签到、任务、切号，不用离开 DSH</em></p>
 
   <p>
     <a href="https://www.npmjs.com/package/dsh-cpa-switch"><img src="https://img.shields.io/npm/v/dsh-cpa-switch?style=flat" alt="npm"></a>
@@ -179,11 +179,11 @@ pnpm check        # typecheck + lint + format + build + verify:artifacts + test
 | 部分                                                                                                                                      | 参考来源                                                                                                                                                                                  |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **工程骨架与插件机制**：tsdown 双目标构建、双 tsconfig、vitest / eslint / prettier、Cordis 集成、配置 schema、React 面板 UI、生命周期写法 | [dsh-workbuddy-bridge](https://github.com/zlZayn/dsh-workbuddy-bridge)                                                                                                                    |
-| **被管理宿主**：多渠道中转 ProxyAPI、账号 / 签到 / 任务 / 路由管理 API（上游代码）                                                        | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)                                                                                                                               |
-| **渠道协议**：WorkBuddy / Trae / Qoder / ZCode 渠道插件与签到、任务、余额协议                                                             | [cpa-multi-plugins](https://github.com/mmqz/cpa-multi-plugins) · [workbuddy-bridge-0.1.2-source](https://github.com/ki11a-Conton/workbuddy-bridge-0.1.2-source)（WorkBuddy 渠道协议参考） |
+| **被管理宿主**：多渠道中转 ProxyAPI，以及账号文件、路由策略等管理 API（上游代码）                                                         | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)                                                                                                                               |
+| **渠道协议与多渠道路由能力**：WorkBuddy / Trae / Qoder / ZCode 渠道插件，以及账号聚合、签到、任务、余额协议 —— 面板的渠道能力面由它定义   | [cpa-multi-plugins](https://github.com/mmqz/cpa-multi-plugins) · [workbuddy-bridge-0.1.2-source](https://github.com/ki11a-Conton/workbuddy-bridge-0.1.2-source)（WorkBuddy 渠道协议参考） |
 | **宿主平台**                                                                                                                              | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)                                                                                                                       |
 
-> CLIProxyAPI 运行时产物发布自 [cslkkl/CLIProxyAPI](https://github.com/cslkkl/CLIProxyAPI)（`release-windows` 工作流，源码取自上游发布 tag）；开发与调研另参考 [zlZayn/CLIProxyAPI](https://github.com/zlZayn/CLIProxyAPI)（`local-autobrowser` 分支）。二者与上游本质同源，仅存放位置与分支不同。
+> CLIProxyAPI 运行时产物发布自 [cslkkl/CLIProxyAPI](https://github.com/cslkkl/CLIProxyAPI)（`release-windows` 工作流）；开发与调研另参考 [zlZayn/CLIProxyAPI](https://github.com/zlZayn/CLIProxyAPI)（`local-autobrowser` 分支）。二者与上游 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 本质同源，仅存放位置与分支不同。
 
 ## 免责声明
 
