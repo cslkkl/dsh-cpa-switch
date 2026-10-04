@@ -180,6 +180,18 @@ export class AdminKeyStore {
  *
  * @returns `existing` 沿用 / `created` 新建 / `failed` 写不进去。
  */
+/** 读回调用密钥的当前值（空串表示未备好；供模型路由作为 `/v1` 的 Bearer）。 */
+export async function resolveApiKey(
+  deps: Pick<CredentialStoreDeps, 'credentials'>,
+): Promise<string> {
+  try {
+    const found = await deps.credentials.resolve(credentialRef(CPA_API_KEY_REF))
+    return found?.value ?? ''
+  } catch {
+    return ''
+  }
+}
+
 export async function ensureApiKey(
   deps: Pick<CredentialStoreDeps, 'credentials' | 'logger'>,
 ): Promise<'existing' | 'created' | 'failed'> {

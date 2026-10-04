@@ -48,6 +48,11 @@ export interface OpsDeps {
   /** 当前管理密钥（空串表示未配置）。 */
   readonly adminKey: () => string
   readonly logger?: LoggerLike | undefined
+  /**
+   * 账号集合可能发生变化的回调（OAuth 授权完成后由 `authStatus` 触发）。
+   * 模型路由依赖账号集合，宿主用它安排一次重推。
+   */
+  readonly onAccountsChanged?: (() => void) | undefined
 }
 
 /** 把任意抛出物转成错误串。 */
@@ -713,6 +718,11 @@ export class Operations {
         this.#deps.options(),
         `/v8/management/oauth/status?state=${encodeURIComponent(state)}`,
       )) as { status?: unknown } | undefined
+      /**
+       * 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推（不阻塞响应）。
+       * 前端语义与此一致：状态不再是 `wait` 就当作流程结束。
+       */
+      if (data?.status !== 'wait') this.#deps.onAccountsChanged?.()
       return { ok: true, status: data?.status ?? 'unknown', raw: data }
     } catch (error) {
       return { ok: false, error: messageOf(error) }

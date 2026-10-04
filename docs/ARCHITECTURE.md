@@ -115,6 +115,19 @@
 
 ---
 
+### 4.6 模型路由只走 volatile 更新通道
+
+- 模型路由由插件运行时推给 `llm-pi-ai` 的 `providers.cpa`（volatile 配置字段）：
+  对它所在 loader entry 做**只含 volatile 差异**的 `entry.update()`，loader 在
+  原进程内提交并广播 `loader/volatile-update`，llm-pi-ai 原子重注册路由 ——
+  不重启、不写盘。随包静态清单已废弃（会漂移、且与端口耦合）。
+- **只动 `cpa` 一个键**：推送前合并既有 `providers`，用户自声明的其它 provider
+  原样保留；混入非 volatile 变更会让 update 退化成整体重载。
+- **推送前等目录稳定**：CPA 启动后凭据分批加载，`/v1/models` 从空慢慢变多 ——
+  连续两次计数一致才推；目录为空（无账号）则撤下路由
+  （`llm-pi-ai` 拒绝空 models 的手工路由）。
+- 触发点：CPA 就绪（boot / 环境准备完成）与 OAuth 加号完成；幂等，无变化即零动作。
+
 ## 5. 防错清单
 
 每条都来自真实事故或已核实的源码行为，改动前先读。
@@ -136,6 +149,8 @@
 | F13 | 改 `scheduler_mode` 后必须重启 CPA                        | 配置不热加载；`credits` 模式下插件自己选号，`priority` 形同虚设                                                       |
 | F14 | 被限流的号看不出异常                                      | 上游模型级限流（code 6004）下 CPA 仍报 `status: active`。面板「启用」≠「现在能用」                                    |
 | F15 | 浏览器产物里不能混入 React 运行时                         | 内联后产物从 ~80 KB 涨到 ~1 MB，且模块作用域读 `process.env.NODE_ENV` → 浏览器抛 `process is not defined`             |
+| F16 | Windows 解压**显式用 System32 的 bsdtar**，不裸调 `tar`   | PATH 里有 Git 的 GNU tar 时它读不了 zip，解压静默失败（曾让 CPA 装不出来）                                            |
+| F17 | 补装 / 同步的**网络异常必须就地吞掉**，只记日志           | 放任冒出去会拖死整个 DSH 宿主（fatal load failure，实测一次 release 查询失败就整个 web 端没了）                       |
 
 ---
 

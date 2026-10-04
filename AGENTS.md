@@ -10,6 +10,7 @@
   两边都必须先 `pnpm build` —— `lib/` 才是实际被加载的产物。
 - 宿主路由契约：同 path 只能注册一次、方法只有 `GET`/`HEAD`/`POST`。见 [架构 §4.3](docs/ARCHITECTURE.md)。
 - 配置字段**必须** `.volatile()`，值一律现读、不许缓存。见 [架构 §4.4](docs/ARCHITECTURE.md)。
+- 模型路由只走 volatile 更新通道、只动 `providers.cpa` 一个键、推送前等目录稳定；见 [架构 §4.6](docs/ARCHITECTURE.md)。
 - 引用一律相对路径，禁写本机绝对路径。
 - 同一事实只写一处，别处链接；可枚举实体写「规则 + 去哪查」，不复制清单。
 
