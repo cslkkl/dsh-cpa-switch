@@ -38,9 +38,10 @@ Open **Plugins → CPA panel** in DSH. Each of the four channels gets its own ta
   counted separately and never summed together.
 - **One-click actions**: check in all, run all tasks, refresh; each account can also be
   checked in / run individually.
-- **Choose an account**: click "Use only this" on an account and **every other account in the
-  same channel is disabled automatically** — one channel spends credits from one account, with
-  no per-account toggling.
+- **Enable / disable accounts and converge in one click**: every account has an enable
+  toggle for individual control, and "Use only this one" disables every other account in
+  the same channel at once — one channel spends its credits from a single account, no
+  toggling each one down.
 - **Add an account**: the "+ Add account" tile at the end of each channel's list opens the OAuth
   authorization page. Finish in the browser — no callback URL copying.
 - **Remembers your choice**: the account you picked is still the one in use after a DSH restart.
@@ -134,9 +135,11 @@ package.
   and disappear when the account is removed.
 - **Mechanism**: `llm-pi-ai`'s `providers` is a volatile config field — the plugin performs a
   volatile update on it (committed in-process, routes re-registered atomically), **with no DSH
-  restart and nothing written to disk**. Providers you declared yourself on the Models page are
-  left untouched.
-- **Triggers**: CPA becoming ready (startup / setup finished) and an OAuth account being added.
+  restart and nothing written on the DSH side**. Providers you declared yourself on the Models
+  page are left untouched.
+- **Triggers**: CPA becoming ready (startup / setup finished), an OAuth account being added, and
+  host config reloads (settings writes such as switching language or theme invalidate the
+  runtime-injected model list; the plugin listens for the reload and re-pushes automatically).
   The catalog is pushed only once it settles on "same count twice in a row" — credentials load in
   batches after CPA starts, so reading immediately yields an incomplete catalog.
 - **Display name**: `channel · model` (e.g. `WorkBuddy · deepseek-v4.1-flash`); models whose
@@ -155,8 +158,9 @@ startup; see [Security](#security)).
 ## Known limitations
 
 - **Windows only**: CPA currently ships as a Windows executable plus DLL plugins.
-- **CPA's configuration is not modified**: the plugin only calls CPA's management APIs. Routing
-  strategy and the rest stay under CPA's `config.yaml`.
+- **CPA's behavior is still governed by its own config**: the plugin generates the
+  configuration it needs to run (routing aliases, listen address, port); everything else stays
+  under CPA's `config.yaml`.
 - **Downloading CPA needs access to GitHub Releases**: a proxy is needed where a direct connection
   does not work — the plugin prefers `HTTPS_PROXY` / `ALL_PROXY` and similar environment
   variables, then falls back to the Windows system proxy (**only effective while the system proxy
@@ -165,7 +169,9 @@ startup; see [Security](#security)).
 - **`disabled` is the only reliable "single account" mechanism**: `priority` merely means "prefer
   the higher one", and `fill-first` takes "the first usable credential" — both fall back to
   another account when the preferred one is unavailable. Only being disabled means "not taking
-  part at all", which is what the panel's "Use only this" does.
+  part at all", which is what the panel's "Use only this one" does.
+  Cross-channel selection is already pinned by model aliases (one id per channel for same-named
+  models); converging a channel to a single account still relies on disabling.
 - **Rate-limited accounts look normal**: upstream has model-level rate limits (code 6004), and a
   limited account still reports `status: active` in CPA. It only shows up once a real request is
   made — the panel showing "enabled" does not mean "this account works right now".
