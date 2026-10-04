@@ -107,6 +107,7 @@ python check-line-endings.py <本仓根> --target lf
 
       步骤：所有者本机 `pnpm check` 全绿 → `npm publish`（首次手工；
       Trusted Publishing 配好后改为 tag 触发）。发布后核对 npm 页面的 files 清单。
+
 - [ ] **配置 npm Trusted Publishing（需维护者手动操作）**
 
       当前发布是手工 `npm publish`，要改成**绑定本仓库自动发布** —— 免掉本机存 token，
