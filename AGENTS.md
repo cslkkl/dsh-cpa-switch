@@ -135,7 +135,6 @@ python check-line-endings.py <本仓根> --target lf
       ```
 
       前 10 个取自同工作区另几个插件的公共集，后 3 个是本插件特有。
-      已在我 fork（`zlZayn/dsh-cpa-switch`）设好，可从那里核对。
 
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
