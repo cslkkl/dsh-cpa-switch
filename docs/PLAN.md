@@ -45,17 +45,19 @@
 要收口得同时改三处，属独立一轮：
 
 - [ ] 配置里写 `access.api-keys: [<CPA_API_KEY>]`
-- [ ] DSH 调用侧（`model-routes.ts` 推的 profile 与 `cpaFetch`）统一带
+- [ ] DSH 调用侧（`route-registry.ts` 推的 profile 与 `cpaFetch`）统一带
       `Authorization: Bearer <CPA_API_KEY>`
 - [ ] 实测：不带密钥应当 401，带密钥 200
 
 **旧装机器仍是暴露状态**：`server.host` 只在「配置不存在」时写入（`setup/index.ts` 的
-`existsSync` 守卫），已经跑过一次的机器配置里没有这一行，仍监听 `::` —— 本机就是这种情况。
+`existsSync` 守卫），已经跑过一次的机器配置里没有这一行，仍监听 `::` ——
+本机已手动补写 `host: "127.0.0.1"` 并复验（只监听 127.0.0.1）；其他旧装机器要靠升级逻辑补。
 本轮只改了生成逻辑，未动用户已有配置；要不要给一条「补写缺失安全项」的修补路径待定。
 
 > 2026-10-04 实测记录：缺 `server.host` 时 CPA 监听 `::`，
 > `http://192.168.3.22:8317/v1/models` **不带鉴权返回 200**；补上 host 后只监听
-> `127.0.0.1`（用 18317 端口跑真实 exe 复验过）。
+> `127.0.0.1`（用 18317 端口跑真实 exe 复验过）。本机 `runtime/cpa/config.yaml`
+> 已含 `host: "127.0.0.1"`（2026-10-04 核对）。
 
 ### 2.2 同名模型跨渠道轮询（核心，方向已定、验证卡住）
 
@@ -89,9 +91,11 @@ use unique aliases/prefixes**）。
 - [x] 重启 CPA 后复验别名 —— **通过**：`wb/glm-5.3` 进目录、请求 200；
       禁用该渠道唯一账号后它 400 而裸 id 仍 200 → 别名只属该渠道、不跨渠道
 - [x] `src/setup/config.ts` 按实时目录生成 `model-alias` 段（写 CPA 起来之前的配置）
-- [x] 插件侧 `model-routes.ts` 用别名当 id，展示名保持「渠道 · 模型名」不变
+- [x] 插件侧 `route-registry.ts` 用别名当 id，展示名保持「渠道 · 模型名」不变
 - [x] 上下文窗口校准表 `src/model-caps.ts`（262K 是宿主兜底，不是真实能力）
-- [ ] **真机复验**：重建 + 重启 CPA，确认别名在真实会话里生效
+- [x] **真机复验 —— 通过**（2026-10-04）：重启 DSH 后 71 个模型入目录，
+      两轮切语言均存活；渠道拆行由 `route-registry.ts` 按实时目录现算，
+      会话内请求走渠道别名（路由拆分验证见 issue #9 结案评论）
 
 **当前重叠清单**（2026-10-04 20:0x 重启后实测，58 个模型里 12 个重叠；
 **会随账号变动，用前现查**）：
@@ -126,7 +130,7 @@ use unique aliases/prefixes**）。
       与 cpa-multi-plugins `PROTOCOL.md`；未校准的仍留兜底。
 - [ ] **补齐 Trae / Qoder 渠道的校准值**：现在只有 workbuddy 与 zcode 有，
       trae 的窗口值要从 `trae/upstream` 的 `context_window_tokens.dev` 现查
-- [ ] **`model-routes.ts` 的两次 map + 两次 filter**：第一组是历史遗留的重复过滤，
+- [ ] **`route-registry.ts` 的两次 map + 两次 filter**：第一组是历史遗留的重复过滤，
       等价于只做一次，可清理（无功能影响）。
 
 ### 2.4 发布与供应链（P1）
