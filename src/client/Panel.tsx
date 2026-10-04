@@ -5,9 +5,9 @@
  */
 
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import { api } from './api.ts'
+import { api, prefetch } from './api.ts'
 import { PluginPanel, progressLine } from './PluginPanel.tsx'
 import type { PluginMeta } from './PluginPanel.tsx'
 import { RoutingSection } from './RoutingSection.tsx'
@@ -136,6 +136,29 @@ export function Panel(props: PanelProps): ReactNode {
   }, [refreshSetup])
 
   /**
+   * **四个渠道同时加载。**
+   *
+   * 原来是「点哪个页签才加载哪个」—— 用户要先看一帧加载态才能看到内容，
+   * 切到没去过的渠道必然等一次。渠道只有四条、每条两个接口，一次性取完的成本
+   * 与「刚好要用的那一条」相差无几，却换来了「每个页签都是秒开」。
+   *
+   * 触发点是**渠道清单到位之后**：清单本身是静态的（写在 `adapters.ts`），
+   * 它到位才知道有哪几条。
+   *
+   * 依赖 `pluginsResource.data` 而不是 `plugins`（后者每帧新数组）。
+   */
+  useEffect(() => {
+    const list = pluginsResource.data
+    if (list === undefined) return
+    for (const channel of list) {
+      prefetch(
+        'accounts:' + channel.id,
+        '/api/v1/cpa/accounts?plugin=' + encodeURIComponent(channel.id),
+      )
+    }
+  }, [pluginsResource.data])
+
+  /**
    * 渠道清单到位后校正默认页签。
    *
    * 依赖 `pluginsResource.data` 而不是 `plugins`：`plugins` 每次渲染都是新
@@ -158,6 +181,18 @@ export function Panel(props: PanelProps): ReactNode {
   /** 环境准备进度那一行（拿不到就为空串，退回只显示通用文案）。 */
   const setupProgress = progressLine(setup?.progress, t)
   const missing = Array.isArray(setup?.missing) ? (setup?.missing ?? []) : []
+
+  /**
+   * 页签的 `options` 固定住引用。
+   *
+   * 原来每次渲染都 `plugins.map(...)` 生成新数组。`SegmentedControl` 是**受控**
+   * 组件，新数组会让它认为选项变了 —— 顺带也让下面那条校正默认页签的 effect
+   * 拿到一个每次都不同的 `list`。`useMemo` 把它钉在 `plugins` 上。
+   */
+  const channelOptions = useMemo(
+    () => plugins.map((p) => ({ value: p.id, label: p.label })),
+    [plugins],
+  )
 
   return (
     <div className={css.wrap}>
@@ -260,7 +295,7 @@ export function Panel(props: PanelProps): ReactNode {
         <SegmentedControl
           id="cpa-panel-channel"
           value={active}
-          options={plugins.map((p) => ({ value: p.id, label: p.label }))}
+          options={channelOptions}
           onChange={setActive}
           label={t('tab')}
         />
@@ -273,15 +308,21 @@ export function Panel(props: PanelProps): ReactNode {
       )}
 
       {/*
-       * 渠道面板用 `key` 强制重挂：切渠道时上一份渠道的状态不该渗进来。
-       * 账号数据本身在 `api.ts` 的共享缓存里，所以重挂不会丢数据。
+       * ⚠️ **这里刻意没有 `key={activeMeta.id}`。**
+       *
+       * 加 key 会让切渠道变成「卸载重挂」，于是：所有 `useState` 归零，
+       * 缓存里明明有值却要等挂载后的 effect 才生效 —— 用户必然看到一帧
+       * 「读取中…」（2026-10-04 实机「一直刷」的原因之一）。
+       *
+       * 取消重挂载的代价：渠道间的局部状态会留下来。`PluginPanel` 在
+       * `plugin` 变化时自己重置那些状态（见该文件），比整屏闪一下划算。
+       * 决策见
+       * [`.agents/notes/2026-10-04-channel-switch-read-strategy.md`](../../.agents/notes/2026-10-04-channel-switch-read-strategy.md)。
        */}
-      {activeMeta !== undefined && (
-        <PluginPanel key={activeMeta.id} plugin={activeMeta.id} meta={activeMeta} t={t} />
-      )}
+      {activeMeta !== undefined && <PluginPanel plugin={activeMeta.id} meta={activeMeta} t={t} />}
 
       {/* 路由区：跟随当前渠道（每个渠道有各自的账号池） */}
-      {activeMeta !== undefined && <RoutingSection key={'routing-' + activeMeta.id} t={t} />}
+      {activeMeta !== undefined && <RoutingSection t={t} />}
     </div>
   )
 }
