@@ -29,6 +29,7 @@ import {
   normalizeAccounts,
 } from './adapters.js';
 import {
+  generateApiKey,
   generateSecretKey,
   managedExePath,
   readSecretKeyFromConfig,
@@ -414,6 +415,37 @@ export async function apply(ctx, refs) {
   // 密钥在启动时解析一次留作缓存；凭据轮换会在下一次 apply/重启生效。
   let cachedAdminKey = await resolveAdminKey();
 
+  /** 模型路由引用的调用密钥凭据名，与 `cordis.patch.yml` 里的 `apiKeyEnv` 一致。 */
+  const CPA_API_KEY_REF = 'CPA_API_KEY';
+
+  /**
+   * 备好模型路由要用的调用密钥。
+   *
+   * 随包发布的 `cordis.patch.yml` 声明了 `apiKeyEnv: CPA_API_KEY`，
+   * 而 `llm-pi-ai` 是**发请求时**才解析这个引用，解析不到就抛
+   * `MISSING_CREDENTIAL` —— 症状是「模型在列表里、一发就报错」。
+   * 所以这条凭据必须插件自己备好，不能指望用户手建。
+   *
+   * 已有值一律不覆盖：用户可能自己配过、或别的工具在共用它。
+   * 托管配置里没有 `api-keys` 段，CPA 的 `/v1` 不校验这个值，非空即可。
+   * 凭据只进宿主凭据库，不下发浏览器。
+   *
+   * @returns 'existing' 沿用 / 'created' 新建 / 'failed' 写不进去。
+   */
+  const ensureApiKey = async () => {
+    try {
+      const found = await ctx.credentials.resolve(credentialRef(CPA_API_KEY_REF));
+      if (found !== undefined && found.value !== '') return 'existing';
+      await ctx.credentials.set(credentialRef(CPA_API_KEY_REF), generateApiKey());
+      return 'created';
+    } catch (error) {
+      // 引用可能被只读来源（如同名环境变量）遮蔽而拒绝写入。这时报出来，
+      // 别静默 —— 静默的话用户只会看到模型调用失败，查不到原因。
+      ctx.logger?.warn?.('cpa-panel: ensure CPA_API_KEY failed: %o', error);
+      return 'failed';
+    }
+  };
+
   const options = () => ({
     port: readConfig().port,
     adminKey: cachedAdminKey.value,
@@ -686,6 +718,17 @@ export async function apply(ctx, refs) {
     };
 
     const boot = async () => {
+      /**
+       * 第一件事：备好模型路由要用的调用密钥。
+       *
+       * **不放在下面的条件分支里** —— 它和「CPA 在不在跑」「生命周期开没开」
+       * 都无关：模型路由是随包声明的，`llm-pi-ai` 一旦被调用就要解析这条凭据。
+       * 漏了它，用户看到的是「模型列表里有、一发就报 MISSING_CREDENTIAL」。
+       */
+      const apiKeyState = await ensureApiKey();
+      ctx.logger?.info?.('cpa-panel: CPA_API_KEY %s', apiKeyState);
+      if (stopped) return;
+
       /**
        * **先补环境，再启动** —— 顺序不能反。
        *

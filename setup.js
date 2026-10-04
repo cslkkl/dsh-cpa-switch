@@ -186,6 +186,24 @@ export function generateSecretKey() {
   return randomBytes(32).toString('base64url');
 }
 
+/**
+ * 生成调用密钥（`/v1` 用的 `CPA_API_KEY`）。
+ *
+ * 与 [generateSecretKey] 同源同强度，单独命名只为让两处意图可分辨：
+ * 管理密钥能改配置，调用密钥只能发请求。
+ *
+ * 为什么必须由插件备好：随包发布的 `cordis.patch.yml` 声明了一条 `cpa`
+ * 模型路由（`apiKeyEnv: CPA_API_KEY`），`llm-pi-ai` 在**发请求时**才解析这个
+ * 引用，解析不到直接抛 `MISSING_CREDENTIAL` —— 用户看到的是「模型列表里
+ * 有、一点就报错」，很难联想到是缺一条凭据。
+ *
+ * 托管配置里没有 `api-keys` 段，CPA 的 `/v1` 目前不校验这个值，
+ * 所以它只需要非空；密钥只存宿主凭据库，不出本机。
+ */
+export function generateApiKey() {
+  return randomBytes(32).toString('base64url');
+}
+
 /** 是否长得像 bcrypt 哈希。CPA 会把配置里的明文换成这个形态。 */
 export function looksLikeBcrypt(value) {
   return /^\$2[aby]?\$\d{2}\$/.test(String(value ?? ''));
