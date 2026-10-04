@@ -43,6 +43,9 @@ export interface RenderConfigInput {
  * 生成一份最小可用的 `config.yaml`。
  *
  * 要点：
+ * - `server.host` **必须显式写 `127.0.0.1`**：上游默认是空 host，等于监听所有网卡。
+ *   实测（2026-10-04）少这一行时 CPA 监听 `::`，局域网内 `http://<内网 IP>:8317/v1/models`
+ *   **不带任何鉴权就返回 200** —— 同网段的任何人都能消耗用户账号额度；
  * - `management.secret-key` 必须设，否则管理接口无鉴权（本插件也调不通）；
  * - `oauth.auth-dir` **指向用户原有的 `~/.cli-proxy-api`** —— 这样本来就用着
  *   CPA 的人，新装的这份能直接看到已有账号，不用重新加号；
@@ -57,6 +60,7 @@ export function renderConfig(input: RenderConfigInput): string {
     'config-version: 8',
     '',
     'server:',
+    '  host: "127.0.0.1"',
     `  port: ${String(input.port)}`,
     '',
     'management:',
