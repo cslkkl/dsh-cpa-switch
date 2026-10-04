@@ -9,6 +9,9 @@ dist/
 # 调研与规划归档：本地保留、不进版本库，不属文档网络
 调研报告归档/
 
+# 上游参考源码：本地只读、不进版本库，不属文档网络（见 reference/README.md）
+reference/
+
 # 编辑器 / 系统噪音
 .DS_Store
 Thumbs.db
