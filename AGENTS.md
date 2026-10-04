@@ -169,4 +169,10 @@ python check-line-endings.py <本仓根> --target lf
   `react` shim 因此必须提供 `Component`，缺了它脚本会在加载阶段抛。
 - 停 CPA 不能依赖插件 shutdown 清理调度器 —— 会 SIGSEGV；走 shutdown 端点 → Ctrl-C → `taskkill /F`。
 - 被限流的号 CPA 仍报 `status: active`（code 6004）：面板「启用」≠「现在能用」。
-- `调研报告归档/` 已 gitignore，是只读历史，不属文档网络、不参与维护。
+- `调研报告归档/` 已**取消跟踪**、只保留在本地磁盘（只读历史，不属文档网络、不参与维护）。
+  ⚠️ `.gitignore` **只对未追踪的文件生效** —— 之前只加了规则、没跑
+  `git rm -r --cached`，文件其实一直被追踪着，所以规则对它们不起作用
+  （2026-10-04 由用户在 GitHub 页面上发现）。加忽略规则后要确认它真的生效：
+  `gh api repos/cslkkl/dsh-cpa-switch/contents/调研报告归档?ref=main` 应当报错。
+  ⚠️ **别用 PowerShell 查这条中文路径** —— 引用与编码不一致会让
+  `git ls-tree` / `cat-file` 给出自相矛盾的结果（两者都答错过），验收一律走 API。
