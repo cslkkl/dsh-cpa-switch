@@ -202,6 +202,10 @@ python check-line-endings.py <本仓根> --target lf
   （静态，不受重载影响）+ 订阅 `app-boot/config-reload` 重推清单。
   ⚠️ 恢复逻辑要挂在「配置可能变」这个**语义**上；挂在 boot / setup / oauth 这些
   **时机**上就一定会漏掉新路径 —— 2026-10-04 实测，[issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)。
+  ⚠️ 订阅失败**不许静默降级** —— `host.on` 取不到就抛错；曾写成可选降级，
+  订阅从未注册却零痕迹，排查无从下手（issue #9）。
+  ⚠️ 重推里的目录稳定检测用**指数退避**，不许固定间隔 —— 固定 4s 让每次重推
+  白等一轮，用户看到「切个语言，模型两三秒才回来」（`tests/route-registry.test.ts` 钉住）。
 - **额度/积分不能统一套一套模板** —— 各渠道返回的字段根本不同（2026-10-04 逐渠道实测）：
   workbuddy / qoder / zcode 有 `total_size` + `total_used`，**占比可算**；trae 只有
   `credits_pool_remain`，且 `credits_pool_known` 可能为 false、`total_remain` 直接是 0
