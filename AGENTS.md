@@ -16,18 +16,19 @@
 
 ## 变更影响路由
 
-| 改了                            | 必须同步                                                                                                                                              |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts` 路由表           | [src/README.md](src/README.md) 的路由表 + [架构 §4.2](docs/ARCHITECTURE.md)                                                                           |
-| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构 §4.7](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35） |
-| `src/adapters.ts`               | [架构 §3](docs/ARCHITECTURE.md)、渠道能力表                                                                                                           |
-| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                       |
-| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构 §4.7](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                         |
-| `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构 §4.7](docs/ARCHITECTURE.md)）                                                     |
-| `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构 §4.9](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                  |
-| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构 §4.10](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                                                                    |
-| `tsdown.config.ts` 的 externals | [架构 §4.5](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                |
-| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                        |
+| 改了                            | 必须同步                                                                                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts` 路由表           | [src/README.md](src/README.md) 的路由表 + [架构 §4.2](docs/ARCHITECTURE.md)                                                                                                                                        |
+| `src/route-registry.ts`         | 模型路由唯一入口：[架构 §4.6](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证） |
+| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构 §4.7](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）                                                              |
+| `src/adapters.ts`               | [架构 §3](docs/ARCHITECTURE.md)、渠道能力表                                                                                                                                                                        |
+| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                    |
+| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构 §4.7](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                      |
+| `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构 §4.7](docs/ARCHITECTURE.md)）                                                                                                                  |
+| `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构 §4.9](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                                                                               |
+| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构 §4.10](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                                                                                                                                 |
+| `tsdown.config.ts` 的 externals | [架构 §4.5](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                                                                             |
+| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                                                                                     |
 
 ## 常用命令
 
@@ -147,6 +148,9 @@ python check-line-endings.py <本仓根> --target lf
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
 - [ ] `providerId` 粒度裁决（按渠道 vs 每单元）。
+- [ ] **渠道额度/积分展示按渠道能力区分** —— 各渠道返回的额度字段不同（有的有
+      总额+已用，有的只有剩余），展示不能统一套模板；改前先查各渠道实际返回字段，
+      现状与判据见[活跃坑](#活跃坑)那条。
 - [ ] **账号卡片高度不统一**（需专门讨论方案）—— 四个渠道卡片高度看着突兀，ZCode 最矮
       （它没有签到/任务按钮）。反复试过没根治：`min-height` / `grid-auto-rows` 都只治标
       （见 [架构 §4.10](docs/ARCHITECTURE.md) F29：卡片等高靠 `.card` 的 `min-height`，
