@@ -243,9 +243,13 @@ export function Panel(props: PanelProps): ReactNode {
 
           {missing.length > 0 && (
             <div className={css.hint}>
-              {t('setupMissing') +
-                '：' +
-                missing
+              {t('missingList', {
+                prefix: t('setupMissing'),
+                /**
+                 * 分隔符是**标点**，不是词 —— 所以它属于文案，不属于布局。
+                 * 中文用「、」，英文用 `, `，两条都由各自的表给。
+                 */
+                items: missing
                   .map((k: string) =>
                     k === 'cpa'
                       ? t('setupCpa')
@@ -253,7 +257,8 @@ export function Panel(props: PanelProps): ReactNode {
                         ? t('setupPlugins')
                         : t('setupConfig'),
                   )
-                  .join('、')}
+                  .join(t('listSeparator')),
+              })}
             </div>
           )}
 
@@ -266,7 +271,7 @@ export function Panel(props: PanelProps): ReactNode {
           )}
           {setup.phase === 'error' && (
             <div className={css.hint + ' ' + css.error}>
-              {t('setupFailed') + '：' + String(setup.error ?? '')}
+              {t('setupFailedWith', { reason: String(setup.error ?? '') })}
             </div>
           )}
           {setup.phase !== 'working' && setup.phase !== 'error' && (
@@ -319,7 +324,19 @@ export function Panel(props: PanelProps): ReactNode {
        * 决策见
        * [`.agents/notes/2026-10-04-channel-switch-read-strategy.md`](../../.agents/notes/2026-10-04-channel-switch-read-strategy.md)。
        */}
-      {activeMeta !== undefined && <PluginPanel plugin={activeMeta.id} meta={activeMeta} t={t} />}
+      {activeMeta !== undefined && (
+        <PluginPanel
+          plugin={activeMeta.id}
+          meta={activeMeta}
+          t={t}
+          /*
+           * 即时反馈的出口。账号列表在 `PluginPanel` 里，所以覆盖层也在那里；
+           * 这一层目前没有别的订阅者，但**契约先立住**：谁拥有数据，谁负责通知，
+           * 卡片不直接改父级的 props。
+           */
+          onAccountDisabled={() => {}}
+        />
+      )}
 
       {/* 路由区：跟随当前渠道（每个渠道有各自的账号池） */}
       {activeMeta !== undefined && <RoutingSection t={t} />}
