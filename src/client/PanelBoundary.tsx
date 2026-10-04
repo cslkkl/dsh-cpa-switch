@@ -54,7 +54,9 @@ export class PanelBoundary extends Component<PanelBoundaryProps, PanelBoundarySt
     if (message === undefined) return this.props.children
     return (
       <div className={css.crashed} role="alert">
-        <span className={css.error}>{this.props.t('panelCrashed', this.props.label)}</span>
+        <span className={css.error}>
+          {this.props.t('panelCrashed', { panel: this.props.label })}
+        </span>
         <span className={css.hint}>{message}</span>
         <Button
           size="sm"
