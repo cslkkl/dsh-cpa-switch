@@ -68,10 +68,13 @@
 ## 模型路由
 
 - **`route-registry.ts`** —— **保证 CPA 路由可用的唯一入口**。
-  - 导出：`attachRouteRegistry` / `readAliasTable` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `SyncResult`
+  - 导出：`attachRouteRegistry` / `readAliasTable` / `readStableCatalog` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `SyncResult`
   - 一条链：**查 CPA 目录 → 算别名 → 补写配置 → 推 models**
   - 骨架在 `cordis.patch.yml`（随包发布），清单走 volatile —— **两层缺一不可**
   - 同名模型按渠道拆行：每渠道一项，id 用该渠道别名、展示名仍是「渠道 · 模型名」
+  - 目录稳定检测用**指数退避**（250ms 起、翻倍、4s 封顶），不许固定间隔 ——
+    冷启动等凭据分批加载，已稳定场景两次快读即收敛；
+    判据在 `tests/route-registry.test.ts`
   - ⚠️ **必须订阅 `app-boot/config-reload`**：宿主每次重建 profile 都 emit 它，
     而重建会抹掉运行时注入的 volatile 值（`app-boot/src/index.ts:289` → `:300`）。
     不订阅 = 路由在第一次设置写入后永久消失，2026-10-04 实测（[issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)）

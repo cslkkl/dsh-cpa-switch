@@ -13,6 +13,10 @@
 | `read-cache.test.ts`     | 浏览器侧 `ReadCache` 的新鲜 / 陈旧两档、跨 key 隔离与按前缀作废；切渠道的按 key 认领；预取              |
 | `action-outcome.test.ts` | 写操作返回的**归一**：`summary` 缺失时从 `results` 累加、净增量累加、失败项带名字与原因                 |
 | `action-report.test.ts`  | 批量动作的四种反馈分支、失败明细逐个点名、中英标点（`：` vs `: `）                                      |
+| `route-registry.test.ts` | `readStableCatalog` 的**退避间隔策略**：已稳定两次快读收敛、1 秒内收敛（固定 4s 做不到）、空目录不采信、超时撤下 |
+| `model-alias.test.ts`    | 别名表：只收录多渠道供给的同名模型、每渠道一个互不相同的别名、不重名不配别名                            |
+| `model-caps.test.ts`     | 能力校准表：已校准渠道取表值、未校准回宿主兜底                                                          |
+| `setup-config.test.ts`   | `renderConfig` 的 `server.host` 写入、`model-alias` 段形状、`looksLikeBcrypt`                            |
 
 **为什么「浏览器侧纯逻辑」要单独成文件**：`plan-text.ts` 与 `action-text.ts`
 都不含 JSX、不引 UI 包，所以 Node 侧的测试能直接引用。放 `report.tsx` 里就不行 ——
