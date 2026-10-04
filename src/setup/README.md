@@ -37,9 +37,9 @@
 
 ## 变更影响路由
 
-- 改下载源 → `SOURCES` + [架构 §7](../../docs/ARCHITECTURE.md) 的范围边界
+- 改下载源 → `SOURCES` + [架构说明](../../docs/ARCHITECTURE.md) 的范围边界
 - 改 `config.yaml` 字段 → 与 CPA 上游 `internal/config` 对照后同步本文件
-- 改 `prepare` 的跳过判据 → 同步 [架构 §5](../../docs/ARCHITECTURE.md) 的 F5
+- 改 `prepare` 的跳过判据 → 同步 [架构说明](../../docs/ARCHITECTURE.md) 的 F5
 - 新增文件 → 回填本文件
 
 ## 参考

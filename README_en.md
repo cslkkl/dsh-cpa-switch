@@ -65,7 +65,7 @@ that "does nothing when clicked".
 ## Security
 
 The admin key only lives on the host side and is never sent to the browser — details in
-[Architecture §4.1](docs/ARCHITECTURE.md).
+[Architecture](docs/ARCHITECTURE.md).
 
 ## Requirements
 
@@ -121,7 +121,7 @@ model picker on their own:
   accounts.
 
 Adding or removing accounts updates the model list automatically. How it works is described in
-[Architecture §4.6](docs/ARCHITECTURE.md).
+[Architecture](docs/ARCHITECTURE.md).
 
 ## Known limitations
 

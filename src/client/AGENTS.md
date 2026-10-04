@@ -7,7 +7,7 @@ client/ 特有约束：
 - **这一侧永远不带管理密钥**。只调 `/api/v1/cpa/*`，密钥由宿主半边带。
 - **不得引用 `../` 下的宿主模块** —— 两半运行在不同进程，那种 import 在浏览器里必然失败。
 - **不得新增会被打包的外部依赖**：`react` 与 primitives 由宿主注入，
-  新增外部包要先加进 `tsdown.config.ts` 的 `CLIENT_EXTERNALS`，否则会被**内联**（见架构 §4.5）。
+  新增外部包要先加进 `tsdown.config.ts` 的 `CLIENT_EXTERNALS`，否则会被**内联**（见架构说明）。
 - **`inject` 导出不能删**：少了它插件挂不上，而且**不报错、只是不出现**。
 - 文案改动两张表一起改；`en` 的类型是 `Record<LocaleKey, string>`，漏项编译报错。
 - 改完跑 `pnpm build` 并确认 `lib/client.js` 里仍有 `exports.apply` 与 `exports.inject`。

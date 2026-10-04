@@ -32,7 +32,7 @@
   - 改后必测：同 path 多条目合并、非法方法被剔除、单条失败不拖垮其余
 - **`cache.ts`** —— 读缓存与端口探活记忆。
   - 导出：`CpaCache`见类）/ `ProbeCache`见类）
-  - 折叠面板一次点击里的并发读；写操作后按前缀失效见见[架构 §4.6](../docs/ARCHITECTURE.md)）
+  - 折叠面板一次点击里的并发读；写操作后按前缀失效见见[架构说明](../docs/ARCHITECTURE.md)）
   - ⚠️ 两条缓存都**不抛错**，失效坏了只会静默变慢或显示旧值
   - 改后必测：`tests/cache.test.ts`见并发合并、写后失效、失败不留缓存）
 
@@ -125,7 +125,7 @@
 **改路由前必读**：同一 `path` 只能注册一次（多方法合并在一个条目里）、
 方法只有 `GET`/`HEAD`/`POST`。违反任一条会让**所有**路由失效。
 [routes.ts](routes.ts) 会归一化兜底，但新增路由仍要走 `RouteSpec`。
-契约边界见 [架构 §4.3](../docs/ARCHITECTURE.md)。
+契约边界见 [架构说明](../docs/ARCHITECTURE.md)。
 
 **为什么 `routing` 不读各渠道 `scheduler_mode`**：它曾顺带循环读四个 `/config`，
 而界面从不消费那份数据 —— 每次打开面板白付 4 次 CPA 往返。

@@ -29,7 +29,7 @@
 - **`RoutingSection.tsx`** —— 路由策略，**只读**。
   - 拖动排序已删除：控制用哪个号有更直接的手段（启用开关 / 记忆选择）
   - `round-robin` 的警告用官方 `IconWarningOutlineRegular`，**不用 Emoji**
-- **`PanelBoundary.tsx`** —— 渲染错误边界。**必须是类组件**（见[架构 §4.8](../../docs/ARCHITECTURE.md)）
+- **`PanelBoundary.tsx`** —— 渲染错误边界。**必须是类组件**（见[架构说明](../../docs/ARCHITECTURE.md)）
 - **`use-async-resource.ts`** —— 带缓存与竞态保护的异步资源 hook。
   - **同步**在渲染阶段读缓存 → 切渠道 / 刷新不闪；副作用（重验）交给 effect
   - 已取到的值**连 key 一起存**：组件不随 key 重挂载，不认 key 会把上一个渠道的
@@ -45,7 +45,7 @@
   - 为什么单独一个文件：放 `report.tsx` 的话 Node 侧测试 import 不到
     （primitives 依赖 `clsx`，那是浏览器宿主注入的，Node 装不上）
   - 规则：**实测过的值才映射，认不出的原样透传**。
-    原则见[架构 §4.9](../../docs/ARCHITECTURE.md)，
+    原则见[架构说明](../../docs/ARCHITECTURE.md)，
     实测记录见[决策记录](../../.agents/notes/2026-10-04-upstream-value-translation.md)
 - **`action-text.ts`** —— 批量动作（全部签到 / 全部任务）的反馈文案。**同样不含 JSX**。
   - 导出：`actionText` / `MAX_FAILURES_SHOWN` / 类型 `ActionOutcomeView`
@@ -70,7 +70,7 @@
   - 列表分隔符也是文案（`listSeparator`），不在代码里写死
 - **`panel.module.css`** —— 布局样式。
   - 每个值要么是 `--dsw-*` token，要么抄自宿主 `settings-form/fields.module.css`
-  - ⚠️ 不写颜色字面量；`--dsw-alias-bg-layer-N` **只到 3**（见[架构 §4.10](../../docs/ARCHITECTURE.md)）
+  - ⚠️ 不写颜色字面量；`--dsw-alias-bg-layer-N` **只到 3**（见[架构说明](../../docs/ARCHITECTURE.md)）
   - 按钮 / 开关 / 标签 / 状态点 / 页签 / 弹窗 / Toast 一律 primitives，不自绘
   - 同行卡片等高靠 `grid-auto-rows: 1fr` + `.actions { margin-top: auto }` **两条一起**
 
@@ -86,10 +86,10 @@
 
 - 改组件结构 → 回填本文件
 - 改文案键 → `locales.ts` 两张表 + 确认 UI 上不再出现 `undefined`
-- 改槽位 / key → [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §4.5
-- 改缓存语义 → [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §4.6 + `tests/read-cache.test.ts`
+- 改槽位 / key → [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
+- 改缓存语义 → [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`
 - 改外部依赖 → `tsdown.config.ts` 的 externals 同步
-- 改样式 → [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §4.8
+- 改样式 → [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
 
 ## 参考
 

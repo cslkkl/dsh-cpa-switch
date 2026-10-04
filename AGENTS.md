@@ -5,30 +5,30 @@
 
 ## 全局规则
 
-- 密钥只在宿主半端，**永不下发浏览器**；新增路由不得带密钥参数。见 [架构 §4.1](docs/ARCHITECTURE.md)。
+- 密钥只在宿主半端，**永不下发浏览器**；新增路由不得带密钥参数。见 [架构说明](docs/ARCHITECTURE.md)。
 - **改 `src/index.ts` 一侧后要重新构建并重启 DSH**；`src/client/` 一侧构建后刷新页面即可。
   两边都必须先 `pnpm build` —— `lib/` 才是实际被加载的产物。
-- 宿主路由契约：同 path 只能注册一次、方法只有 `GET`/`HEAD`/`POST`。见 [架构 §4.3](docs/ARCHITECTURE.md)。
-- 配置字段**必须** `.volatile()`，值一律现读、不许缓存。见 [架构 §4.4](docs/ARCHITECTURE.md)。
-- 模型路由只走 volatile 更新通道、只动 `providers.cpa` 一个键、推送前等目录稳定；见 [架构 §4.6](docs/ARCHITECTURE.md)。
+- 宿主路由契约：同 path 只能注册一次、方法只有 `GET`/`HEAD`/`POST`。见 [架构说明](docs/ARCHITECTURE.md)。
+- 配置字段**必须** `.volatile()`，值一律现读、不许缓存。见 [架构说明](docs/ARCHITECTURE.md)。
+- 模型路由只走 volatile 更新通道、只动 `providers.cpa` 一个键、推送前等目录稳定；见 [架构说明](docs/ARCHITECTURE.md)。
 - 引用一律相对路径，禁写本机绝对路径。
 - 同一事实只写一处，别处链接；可枚举实体写「规则 + 去哪查」，不复制清单。
 
 ## 变更影响路由
 
-| 改了                            | 必须同步                                                                                                                                                                                                           |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/index.ts` 路由表           | [src/README.md](src/README.md) 的路由表 + [架构 §4.2](docs/ARCHITECTURE.md)                                                                                                                                        |
-| `src/route-registry.ts`         | 模型路由唯一入口：[架构 §4.6](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证） |
-| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构 §4.7](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）                                                              |
-| `src/adapters.ts`               | [架构 §3](docs/ARCHITECTURE.md)、渠道能力表                                                                                                                                                                        |
-| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                    |
-| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构 §4.7](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                      |
-| `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构 §4.7](docs/ARCHITECTURE.md)）                                                                                                                  |
-| `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构 §4.9](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                                                                               |
-| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构 §4.10](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                                                                                                                                 |
-| `tsdown.config.ts` 的 externals | [架构 §4.5](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                                                                             |
-| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                                                                                     |
+| 改了                            | 必须同步                                                                                                                                                                                                          |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts` 路由表           | [src/README.md](src/README.md) 的路由表 + [架构说明](docs/ARCHITECTURE.md)                                                                                                                                        |
+| `src/route-registry.ts`         | 模型路由唯一入口：[架构说明](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证） |
+| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）                                                              |
+| `src/adapters.ts`               | [架构说明](docs/ARCHITECTURE.md)、渠道能力表                                                                                                                                                                      |
+| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                   |
+| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构说明](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                      |
+| `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](docs/ARCHITECTURE.md)）                                                                                                                  |
+| `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构说明](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                                                                               |
+| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构说明](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                                                                                                                                  |
+| `tsdown.config.ts` 的 externals | [架构说明](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                                                                             |
+| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                                                                                    |
 
 ## 常用命令
 
@@ -153,7 +153,7 @@ python check-line-endings.py <本仓根> --target lf
       现状与判据见[活跃坑](#活跃坑)那条。
 - [ ] **账号卡片高度不统一**（需专门讨论方案）—— 四个渠道卡片高度看着突兀，ZCode 最矮
       （它没有签到/任务按钮）。反复试过没根治：`min-height` / `grid-auto-rows` 都只治标
-      （见 [架构 §4.10](docs/ARCHITECTURE.md) F29：卡片等高靠 `.card` 的 `min-height`，
+      （见 [架构说明](docs/ARCHITECTURE.md) F29：卡片等高靠 `.card` 的 `min-height`，
       纯视觉属性断言不了，只能真机看）。**不是改个数值能解决** —— 要么按渠道分模板，
       要么重新想行结构（操作区用固定槽位占位），需要开一轮讨论再动手。
 - [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
@@ -179,20 +179,20 @@ python check-line-endings.py <本仓根> --target lf
   引用了不存在的 layer-4，照抄那个引用会得到一条**静默失效**的背景色声明。
 - **切渠道不加 `key`，且已取到的值连 key 一起存** —— 加 `key` = 卸载重挂，
   缓存的同步读取随之失效（必闪一帧）；不加 `key` 而不认 key，则上一个渠道的账号
-  会画在当前页签下，**不报错**。见 [架构 §4.7.1](docs/ARCHITECTURE.md) 与
+  会画在当前页签下，**不报错**。见 [架构说明](docs/ARCHITECTURE.md) 与
   [决策记录](.agents/notes/2026-10-04-channel-switch-read-strategy.md)。
 - **界面上不拼中文标点** —— `'：'`、`'（'` 在英文下变成 `Current strategy：Round robin`。
-  占位符用 `{名字}`、标点写在文案里、列表分隔符也是文案（[架构 §4.7](docs/ARCHITECTURE.md)）。
+  占位符用 `{名字}`、标点写在文案里、列表分隔符也是文案（[架构说明](docs/ARCHITECTURE.md)）。
 - **提示文案里不加 `✓`/`✗`、不用 Emoji** —— `Toast` 在 `tone="success"` 时自带绿勾；
   Emoji 不跟随主题色且 13px 下糊。统一走 [report.tsx](src/client/report.tsx)。
 - **卡片等高靠 `.card` 的 `min-height`** —— 不是 `grid-auto-rows`。
   `margin-top: auto` 只在容器有**确定高度**时吸收空间，而 auto 行高下高度由内容决定，
-  所以只加 grid 属性**无效**（[架构 §4.10](docs/ARCHITECTURE.md) F29，2026-10-04 两轮没修好）。
+  所以只加 grid 属性**无效**（[架构说明](docs/ARCHITECTURE.md) F29，2026-10-04 两轮没修好）。
   这类纯视觉属性断言不了，只能真机看。
 - **官方 `Switch` 不要包在 `<label>` 里** —— 它是 `<button onClick>`，label 会再转发一次
   点击 → `onChange` **触发两次**，刚改的状态立刻被改回去。表现是「点一下闪回、关不掉」，
   而且**后端被写成原值**、界面上看不出变化。`Switch` 自带 `aria-label`，外层用 `<div>` 即可
-  （[架构 §4.10](docs/ARCHITECTURE.md) F31）。账号启用开关与自动签到开关都踩过。
+  （[架构说明](docs/ARCHITECTURE.md) F31）。账号启用开关与自动签到开关都踩过。
 - **`Switch` 的 `onChange` 给新值，不要取反** —— 它内部是 `onChange(!checked)`。
   多取一次反等于传回旧值，后端被写回原值，表现「按了没反应」
   （F32，2026-10-04 **踩了两次**：先修了 label 双触发，漏了这条更基础的）。
@@ -202,7 +202,7 @@ python check-line-endings.py <本仓根> --target lf
   —— 那里 `flex-wrap` 按**按钮数量**决定换行，渠道能力不同（ZCode 无签到/任务）
   就把开关甩到不同位置，看着「歪」（2026-10-04 实机）。
 - **上游（CPA）数据不能改，只能适配** —— 它是独立进程，插件只调它的接口。
-  **实测过的值才映射，认不出的原样透传**（[架构 §4.9](docs/ARCHITECTURE.md)）。
+  **实测过的值才映射，认不出的原样透传**（[架构说明](docs/ARCHITECTURE.md)）。
   ⚠️ 别拿 `plugins/*.dll` 里的字符串当契约 —— 那些大多是 **Go 注释**，
   2026-10-04 就因此差点把正确的映射表当成多余的删掉。实测方式与结果见
   [决策记录](.agents/notes/2026-10-04-upstream-value-translation.md)。
