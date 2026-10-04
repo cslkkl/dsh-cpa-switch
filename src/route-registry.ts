@@ -93,8 +93,18 @@ interface LoaderLike {
 export interface RouteRegistryHost {
   inject(deps: string[], callback: (scope: object) => void): unknown
   readonly logger?: LoggerLike | undefined
-  /** 订阅宿主事件（如 `app-boot/config-reload`）；返回退订函数。 */
-  on?(event: string, callback: () => void): (() => void) | undefined
+}
+
+/**
+ * Cordis 上下文上的事件订阅面。
+ *
+ * `ctx.on` 运行时确实存在（事件总线方法被 mixin 到 ctx 上），但插件拿到的
+ * `EffectContext` 类型**不声明它** —— 所以这里单独取出来，并在下面断言存在。
+ * 之前把 `on` 写成可选的，结果编译通过、运行时取不到方法、订阅**从未注册**，
+ * 却没有任何痕迹（2026-10-04 实踩，见 issue #9）。
+ */
+interface EventEmitterLike {
+  on(event: string, callback: () => void): () => void
 }
 
 /** 一次同步的结果（进日志，便于定位触发链）。 */
@@ -388,22 +398,32 @@ export function attachRouteRegistry(
    * 订阅宿主重载。`app-boot/config-reload` 在 profile 重建末尾 emit
    * （`app-boot/src/index.ts:300`），此刻 `llm-pi-ai` 的 fiber 刚换新，
    * 我们推的 volatile 值已随旧 fiber 一起消失 —— 这是唯一能把它补回去的时机。
+   *
+   * ⚠️ **订阅失败必须响**。曾经这里写成「`host.on` 不存在就静默降级」，
+   * 结果订阅没注册也毫无痕迹，排查时完全看不出发生过什么
+   * （2026-10-04 实踩）。现在三条路径各自留日志：
+   * 注册、事件到达、重推完成 —— 一次重启 + 切语言就能定性是哪一环断了。
    */
-  if (typeof host.on === 'function') {
-    let unsubscribe: (() => void) | undefined
-    try {
-      unsubscribe = host.on('app-boot/config-reload', () => {
-        void refresh('config-reload').catch(() => {})
-      })
-    } catch (error) {
-      // 宿主没有这个事件（版本差异）时静默降级：仍可由 boot / setup 路径刷新。
-      host.logger?.warn?.('cpa-panel: app-boot/config-reload unavailable: %o', error)
-    }
-    if (typeof unsubscribe === 'function') {
-      // 退订随宿主作用域释放；这里不额外持有，避免泄漏。
-      void unsubscribe
-    }
+  const emitter = host as unknown as Partial<EventEmitterLike>
+  if (typeof emitter.on !== 'function') {
+    // 宁可炸也不要静默退化：取不到 on() 就意味着重载后路由不会恢复，
+    // 而那正是本模块存在的理由。
+    throw new Error(
+      'cpa-panel: 宿主上下文没有 on()，无法订阅 app-boot/config-reload —— ' +
+        'profile 重载后模型路由不会被恢复。宿主版本不兼容？',
+    )
   }
+  emitter.on('app-boot/config-reload', () => {
+    deps.logger?.info?.('cpa-panel: host config-reload received, repushing models')
+    void refresh('config-reload')
+      .then((result) => {
+        deps.logger?.info?.('cpa-panel: config-reload repush done: %o', result)
+      })
+      .catch((error: unknown) => {
+        deps.logger?.warn?.('cpa-panel: config-reload repush failed: %o', error)
+      })
+  })
+  deps.logger?.info?.('cpa-panel: subscribed to app-boot/config-reload')
 
   return refresh
 }
