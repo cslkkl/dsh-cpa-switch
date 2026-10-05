@@ -20,13 +20,14 @@ const SRC = path.join(ROOT, 'src')
 /**
  * 纯判据文件：只做「输入 → 判据」，因此**不许有任何依赖**（契约类型除外）。
  *
- * ⚠️ 这份清单要跟着拆分走：判据搬到 `src/domain/` 之后，这里换成目录规则。
+ * ⚠️ 这份清单要跟着拆分走：判据搬进 `src/domain/` 之后，这里换成目录规则。
  */
 const JUDGEMENT_FILES = new Set([
   'src/select-plan.ts',
   'src/checkin-ledger.ts',
   'src/model-alias.ts',
   'src/model-caps.ts',
+  'src/action-outcome.ts',
 ])
 
 /** 判据允许的依赖：契约层与渠道层（两者都是纯的）。 */
@@ -65,6 +66,15 @@ const RULES = [
     files: (rel) => rel.startsWith('src/channels/'),
     violation: (spec) =>
       spec.startsWith('./') || spec.startsWith('../contracts/') ? null : `渠道层依赖了 ${spec}`,
+  },
+  {
+    id: 'ops-no-outer',
+    title: '业务域不得依赖传输层与装配层（依赖方向单向）',
+    files: (rel) => rel.startsWith('src/ops/'),
+    violation: (spec) =>
+      /^\.\.\/(index|boot|route-table|routes)\.ts$/u.test(spec)
+        ? `业务域依赖了外层模块 ${spec}（用例不该知道谁在调它）`
+        : null,
   },
 ]
 
