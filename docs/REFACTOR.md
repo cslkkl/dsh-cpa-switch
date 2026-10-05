@@ -148,11 +148,15 @@
 
 **P6 · 客户端数据层**
 
-- `client/api.ts` 三分：传输 / 端点与解码 / 缓存；`fmt` 移出传输层。
-- `useResource` 基于 `useSyncExternalStore`，统一 `Panel` 的自定义轮询。
-- `PluginPanel` 拆 `useDisabledOverrides` / `useAccountLogin` / `useChannelActions`；合计判据进纯函数。
-- 删无引用文案键并加断言；`tests/card-slots.test.ts` 文本断言同批同步。
-- 真机项：切渠道不闪、开关不闪回、设为唯一。
+- `client/api.ts` **四分**：`transport.ts`（一次请求 + 错误收敛）/ `endpoints.ts`（路径与端点）/
+  `read-cache.ts`（共享缓存，同时是**可订阅 store**）/ `format.ts`（`fmt` 移出传输层）。
+- `useResource` 基于 `useSyncExternalStore`；`Panel` 与登录流程的自定义轮询收成它的 `pollMs`。
+- `PluginPanel` 拆 `useDisabledOverrides` / `useAccountLogin` / `useChannelActions`；合计判据进纯函数 `sumCredits`。
+- 删 7 个无引用的文案键，判据 `tests/locales.test.ts`（扫引用、**排除表自己**）。
+  原计划要同步的 `tests/card-slots.test.ts` **不必改** —— 它只钉颜色与槽位结构，不钉文案。
+- 真机验收（2026-10-05，维护者）：切渠道不闪、开关不闪回、设为唯一 —— **全过**。
+- 验收捎回一个**历史缺陷**（非本批引入）：进度条按「已用占比」画，与绿条读作「还有」相反 ——
+  已改「剩余占比」，见[决策记录](../.agents/notes/2026-10-05-meter-bar-shows-remaining.md)。
 
 **P7 · 剩余物理拆分**
 
@@ -223,7 +227,7 @@
 - [x] P4 路由表数据化
 - [x] P5a Gateway
 - [x] P5b 用例分域
-- [ ] P6 客户端数据层
+- [x] P6 客户端数据层
 - [ ] P7 剩余物理拆分（可选）
 - [ ] 收尾：本文档结论并入架构说明并删除
 

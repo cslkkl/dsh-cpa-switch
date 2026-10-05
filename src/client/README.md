@@ -48,10 +48,25 @@
   - 策略值与警示判定走 [routing-text.ts](routing-text.ts)；警告用官方
     `IconWarningOutlineRegular`，**不用 Emoji**
 - **`PanelBoundary.tsx`** —— 渲染错误边界。**必须是类组件**（见[架构说明](../../docs/ARCHITECTURE.md)）
-- **`use-async-resource.ts`** —— 带缓存与竞态保护的异步资源 hook。
-  - **同步**在渲染阶段读缓存 → 切渠道 / 刷新不闪；副作用（重验）交给 effect
+- **`use-resource.ts`** —— 渠道级读资源的**统一入口**（缓存 + 竞态 + 轮询）。
+  - 导出：`useResource`（含类型 `Resource` / `UseResourceOptions`）/ 纯函数 `shownValue`
+  - 走 `useSyncExternalStore` 订阅 [read-cache.ts](read-cache.ts) 的 store ——
+    **别人写进去的值**（预取、另一个挂载点）也会让它重渲染，而不是「只在本次渲染
+    peek 一眼」（后者要等一次无关的重渲染才生效）
   - 已取到的值**连 key 一起存**：组件不随 key 重挂载，不认 key 会把上一个渠道的
     数据画在当前页签下
+  - `pollMs` 是**唯一**的轮询实现：**读完再排下一次**（慢响应不会把定时器堆起来），
+    且轮询**绕过缓存**（不绕的话读到的永远是它自己上一轮写进去的那份，进度会停在第一帧）
+  - ⚠️ `shownValue` 的门在 `ok` 上：**失败的那份响应不许当值渲染**（判据
+    `tests/read-cache.test.ts`）
+- **`use-disabled-overrides.ts`** —— 启用态的**即时覆盖层**（按渠道认领）。
+  - 后端**一确认就自我删除**，所以它不会像以前那样「粘住」一次失败的显示
+  - `plugin` 变化时整层清掉：覆盖层是渠道级状态，跟着渠道走
+- **`use-account-login.ts`** —— 「添加账号」弹窗的状态机（`idle` / `starting` / `wait` / `error`）。
+  - 授权轮询也走 `useResource` 的 `pollMs`（`POLL_MS = 2500`）；还没有 `state` 时不轮询
+  - 到**终态**后 `invalidateReads('accounts:' + plugin)` 让账号列表自己刷新
+- **`use-channel-actions.ts`** —— 渠道级动作（全部签到 / 任务、自动签到开关）+ 忙碌与提示。
+  - 「批量在飞」与「某张卡在飞」**互相看得见**：并发点各发一次写请求会互相盖掉响应
 - **`report.tsx`** —— 操作结果提示的**唯一**组装处（文案 + 图标）。
   - 导出：`reportOf` / `okReport` / `errReport` / `errorText` / 类型 `Report`
   - ⚠️ 文案里**不加** `✓` / `✗`：`Toast` 在 `tone="success"` 时自带绿勾，
@@ -94,13 +109,26 @@
   - 失败明细**逐个点名**（账号名 + 原因），超过 3 条截断并说明还剩几个
   - ⚠️ 分隔符与冒号都取自文案表（`actionListSep` / `colon`）——
     硬编码 `：` 会让英文下变成 `Check-in failed：zlz`（F28）
-- **`api.ts`** —— `/api/v1/cpa/*` 调用封装 + **共享读缓存**（`ReadCache`）。
-  - 导出：`api` / `cachedGet` / `invalidateReads` / `act` / `selectCpaAccount` /
-    `setAccountEnabled` / `setAutoCheckin` / `startAuth` / `authStatus` / `authCancel` / `fmt` /
-    `prefetch` / `readCache` / 类型 `ReadCache`
-  - ⚠️ 任何异常收敛成 `{ ok: false, error }`，**不抛**
-  - ⚠️ **写操作成功后必须 `invalidateReads`**，否则界面显示旧值
+- **`transport.ts`** —— 传输层：一次 `/api/v1/cpa/*` 请求 + 错误收敛。
+  - 导出：`api` / `post` / 类型 `ApiResult`
+  - ⚠️ 任何异常收敛成 `{ ok: false, error }`，**不抛** —— 调用方只需判 `ok`
+- **`read-cache.ts`** —— **共享读缓存**（`ReadCache`）：新鲜 / 陈旧两档 + 按前缀作废。
+  - 导出：`readCache` / `cachedGet` / `prefetch` / `invalidateReads` /
+    `class ReadCache` / 类型 `CachedValue` / `ReadCacheOptions`
+  - 它同时是**可订阅的 store**（`subscribe` / `getVersion`）：界面侧的响应式来源。
+    快照给的是**版本号**而不是整份缓存 —— `useSyncExternalStore` 用 `Object.is` 比快照，
+    每次给新对象会让 React 认为「一直在变」而无限重渲染
   - `prefetch` 失败**不算错**（只是优化）；判据是缓存里真的有值，不是「没报错」
+- **`endpoints.ts`** —— `/api/v1/cpa/*` 的**端点与解码**：`paths` 与逐个读 / 写函数。
+  - 导出：`paths`（路径的**唯一来源**，别处不许再写字面量）/ `fetchSetup` / `runSetup` /
+    `fetchStatus` / `startCpa` / `act` / `selectCpaAccount` / `setAccountEnabled` /
+    `setAutoCheckin` / `startAuth` / `authStatus` / `authCancel`
+  - ⚠️ **写函数自己失效缓存**（不是让调用方记得）：`act` / `selectCpaAccount` /
+    `setAccountEnabled` → `accounts:` 前缀，`setAutoCheckin` → `autockin:` 前缀。
+    **前缀必须与宿主 `cacheKeys` 造出的键一致**（键即失效前缀）—— 对不上不报错，
+    只是界面永远显示写之前的值
+- **`format.ts`** —— 千分位格式化（`fmt`）。与传输 / 缓存 / 端点**都不沾边**，
+  所以分开：`amountWithUnit` 那类判据只想要一个格式化函数，不该被迫认识 HTTP
 - **`locales.ts`** —— 中英文案 + 插值。
   - 导出：`zh`（`as const`）/ `en`（`Record<LocaleKey, string>`）/ `makeTranslate` /
     类型 `LocaleKey` / `Translate` / `RawTranslate`
@@ -180,11 +208,13 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 
 **切渠道要「换参数」而不是「卸载重挂」**，三件事缺一件就闪一下（2026-10-04 实机）：
 
-1. **缓存要能同步读到** —— `useAsyncResource` 在**渲染阶段** `peek` 缓存。
-   只在 `useEffect` 里写 state 不够：那发生在挂载**之后**，换 key 那一帧必然是空的。
+1. **缓存要能同步读到** —— `useResource` 用 `useSyncExternalStore`，它的 `getSnapshot`
+   **在渲染阶段**直接读缓存。只在 `useEffect` 里写 state 不够：那发生在挂载**之后**，
+   换 key 那一帧必然是空的。
 2. **`Panel` 不给 `PluginPanel` 加 `key`** —— 加了就是卸载重挂，`useState` 全部归零，
-   上面那条同步读取一并失效。代价是渠道间的局部状态会留下来，所以 `PluginPanel`
-   在 `plugin` 变化时自己重置（toast / busy / 登录弹窗）。
+   上面那条同步读取一并失效。代价是渠道间的局部状态会留下来，所以状态**各由自己的
+   hook 在 `plugin` 变化时重置**（toast / busy / 登录弹窗 / 启用态覆盖层）——
+   清理责任跟着状态走，不在 `PluginPanel` 里一股脑清六样。
 3. **已取到的值要连 key 一起存** —— 不重挂载意味着 state 不自动归零，它还揣着上一个
    渠道的数据；只比值不认 key，A 渠道的账号会画在 B 的页签下，**而且不报错**。
 
@@ -196,7 +226,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 换来「每个页签秒开、零加载态」。
 
 - 触发点是**渠道清单到位之后**（清单写在 `channels/registry.ts`，到位才知道有哪几条）。
-- 预取走 `api.ts` 的 `prefetch()`，**失败不算错**：用户没点的渠道取不到不该影响界面。
+- 预取走 `read-cache.ts` 的 `prefetch()`，**失败不算错**：用户没点的渠道取不到不该影响界面。
 - 同 key 已在飞就跳过 —— `cachedGet` 没有 single-flight，预取与真实渲染可能同时要它。
 - 判据在 `tests/read-cache.test.ts` 的「预取」组：**判据是缓存里真的有值**，
   而不是「调用了没报错」—— 后者对静默失败的预取一样成立。
@@ -204,7 +234,9 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 ## 归属与依赖
 
 - 被谁依赖：宿主 loader；`Panel` 是唯一的根组件
-- 依赖方向：只能依赖 `api` / `locales` / 样式表与本目录其他组件；
+- 依赖方向：只能依赖本目录的传输 / 缓存 / 端点模块（[transport.ts](transport.ts)、
+  [read-cache.ts](read-cache.ts)、[endpoints.ts](endpoints.ts)）、`locales`、样式表
+  与本目录其他组件；
   **不得**引用 `../` 下的宿主模块（两半运行在不同进程）—— 唯一例外是
   [../contracts/](../contracts/README.md)（两半共享的纯类型）。
   这条由 `pnpm check:layering` 的 `client-no-host` 规则拦，别只靠自觉。
