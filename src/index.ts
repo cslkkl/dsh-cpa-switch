@@ -28,8 +28,8 @@ import { CpaProcess, probePort } from './process.ts'
 import { Operations } from './operations.ts'
 import type { RouteSpec } from './routes.ts'
 import { CHANNEL_IDS, CHANNELS } from './channels/registry.ts'
-import { managedExePath, inspect as inspectSetup, prepare as prepareSetup } from './setup/index.ts'
-import { readAccountIntent, writeExeMemory } from './state.ts'
+import { SetupSession, inspect as inspectSetup } from './setup/index.ts'
+import { readAccountIntent } from './state.ts'
 import { registerRoutes } from './routes.ts'
 
 /** 本插件那一行的 Loader 条目 id —— 0.1.7 起它就是设置命名空间。 */
@@ -48,12 +48,6 @@ export const name = 'cpa-panel'
 export const inject = ['credentials']
 
 export { Config }
-
-/** 环境准备的运行态。 */
-interface SetupState {
-  running: boolean
-  progress: unknown
-}
 
 /** 生命周期 effect 的最小上下文。 */
 interface EffectContext {
@@ -96,7 +90,6 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
   await adminKey.load()
 
   const cpaProcess = new CpaProcess()
-  const setup: SetupState = { running: false, progress: undefined }
 
   /** 每次调用现求值 —— 配置改了立刻生效。 */
   const options = () => ({
@@ -143,50 +136,18 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     onAccountsChanged: () => void ensureRoutesFresh('oauth').catch(() => {}),
   })
 
+  /** 环境准备的运行态 —— 路由与 boot 都只经它，装配层不再自己管进度。 */
+  const setup = new SetupSession({
+    readConfig,
+    adminKey,
+    logger: ctx.logger,
+    /** 用户点「一键准备」成功后，CPA 可能刚被拉起 —— 立刻推模型路由。 */
+    onPrepared: (trigger) => void ensureRoutesFresh(trigger).catch(() => {}),
+  })
+
   // ── 生命周期 effect ────────────────────────────────────────────────────
   ctx.effect(() => {
     let stopped = false
-
-    /**
-     * 首次运行的自动安装。
-     *
-     * 目标：用户装完插件什么都不用点，CPA 自己就装好、配好、跑起来。
-     *
-     * ⚠️ **只在「环境为空」时动手**（见 `inspectSetup` 的 `missing`）：
-     * - 已经有 exe → 走 `ensure` 复用，**绝不覆盖**；
-     * - 只缺渠道插件（有 exe、dll 数 0）→ 补齐插件即可，不重下 exe。
-     *
-     * 这条判断是硬约束：删掉探测来源却漏了兜底，曾导致**启不动 CPA、用户服务
-     * 直接中断**（见 `.agents/notes/incident-exe-discovery-2026-10-03.md`）。
-     *
-     * @returns 装成功了没有。
-     */
-    const autoInstallIfNeeded = async (): Promise<boolean> => {
-      const config = readConfig()
-      const state = inspectSetup({ port: config.port, secretKey: adminKey.value })
-      if (state.ok) return false
-
-      /**
-       * 用的是 `ensureForAutoInstall()` 而不是 `adminKey.value` —— 首次安装时
-       * 后者必然是空，直接传会立刻 `no-admin-key` 卡死，自动安装就成了摆设。
-       */
-      const secretKey = await adminKey.ensureForAutoInstall()
-      ctx.logger?.info?.('cpa-panel: auto install starting (missing: %o)', state.missing)
-      const result = await prepareSetup({ port: config.port, secretKey })
-      ctx.logger?.info?.(
-        'cpa-panel: auto install %s',
-        result.ok ? 'ok' : `failed (${String(result.phase)}: ${String(result.error)})`,
-      )
-
-      /**
-       * 装完把密钥缓存回填。不回填的话，后续路由仍以为「没密钥」，会出现
-       * 「装好了但面板处处报 no-admin-key」的怪状态。
-       */
-      if (result.ok && adminKey.value === '') {
-        adminKey.adopt(secretKey, 'auto-install')
-      }
-      return result.ok
-    }
 
     const boot = async (): Promise<void> => {
       /**
@@ -224,15 +185,11 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
           missing,
         )
         /**
-         * ⚠️ 必须包 try/catch：下载环节的网络抖动（代理 TLS 断连等）会在这里
-         * 抛出 —— 放任它冒出去会**拖死整个 DSH 宿主**（fatal load failure）。
-         * 补装失败只该意味着「这次没装上、面板提示重试」，绝不是「宿主崩了」。
+         * 补装在这里**就地吞异常**（见 `SetupSession.autoInstall`）：下载环节的网络抖动
+         * 放任冒出去会**拖死整个 DSH 宿主**（fatal load failure），补装失败只该意味着
+         * 「这次没装上、面板提示重试」。
          */
-        try {
-          await autoInstallIfNeeded()
-        } catch (error) {
-          ctx.logger?.warn?.('cpa-panel: auto install at boot failed: %o', error)
-        }
+        await setup.autoInstall()
         if (stopped) return
       }
 
@@ -246,13 +203,9 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
        * 此时上面的 preflight 已经放过，得靠这里再兜一次。
        */
       if (!state.running && state.reason === 'exe-not-found') {
-        /** 同上：兜底补装的网络异常也必须就地吞掉，只记日志。 */
-        try {
-          const installed = await autoInstallIfNeeded()
-          if (installed) state = await cpaProcess.ensure(processOptions())
-        } catch (error) {
-          ctx.logger?.warn?.('cpa-panel: auto install retry failed: %o', error)
-        }
+        /** 同上：兜底补装的网络异常也必须就地吞掉（`autoInstall` 内部已吞）。 */
+        const installed = await setup.autoInstall()
+        if (installed) state = await cpaProcess.ensure(processOptions())
         if (stopped) return
       }
 
@@ -294,7 +247,6 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
         readConfig,
         setup,
         cpaProcess,
-        onSetupDone: () => void ensureRoutesFresh('setup').catch(() => {}),
       })
       return registerRoutes(routes, {
         register: (opts) => connectionCtx.connection.fetch.register(opts),
@@ -309,10 +261,8 @@ interface RouteDeps {
   readonly ops: Operations
   readonly adminKey: AdminKeyStore
   readonly readConfig: () => PluginConfig
-  readonly setup: SetupState
+  readonly setup: SetupSession
   readonly cpaProcess: CpaProcess
-  /** 环境准备成功后的回调（CPA 可能是这次拉起的）—— 推模型路由用。 */
-  readonly onSetupDone: () => void
 }
 
 /** 读请求体，失败当空对象（前端有时不带 body）。 */
@@ -327,7 +277,7 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
 
 /** 组装路由表。 */
 function buildRoutes(deps: RouteDeps): RouteSpec[] {
-  const { ops, adminKey, readConfig, setup, onSetupDone } = deps
+  const { ops, adminKey, readConfig, setup } = deps
 
   return [
     {
@@ -347,9 +297,8 @@ function buildRoutes(deps: RouteDeps): RouteSpec[] {
       path: '/api/v1/cpa/setup',
       methods: ['GET', 'POST'],
       handle: async (request) => {
-        const config = readConfig()
         if (request.method !== 'POST') {
-          const inspection = inspectSetup({ port: config.port, secretKey: adminKey.value })
+          const inspection = setup.inspect()
           return json({
             running: setup.running,
             progress: setup.progress,
@@ -363,43 +312,7 @@ function buildRoutes(deps: RouteDeps): RouteSpec[] {
           })
         }
 
-        /**
-         * 密钥优先取缓存；缓存空则现造一个。
-         *
-         * 缓存空有两种情况：真没配（首次自动安装），或自动安装刚跑完但没回填。
-         * 两种都该在现场造密钥，而不是把用户顶回去配。
-         */
-        const secretKey =
-          adminKey.value !== '' ? adminKey.value : await adminKey.ensureForAutoInstall()
-
-        if (setup.running) return json({ ok: false, error: 'already-running' })
-        setup.running = true
-        setup.progress = { phase: 'starting' }
-        try {
-          const result = await prepareSetup({
-            port: config.port,
-            secretKey,
-            onStep: (step) => {
-              setup.progress = step
-            },
-          })
-          // 装完就把记忆指向托管的那份，省得下次还要探测
-          if (result.ok) {
-            writeExeMemory(managedExePath())
-            if (adminKey.value === '') adminKey.adopt(secretKey, 'auto-install')
-            /** 环境刚备好（CPA 可能是这次拉起的）—— 立即推模型路由。 */
-            onSetupDone()
-          }
-          return json(result)
-        } catch (error) {
-          return json({
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          })
-        } finally {
-          setup.running = false
-          setup.progress = undefined
-        }
+        return json(await setup.run())
       },
     },
     {
