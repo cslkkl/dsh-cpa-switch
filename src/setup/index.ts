@@ -23,7 +23,15 @@ import {
   managedExePath,
   managedPluginsDir,
 } from './paths.ts'
-import { countDlls, download, extract, findAsset, inspect, verify } from './download.ts'
+import {
+  countDlls,
+  download,
+  extract,
+  findAsset,
+  inspect,
+  listPluginIds,
+  verify,
+} from './download.ts'
 import { renderConfig, writeConfig } from './config.ts'
 import type { SourceKey } from './paths.ts'
 
@@ -43,6 +51,7 @@ export {
   findFile,
   humanSize,
   inspect,
+  listPluginIds,
   removeDir,
   verify,
 } from './download.ts'
@@ -161,10 +170,14 @@ export async function prepare(input: PrepareInput): Promise<PrepareResult> {
    *
    * 只在**文件不存在**时写 —— 用户手改过的配置不能被覆盖。
    * 要重建得先删掉它（或调 `writeConfig` 显式覆盖）。
+   *
+   * 启用清单取**磁盘上实际存在的 dll**：插件在此之前已经解压就位，
+   * 所以这是一份「装了什么就启用什么」的准确清单，也不需要维护。
    */
   if (!existsSync(managedConfigPath())) {
     step('config', {})
-    writeConfig(renderConfig({ port: input.port, secretKey: input.secretKey }))
+    const pluginIds = listPluginIds(managedPluginsDir())
+    writeConfig(renderConfig({ port: input.port, secretKey: input.secretKey, pluginIds }))
   }
 
   const state = inspect({ port: input.port, secretKey: input.secretKey })

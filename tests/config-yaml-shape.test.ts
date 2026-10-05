@@ -19,7 +19,12 @@ describe('renderConfig 的 YAML 形状', () => {
     'kimi-k2.6': ['workbuddy', 'trae'],
     'minimax-m3': ['workbuddy', 'trae'],
   })
-  const yaml = renderConfig({ port: 8317, secretKey: 'plain-secret', aliases })
+  const yaml = renderConfig({
+    port: 8317,
+    secretKey: 'plain-secret',
+    aliases,
+    pluginIds: ['workbuddy', 'trae', 'qoder', 'zcode'],
+  })
 
   it('每个同名模型都在段里（一个不少）', () => {
     for (const model of Object.keys(aliases.overlaps)) {
