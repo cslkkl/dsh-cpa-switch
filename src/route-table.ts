@@ -19,7 +19,7 @@ import { CHANNEL_IDS, CHANNELS } from './channels/registry.ts'
 import type { PluginConfig } from './config.ts'
 import type { AdminKeyStore } from './credentials.ts'
 import type { Operations } from './operations.ts'
-import type { CpaProcess } from './process.ts'
+import type { CpaRuntime } from './runtime.ts'
 import type { RouteSpec } from './routes.ts'
 import type { SetupSession } from './setup/index.ts'
 import { readAccountIntent } from './state.ts'
@@ -30,7 +30,8 @@ export interface RouteDeps {
   readonly adminKey: AdminKeyStore
   readonly readConfig: () => PluginConfig
   readonly setup: SetupSession
-  readonly cpaProcess: CpaProcess
+  /** 「CPA 在不在跑」与「要它跑起来」都只经它，路由不直接碰进程。 */
+  readonly runtime: CpaRuntime
 }
 
 /** 读请求体，失败当空对象（前端有时不带 body）。 */
@@ -89,26 +90,21 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async () => {
         const config = readConfig()
         /**
-         * 走 `CpaProcess` 的记忆层，**不要**直接调 `probePort`。
+         * 走 {@link CpaRuntime.status} —— **只读探活，绝不起进程**。
          *
          * 面板挂载时 `/status` 与 `/accounts` 几乎同时到达，两者都要回答
-         * 「CPA 在不在跑」。各自探一次 = 两条路径可能给出**相反**的答案
-         * （状态条说「运行中」、账号列表报 `cpa-unavailable`），而且白付一次
-         * TCP 握手。共用记忆后只探一次，两边必然一致。
+         * 「CPA 在不在跑」。共用 `CpaProcess` 的探活记忆后只探一次，
+         * 两条路径必然一致（不会出现状态条说「运行中」、列表报
+         * `cpa-unavailable`），也不会白付一次 TCP 握手。
          *
+         * ⚠️ 别在这里换 `ensure()`：那会在「只是想知道」的时候把 CPA 拉起来。
          * 记忆是短的（1.5 秒）且有显式失效点，所以不会把「刚停掉的 CPA」
          * 继续报成运行中。
          */
-        const running = await deps.cpaProcess.isListening({
-          port: config.port,
-          exePath: config.exePath,
-          manageLifecycle: config.manageLifecycle,
-          openControlPanel: config.openControlPanel,
-          startTimeoutSeconds: config.startTimeoutSeconds,
-        })
+        const state = await deps.runtime.status()
         return json({
-          running,
-          owned: deps.cpaProcess.owned,
+          running: state.running,
+          owned: state.owned,
           port: config.port,
           hasAdminKey: adminKey.value !== '',
           adminKeySource: adminKey.source,
@@ -303,14 +299,7 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       path: '/api/v1/cpa/start',
       methods: ['POST'],
       handle: async () => {
-        const config = readConfig()
-        const state = await deps.cpaProcess.ensure({
-          port: config.port,
-          exePath: config.exePath,
-          manageLifecycle: config.manageLifecycle,
-          openControlPanel: config.openControlPanel,
-          startTimeoutSeconds: config.startTimeoutSeconds,
-        })
+        const state = await deps.runtime.ensure()
         return json({ ok: state.running, owned: state.owned, reason: state.reason })
       },
     },

@@ -4,7 +4,8 @@
  * 全部返回 `{ ok: true, ... }` 或 `{ ok: false, error }` —— 浏览器半边按
  * `ok` 分支，不靠 HTTP 状态码区分业务失败。
  *
- * ⚠️ **一切对 CPA 的调用都经 {@link OpsDeps.cpaFetch}**，密钥只在这一侧。
+ * ⚠️ **一切对 CPA 的调用都经 {@link OpsDeps.gateway}** —— 就绪前置、读写、
+ * 读缓存与失效都在那一层，这里只写业务规则。密钥只在这一侧。
  *
  * @module dsh-cpa-switch/operations
  */
@@ -32,10 +33,8 @@ import {
   writeCheckinLedger,
 } from './state.ts'
 import { applyLedger, CHANNEL_WIDE, recordToday } from './checkin-ledger.ts'
-import type { CpaOptions } from './cpa.ts'
-import { CpaCache } from './cache.ts'
 import type { LoggerLike } from './credentials.ts'
-import type { CpaProcess, EnsureResult } from './process.ts'
+import { cacheKeys, type CpaGateway } from './gateway.ts'
 
 /**
  * 记一次**成功的**签到。
@@ -151,14 +150,14 @@ export function normalizeActionOutcome(payload: unknown): ActionOutcome {
 
 /** 操作层依赖。 */
 export interface OpsDeps {
-  /** 每次调用现求值 —— 配置改了立刻生效。 */
-  readonly options: () => CpaOptions
-  readonly cpaFetch: (options: CpaOptions, path: string, init?: RequestInit) => Promise<unknown>
-  readonly process: CpaProcess
-  /** 交给 `process.ensure()` 的启动参数。 */
-  readonly processOptions: () => Parameters<CpaProcess['ensure']>[0]
-  /** 当前管理密钥（空串表示未配置）。 */
-  readonly adminKey: () => string
+  /**
+   * 对 CPA 的**唯一通道**：连接参数现取、就绪前置、读写、读缓存、失效都在里面。
+   *
+   * 原先这里是 `options` + `cpaFetch` + `process` + `processOptions` + `adminKey`
+   * 五件散装的依赖，于是二十多个调用点各自拼一遍
+   * `cpaFetch(options(), path)` —— 拼错一次就是「改了配置不生效」。
+   */
+  readonly gateway: CpaGateway
   readonly logger?: LoggerLike | undefined
   /**
    * 账号集合可能发生变化的回调（OAuth 授权完成后由 `authStatus` 触发）。
@@ -190,24 +189,11 @@ function filesOf(data: unknown): AuthFile[] {
 /**
  * 账号、路由、优先级、OAuth 等业务操作的集合。
  *
- * 用类而非散函数：这些操作共享 `ensureRunning` 与密钥检查这两个前置，
+ * 用类而非散函数：这些操作共享「CPA 在跑」与「有密钥」这两个前置，
  * 集中在一处就不会出现「某条路由忘了检查密钥」。
  */
 export class Operations {
   readonly #deps: OpsDeps
-  /**
-   * 读路径的记忆层。
-   *
-   * 为什么必须有：**面板挂载一次要打 6 条路由**，其中 4 条落在同一个渠道上
-   * （`/accounts`、`/auto-checkin`、以及各自背后的 `ensure()` 探活）。
-   * 没有它，每点一次刷新都是「探活 + 拉 accounts + 拉 credits + 拉 accounts
-   * 再一遍」—— 用户看到的就是「点一下等很久」。
-   *
-   * 失效靠**事件**而不是靠时间：所有写操作成功后会
-   * {@link invalidateChannel}，所以「签到后余额没变」这种不一致不存在；
-   * TTL 只是给「无写操作时连点几下」兜底。
-   */
-  readonly #cache = new CpaCache()
 
   constructor(deps: OpsDeps) {
     this.#deps = deps
@@ -219,56 +205,40 @@ export class Operations {
    * ⚠️ **每个改变 CPA 状态的写操作成功后都必须调它**，包括
    * 签到 / 任务 / 选择账号 / 改调度策略 —— 否则用户点完签到看到的还是旧余额。
    *
-   * ⚠️ 一个渠道有**两个** key（`accounts:` 与 `autockin:`），所以这里各清一次。
-   * 漏掉 `autockin:` 的话，切换自动签到后开关会一直显示旧值 —— 而它不报错，
-   * 只是「看起来没生效」。
-   *
-   * `plugin` 为空串表示「不知道影响哪个渠道」，按全部失效处理（宁可多打一次
-   * CPA，也不要给出跨渠道的脏数据）。
+   * 一个渠道有几个读 key、怎么清，是 {@link CpaGateway.invalidateChannel}
+   * 的事（键与失效前缀同源，别在这里手写前缀）。
    */
   invalidateChannel(plugin: string): void {
-    if (plugin === '') {
-      this.#cache.invalidate('')
-      return
-    }
-    this.#cache.invalidate(`accounts:${plugin}:`)
-    this.#cache.invalidate(`autockin:${plugin}`)
+    this.#deps.gateway.invalidateChannel(plugin)
   }
 
   /** 读缓存的命中统计，供诊断用。 */
   cacheStats(): { readonly hits: number; readonly misses: number } {
-    return this.#cache.stats()
+    return this.#deps.gateway.cacheStats()
   }
 
-  /** 前置检查：CPA 在跑 + 有管理密钥。 */
-  async #ready(): Promise<EnsureResult | OpsFailure> {
-    const state = await this.#deps.process.ensure(this.#processOptions())
-    if (!state.running) {
-      return {
-        ok: false,
-        error: 'cpa-unavailable',
-        ...(state.reason === undefined ? {} : { reason: state.reason }),
-      }
-    }
-    if (this.#deps.adminKey() === '') return { ok: false, error: 'no-admin-key' }
-    return state
+  /**
+   * 前置检查：CPA 在跑 + 有管理密钥。
+   *
+   * @returns `undefined` 表示可以继续；否则是要原样返回给浏览器的失败。
+   */
+  async #ready(): Promise<OpsFailure | undefined> {
+    return this.#refusalOf(await this.#deps.gateway.requireReady())
   }
 
-  /** 只检查 CPA 在跑（只读操作用，不需要密钥）。 */
-  async #running(): Promise<EnsureResult | OpsFailure> {
-    const state = await this.#deps.process.ensure(this.#processOptions())
-    if (!state.running) {
-      return {
-        ok: false,
-        error: 'cpa-unavailable',
-        ...(state.reason === undefined ? {} : { reason: state.reason }),
-      }
-    }
-    return state
+  /**
+   * 只检查 CPA 在跑（只读操作用，不需要密钥）。
+   *
+   * ⚠️ 「在跑」是由通道层**确保**的，也就是必要时会按配置把 CPA 拉起来 ——
+   * 面板打开就该能用，不该要求用户先去别处启动服务。见 `gateway.requireRunning`。
+   */
+  async #running(): Promise<OpsFailure | undefined> {
+    return this.#refusalOf(await this.#deps.gateway.requireRunning())
   }
 
-  #processOptions(): Parameters<CpaProcess['ensure']>[0] {
-    return this.#deps.processOptions()
+  /** 把通道层的前置结论翻成业务失败形状（`ok: false` 这一格由这里补）。 */
+  #refusalOf(refusal: { error: string; reason?: string } | undefined): OpsFailure | undefined {
+    return refusal === undefined ? undefined : { ok: false, ...refusal }
   }
 
   /**
@@ -283,12 +253,11 @@ export class Operations {
     const channel = channelOf(plugin)
     if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
 
-    const key = `accounts:${plugin}:${String(fresh)}`
-    if (!fresh) {
-      const cached = await this.#cache.read(key, async () => await this.#loadAccounts(plugin))
-      if (cached !== undefined) return cached as OpsResult
-    }
-    return this.#loadAccounts(plugin)
+    if (fresh) return await this.#loadAccounts(plugin)
+    return await this.#deps.gateway.read<OpsResult>(
+      cacheKeys.accounts(plugin),
+      async () => await this.#loadAccounts(plugin),
+    )
   }
 
   /**
@@ -302,14 +271,14 @@ export class Operations {
     if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
 
     const state = await this.#running()
-    if ('error' in state) return state
+    if (state !== undefined) return state
 
     try {
       const accountsPath = accountsPathOf(plugin)
       const [base, creditData] = await Promise.all([
-        this.#deps.cpaFetch(this.#deps.options(), accountsPath),
+        this.#deps.gateway.fetch(accountsPath),
         channel.capabilities.credits
-          ? this.#deps.cpaFetch(this.#deps.options(), channel.creditsPath).catch(() => undefined)
+          ? this.#deps.gateway.fetch(channel.creditsPath).catch(() => undefined)
           : Promise.resolve(undefined),
       ])
       const normalized = normalizeAccounts(plugin, base, creditData)
@@ -388,12 +357,12 @@ export class Operations {
     if (path === undefined) return { ok: false, error: 'unsupported-action' }
 
     const ready = await this.#ready()
-    if ('error' in ready) return ready
+    if (ready !== undefined) return ready
 
     const body =
       authIndex === undefined || authIndex === '' ? '{}' : JSON.stringify({ auth_index: authIndex })
     try {
-      const data = await this.#deps.cpaFetch(this.#deps.options(), path, { method: 'POST', body })
+      const data = await this.#deps.gateway.fetch(path, { method: 'POST', body })
       // 签到 / 任务会改余额与签到态：写完必须作废，否则紧接着的 `load()` 读到旧值
       this.invalidateChannel(plugin)
       /**
@@ -433,36 +402,34 @@ export class Operations {
     if (paths === undefined) return { ok: false, error: 'unsupported' }
 
     if (method === 'GET') {
-      const cached = await this.#cache.read(`autockin:${plugin}`, async () => {
-        const state = await this.#running()
-        if ('error' in state) return state
+      return await this.#deps.gateway.read<OpsResult>(cacheKeys.autoCheckin(plugin), async () => {
+        const refusal = await this.#running()
+        if (refusal !== undefined) return refusal
         try {
           // ⚠️ 从 `/accounts` 顶层读，不是 `/config` —— 详见 channels/spec.ts 的注释
-          const accountsData = (await this.#deps.cpaFetch(this.#deps.options(), paths.readFrom)) as
+          const accountsData = (await this.#deps.gateway.fetch(paths.readFrom)) as
             Record<string, unknown> | undefined
           return { ok: true as const, enabled: accountsData?.[paths.field] === true }
         } catch (error) {
           return { ok: false as const, error: messageOf(error) }
         }
       })
-      return cached as OpsResult
     }
 
     const state = await this.#running()
-    if ('error' in state) return state
+    if (state !== undefined) return state
 
     try {
-      if (this.#deps.adminKey() === '') return { ok: false, error: 'no-admin-key' }
+      if (!this.#deps.gateway.hasAdminKey()) return { ok: false, error: 'no-admin-key' }
 
       // ⚠️ PATCH + 字段名 `checkin_auto`（不是 POST `{enabled}` 到 /checkin/config —— 那路径 404）
-      await this.#deps.cpaFetch(this.#deps.options(), paths.write, {
+      await this.#deps.gateway.fetch(paths.write, {
         method: 'PATCH',
         body: JSON.stringify({ [paths.field]: enabled }),
       })
       // 写接口回的不一定可靠，回读一次更稳
-      const after = (await this.#deps
-        .cpaFetch(this.#deps.options(), paths.readFrom)
-        .catch(() => undefined)) as Record<string, unknown> | undefined
+      const after = (await this.#deps.gateway.fetch(paths.readFrom).catch(() => undefined)) as
+        Record<string, unknown> | undefined
       this.invalidateChannel(plugin)
       return { ok: true, enabled: after?.[paths.field] === true }
     } catch (error) {
@@ -476,10 +443,10 @@ export class Operations {
     if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
 
     const state = await this.#running()
-    if ('error' in state) return state
+    if (state !== undefined) return state
 
     try {
-      const data = (await this.#deps.cpaFetch(this.#deps.options(), channel.modelsPath)) as
+      const data = (await this.#deps.gateway.fetch(channel.modelsPath)) as
         | {
             groups?: {
               label?: unknown
@@ -508,10 +475,10 @@ export class Operations {
     if (schoolPath === undefined) return { ok: false, error: 'unsupported' }
 
     const state = await this.#running()
-    if ('error' in state) return state
+    if (state !== undefined) return state
 
     try {
-      const data = (await this.#deps.cpaFetch(this.#deps.options(), schoolPath)) as
+      const data = (await this.#deps.gateway.fetch(schoolPath)) as
         { accounts?: unknown } | undefined
       return { ok: true, accounts: data?.accounts ?? [] }
     } catch (error) {
@@ -533,13 +500,11 @@ export class Operations {
    */
   async routingGet(): Promise<OpsResult> {
     const state = await this.#running()
-    if ('error' in state) return state
+    if (state !== undefined) return state
 
     try {
-      const data = (await this.#deps.cpaFetch(
-        this.#deps.options(),
-        '/v0/management/routing/strategy',
-      )) as { strategy?: unknown } | undefined
+      const data = (await this.#deps.gateway.fetch('/v0/management/routing/strategy')) as
+        { strategy?: unknown } | undefined
       return { ok: true, strategy: data?.strategy }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -561,17 +526,15 @@ export class Operations {
     if (!allowed.includes(strategy)) return { ok: false, error: 'invalid-strategy' }
 
     const ready = await this.#ready()
-    if ('error' in ready) return ready
+    if (ready !== undefined) return ready
 
     try {
-      await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/routing/strategy', {
+      await this.#deps.gateway.fetch('/v0/management/routing/strategy', {
         method: 'PUT',
         body: JSON.stringify({ value: strategy }),
       })
-      const data = (await this.#deps.cpaFetch(
-        this.#deps.options(),
-        '/v0/management/routing/strategy',
-      )) as { strategy?: unknown } | undefined
+      const data = (await this.#deps.gateway.fetch('/v0/management/routing/strategy')) as
+        { strategy?: unknown } | undefined
       // 空串 = 全部渠道：调度策略是跨渠道的，改它等于改了所有渠道的读结果
       this.invalidateChannel('')
       return { ok: true, strategy: data?.strategy }
@@ -590,14 +553,14 @@ export class Operations {
    */
   async schedulerModeNormalize(): Promise<OpsResult> {
     const ready = await this.#ready()
-    if ('error' in ready) return ready
+    if (ready !== undefined) return ready
 
     try {
       const changed: string[] = []
       const skipped: string[] = []
       for (const plugin of CHANNEL_IDS) {
-        const cfg = (await this.#deps
-          .cpaFetch(this.#deps.options(), configPathOf(plugin))
+        const cfg = (await this.#deps.gateway
+          .fetch(configPathOf(plugin))
           .catch(() => undefined)) as { scheduler_mode?: unknown } | undefined
         // 渠道不支持这个字段就不动它（trae 就没有）
         if (cfg === undefined || cfg.scheduler_mode === undefined) {
@@ -605,7 +568,7 @@ export class Operations {
           continue
         }
         if (cfg.scheduler_mode === SCHEDULER_MODE) continue
-        await this.#deps.cpaFetch(this.#deps.options(), configPathOf(plugin), {
+        await this.#deps.gateway.fetch(configPathOf(plugin), {
           method: 'PATCH',
           body: JSON.stringify({ scheduler_mode: SCHEDULER_MODE }),
         })
@@ -634,9 +597,9 @@ export class Operations {
   async priorityGet(plugin: string): Promise<OpsResult> {
     try {
       const [filesData, accountsData] = await Promise.all([
-        this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files'),
-        this.#deps
-          .cpaFetch(this.#deps.options(), `/v0/management/plugins/${plugin}/accounts`)
+        this.#deps.gateway.fetch('/v0/management/auth-files'),
+        this.#deps.gateway
+          .fetch(`/v0/management/plugins/${plugin}/accounts`)
           .catch(() => undefined),
       ])
 
@@ -686,9 +649,9 @@ export class Operations {
 
     try {
       const [filesData, accountsData] = await Promise.all([
-        this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files'),
-        this.#deps
-          .cpaFetch(this.#deps.options(), `/v0/management/plugins/${plugin}/accounts`)
+        this.#deps.gateway.fetch('/v0/management/auth-files'),
+        this.#deps.gateway
+          .fetch(`/v0/management/plugins/${plugin}/accounts`)
           .catch(() => undefined),
       ])
 
@@ -714,7 +677,7 @@ export class Operations {
         const next = rank.get(nickname)
         if (next === undefined) continue
         if (Number(file.priority ?? 0) === next) continue
-        await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files/fields', {
+        await this.#deps.gateway.fetch('/v0/management/auth-files/fields', {
           method: 'PATCH',
           body: JSON.stringify({ name: file.name, priority: next }),
         })
@@ -765,13 +728,13 @@ export class Operations {
    * 误当成「这个渠道没有账号」。让异常冒到调用方的 `catch`。
    */
   async #readCredentials(plugin: string): Promise<AuthFile[]> {
-    const data = await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files')
+    const data = await this.#deps.gateway.fetch('/v0/management/auth-files')
     return filesOf(data).filter((file) => file.provider === plugin)
   }
 
   /** 改一个文件的启用态。body 里的 `disabled` 就是 `!enabled`，在这里算好。 */
   async #patchEnabled(name: string, enabled: boolean): Promise<void> {
-    await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files/status', {
+    await this.#deps.gateway.fetch('/v0/management/auth-files/status', {
       method: 'PATCH',
       body: JSON.stringify({ name, disabled: !enabled }),
     })
@@ -842,7 +805,7 @@ export class Operations {
    */
   async accountEnabled(plugin: string, authIndex: unknown, enabled: boolean): Promise<OpsResult> {
     const ready = await this.#ready()
-    if ('error' in ready) return ready
+    if (ready !== undefined) return ready
 
     try {
       const { target } = await this.#credentialsOf(plugin, authIndex)
@@ -884,7 +847,7 @@ export class Operations {
    */
   async accountSelect(plugin: string, authIndex: unknown): Promise<OpsResult> {
     const ready = await this.#ready()
-    if ('error' in ready) return ready
+    if (ready !== undefined) return ready
 
     try {
       const { files, target } = await this.#credentialsOf(plugin, authIndex)
@@ -946,14 +909,13 @@ export class Operations {
    */
   async authStart(plugin: string): Promise<OpsResult> {
     const ready = await this.#ready()
-    if ('error' in ready) return ready
+    if (ready !== undefined) return ready
     if (channelOf(plugin) === undefined) {
       return { ok: false, error: 'unknown-provider' }
     }
 
     try {
-      const data = (await this.#deps.cpaFetch(
-        this.#deps.options(),
+      const data = (await this.#deps.gateway.fetch(
         `/v8/management/oauth/auth-url?provider=${encodeURIComponent(plugin)}`,
       )) as { url?: unknown; state?: unknown; error?: unknown } | undefined
 
@@ -979,11 +941,10 @@ export class Operations {
     if (typeof state !== 'string' || state === '') return { ok: false, error: 'missing-state' }
 
     const running = await this.#running()
-    if ('error' in running) return running
+    if (running !== undefined) return running
 
     try {
-      const data = (await this.#deps.cpaFetch(
-        this.#deps.options(),
+      const data = (await this.#deps.gateway.fetch(
         `/v8/management/oauth/status?state=${encodeURIComponent(state)}`,
       )) as { status?: unknown } | undefined
       const status = data?.status ?? 'unknown'
@@ -1012,11 +973,10 @@ export class Operations {
     if (typeof state !== 'string' || state === '') return { ok: false, error: 'missing-state' }
 
     const running = await this.#running()
-    if ('error' in running) return running
+    if (running !== undefined) return running
 
     try {
-      const data = (await this.#deps.cpaFetch(
-        this.#deps.options(),
+      const data = (await this.#deps.gateway.fetch(
         `/v8/management/oauth/session?state=${encodeURIComponent(state)}`,
         { method: 'DELETE' },
       )) as { cancelled?: unknown } | undefined
@@ -1050,8 +1010,8 @@ export class Operations {
     if (pending.length === 0) return { ok: true, skipped: 'already-done-today' }
 
     const state = await this.#running()
-    if ('error' in state) return { ok: true, skipped: 'cpa-unavailable' }
-    if (this.#deps.adminKey() === '') return { ok: true, skipped: 'no-admin-key' }
+    if (state !== undefined) return { ok: true, skipped: 'cpa-unavailable' }
+    if (!this.#deps.gateway.hasAdminKey()) return { ok: true, skipped: 'no-admin-key' }
 
     const results: Record<string, unknown> = {}
     /**
@@ -1070,7 +1030,7 @@ export class Operations {
       const path = ACTION_PATHS[plugin]?.checkin
       if (path === undefined) continue
       try {
-        const result = (await this.#deps.cpaFetch(this.#deps.options(), path, {
+        const result = (await this.#deps.gateway.fetch(path, {
           method: 'POST',
           body: '{}',
         })) as { summary?: unknown } | undefined
@@ -1120,11 +1080,11 @@ export class Operations {
     if (wanted.length === 0) return { ok: true, skipped: 'no-intent' }
 
     const running = await this.#running()
-    if ('error' in running) return { ok: true, skipped: 'cpa-unavailable' }
-    if (this.#deps.adminKey() === '') return { ok: true, skipped: 'no-admin-key' }
+    if (running !== undefined) return { ok: true, skipped: 'cpa-unavailable' }
+    if (!this.#deps.gateway.hasAdminKey()) return { ok: true, skipped: 'no-admin-key' }
 
     try {
-      const data = await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files')
+      const data = await this.#deps.gateway.fetch('/v0/management/auth-files')
       const byName = new Map(filesOf(data).map((file) => [String(file.name), file]))
       const fixed: { name: string; enabled: boolean }[] = []
 
@@ -1133,7 +1093,7 @@ export class Operations {
         if (file === undefined) continue // 凭据已被删除，跳过
         const currentlyDisabled = file.disabled === true
         if (currentlyDisabled === !shouldEnable) continue // 已经一致
-        await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files/status', {
+        await this.#deps.gateway.fetch('/v0/management/auth-files/status', {
           method: 'PATCH',
           body: JSON.stringify({ name, disabled: shouldEnable !== true }),
         })

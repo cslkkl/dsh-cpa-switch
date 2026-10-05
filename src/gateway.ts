@@ -32,10 +32,13 @@ const DEFAULT_TIMEOUT_MS = 20000
  * ⚠️ **取数与失效必须用同一个构造器**。手写字符串时 `autockin:workbuddy`
  * 与 `accounts:workbuddy:false` 形状不同，漏一个尾冒号就静默失效 ——
  * 表现是「切换自动签到后开关一直显示旧值」，不报错（实踩，见 `tests/cache.test.ts`）。
+ *
+ * 两个键都以渠道 id 后的**分隔冒号**收尾，于是「键本身」就是「失效前缀」：
+ * 既不会漏掉自己的读，也不会误伤 id 是它前缀的另一个渠道。
  */
 export const cacheKeys = {
-  accounts: (plugin: string): string => `accounts:${plugin}`,
-  autoCheckin: (plugin: string): string => `autockin:${plugin}`,
+  accounts: (plugin: string): string => `accounts:${plugin}:`,
+  autoCheckin: (plugin: string): string => `autockin:${plugin}:`,
 } as const
 
 /** 前置不满足的原因。字段语义与业务层的失败形状一致，但不带 `ok`。 */

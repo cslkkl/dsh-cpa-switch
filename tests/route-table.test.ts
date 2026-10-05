@@ -16,8 +16,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { PluginConfig } from '../src/config.ts'
 import { AdminKeyStore } from '../src/credentials.ts'
+import { CpaGateway } from '../src/gateway.ts'
 import { Operations } from '../src/operations.ts'
 import { CpaProcess } from '../src/process.ts'
+import { CpaRuntime } from '../src/runtime.ts'
 import { buildRoutes } from '../src/route-table.ts'
 import type { RouteDeps } from '../src/route-table.ts'
 import { SetupSession } from '../src/setup/index.ts'
@@ -45,22 +47,25 @@ function makeDeps(): RouteDeps {
     readConfig,
   })
   const cpaProcess = new CpaProcess()
-  const processOptions = () => ({
-    port: CONFIG.port,
-    exePath: CONFIG.exePath,
-    manageLifecycle: CONFIG.manageLifecycle,
-    openControlPanel: CONFIG.openControlPanel,
-    startTimeoutSeconds: CONFIG.startTimeoutSeconds,
-  })
-  const ops = new Operations({
-    options: () => ({ port: CONFIG.port, adminKey: '' }),
-    cpaFetch: async () => ({}),
+  const runtime = new CpaRuntime({
     process: cpaProcess,
-    processOptions,
-    adminKey: () => '',
+    processOptions: () => ({
+      port: CONFIG.port,
+      exePath: CONFIG.exePath,
+      manageLifecycle: CONFIG.manageLifecycle,
+      openControlPanel: CONFIG.openControlPanel,
+      startTimeoutSeconds: CONFIG.startTimeoutSeconds,
+    }),
   })
+  const gateway = new CpaGateway({
+    port: () => CONFIG.port,
+    adminKey: () => '',
+    cpaFetch: async () => ({}),
+    runtime,
+  })
+  const ops = new Operations({ gateway })
   const setup = new SetupSession({ readConfig, adminKey, onPrepared: () => {} })
-  return { ops, adminKey, readConfig, setup, cpaProcess }
+  return { ops, adminKey, readConfig, setup, runtime }
 }
 
 const routes = buildRoutes(makeDeps())
