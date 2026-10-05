@@ -1,20 +1,26 @@
 /**
  * 一个渠道的面板：汇总 + 工具栏 + 账号网格 + 添加账号弹窗。
  *
+ * 它自己只剩**组装与渲染** —— 三块有独立状态机的东西各自一个 hook：
+ * 即时覆盖层（`use-disabled-overrides`）、登录弹窗（`use-account-login`）、
+ * 渠道级动作与提示（`use-channel-actions`）。合计算法的判据在
+ * `meter-text.ts` 的 `sumCredits`（纯函数，Node 侧测得到）。
+ *
  * @module dsh-cpa-switch/client/PluginPanel
  */
 
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
-import { act, authCancel, paths, setAutoCheckin, startAuth } from './endpoints.ts'
-import { fmt } from './format.ts'
-import { invalidateReads } from './read-cache.ts'
+import type { Capabilities, NormalizedAccount } from '../contracts/domain.ts'
 import { AccountCard } from './AccountCard.tsx'
-import type { ActionOutcome, Capabilities, NormalizedAccount } from '../contracts/domain.ts'
-import { amountWithUnit } from './meter-text.ts'
+import { paths } from './endpoints.ts'
+import { fmt } from './format.ts'
+import { amountWithUnit, sumCredits } from './meter-text.ts'
+import { useAccountLogin } from './use-account-login.ts'
+import { useChannelActions } from './use-channel-actions.ts'
+import { useDisabledOverrides } from './use-disabled-overrides.ts'
 import { useResource } from './use-resource.ts'
-import { reportOf, actionReport, type Report } from './report.tsx'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
@@ -25,33 +31,6 @@ export interface PluginMeta {
   readonly unit: 'credits' | 'tokens'
   readonly capabilities: Capabilities
 }
-
-/**
- * Toast 状态。
- *
- * 直接就是 `Report` 加一个序号 —— 那个序号给 `Toast` 当 `key`，让同一个文案
- * 连着报两次（连点两次签到）也会重新播放。
- */
-interface ToastState extends Report {
-  /** 递增序号：让重播成为可能（见上）。 */
-  readonly key: number
-}
-
-/**
- * 添加账号的弹窗状态。
- *
- * - `null` —— 弹窗关闭
- * - `{phase:'idle'}` —— 刚打开，还没起登录
- * - `{phase:'starting'}` —— 正在起登录
- * - `{phase:'wait', url, state}` —— 等用户去浏览器授权，正在轮询
- * - `{phase:'error', error}` —— 起登录失败
- */
-type LoginState =
-  | null
-  | { readonly phase: 'idle' }
-  | { readonly phase: 'starting' }
-  | { readonly phase: 'wait'; readonly url: string; readonly state: string }
-  | { readonly phase: 'error'; readonly error: string }
 
 /** 宿主 `/accounts` 里本插件要用的部分。 */
 interface AccountsPayload {
@@ -134,62 +113,6 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const { plugin, meta, t, onAccountDisabled } = props
   const capabilities = meta.capabilities
 
-  const [toast, setToast] = useState<ToastState | null>(null)
-  const [busy, setBusy] = useState(false)
-  /**
-   * 卡片级忙碌中的那个 key（`checkin` / `tasks` / `enable` / `select`），空串表示无。
-   *
-   * 为什么要有：渠道级的 `busy` 只知道「有没有批量动作在飞」，看不到某张卡的
-   * 单号动作。于是「全部签到」和单号签到**可以同时点**，后到的响应会盖掉先到的
-   * （2026-10-04）。两个方向都要禁用：批量在飞时禁所有卡片按钮，
-   * 有卡片在飞时禁批量按钮。
-   */
-  const [cardBusy, setCardBusy] = useState('')
-  const [login, setLogin] = useState<LoginState>(null)
-  const [autoOverride, setAutoOverride] = useState<boolean | null>(null)
-  /** toast 自增序号。见 {@link ToastState}。 */
-  const toastSeq = useRef(0)
-
-  /**
-   * 启用状态的**即时覆盖**：`authIndex` 或 `authId` → 后端确认过的权威值。
-   *
-   * 为什么在这里而不在 `AccountCard` 里各存一份：一次「设为唯一」会同时改**多个**
-   * 账号（把其余全禁掉）。覆盖住在父级，那一次改动才能一次落到位；每张卡各存一份
-   * 的话，其余卡要等重读才变 —— 于是「关掉的号还亮着」。
-   *
-   * ⚠️ **两种键都要支持**，因为两个来源的标识不同：
-   * - 单卡开关走 `/accounts`，认领键是 `authIndex`；
-   * - 「设为唯一」走 `/auth-files`，认领键是**凭据文件名**（`name`／`authId`）。
-   *
-   * 认领键一律带 `plugin` 前缀：组件不随渠道重挂载（见 `Panel.tsx`），
-   * 不认领就会串渠道。
-   */
-  const [disabledOverrides, setDisabledOverrides] = useState<Readonly<Record<string, boolean>>>({})
-
-  /**
-   * ⚠️ **这里承担了「取消 `key` 重挂载」的全部清理责任。**
-   *
-   * `Panel` 刻意不给本组件加 `key`，好让切渠道变成「换参数」而不是
-   * 「卸载重挂」—— 否则缓存里明明有值也要等挂载后的 effect 才生效，
-   * 用户必然看到一帧「读取中…」（2026-10-04 实机「一直刷」）。
-   *
-   * 代价是渠道间的**局部状态**会留下来：上一个渠道的 toast、正在转的按钮、
-   * 开着的登录弹窗。所以 `plugin` 一变就把它们清掉 —— 一次 effect 换一次，
-   * 不给重挂载的副作用留任何窗口。
-   *
-   * 刻意**不**清的：账号数据（走共享缓存，本来就是跨渠道的）、自动签到开关的
-   * override（它服务于「别让界面撒谎」，跨渠道保留无害）。
-   */
-  useEffect(() => {
-    setToast(null)
-    setBusy(false)
-    setLogin(null)
-    setAutoOverride(null)
-    setCardBusy('')
-    // 覆盖层**必须**清：它按渠道认领，留着就串渠道了
-    setDisabledOverrides({})
-  }, [plugin])
-
   /**
    * 账号 + 余额。
    *
@@ -213,261 +136,27 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
 
   const reload = accountsResource.reload
 
-  /**
-   * 正在等待授权的那个 `state`；不在等待时是 `undefined`。
-   *
-   * 它就是登录轮询的开关 —— 抽成一个值而不是每次现判 `login`，
-   * 因为轮询的 key、path 与间隔都由它决定（三处必须同时切换）。
-   */
-  const authState = login !== null && login.phase === 'wait' ? login.state : undefined
-
-  /**
-   * 覆盖层的键。渠道与 `authIndex` 拼在一起，中间用一个不会出现在
-   * `auth_index` 里的分隔符 —— 免得 `ab` + `c` 与 `a` + `bc` 撞成同一个键。
-   */
-  const overrideKey = useCallback((id: string): string => `${plugin}::${id}`, [plugin])
-
-  /**
-   * 即时覆盖的查表：**两个键都查，`authIndex` 优先**。
-   *
-   * - `authIndex` —— 单卡开关路径（数据来自 `/accounts`）；
-   * - `authId`（凭据文件名）—— 「设为唯一」路径（数据来自 `/auth-files`）。
-   *
-   * 两个都查是因为两条路径的标识不同，而它们改的**可能是同一个账号**。
-   */
-  const overrideOf = useCallback(
-    (account: NormalizedAccount): boolean | undefined => {
-      const byIndex = disabledOverrides[overrideKey(account.authIndex ?? '')]
-      if (byIndex !== undefined) return byIndex
-      return disabledOverrides[overrideKey(account.authId ?? '')]
-    },
-    [disabledOverrides, overrideKey],
-  )
-
-  /**
-   * 把即时覆盖套到账号列表上。
-   *
-   * ⚠️ **覆盖只活到「后端确认」为止** —— 这是 2026-10-05 修「设为唯一有时好用
-   * 有时不好用」的关键一半。
-   *
-   * 原设计说「重读值与原覆盖一致时两层自然重合，所以不需要清除」。
-   * 那句话只对**写成功**成立；一旦写没生效，覆盖层会**永远**压着后端值，
-   * 界面就停在一个从未存在过的状态上（还看不出错）。
-   *
-   * 现在：重读回来的值与覆盖**一致**时把覆盖**删掉** —— 后端已经确认了，
-   * 覆盖的使命结束，界面回到「只信后端」这一条路上来。于是任何一次失败，
-   * 只要重读拿到真相就自动纠正，不会粘住。
-   */
-  const accounts = (accountsResource.data?.accounts ?? []).map((account) => {
-    const override = overrideOf(account)
-    if (override === undefined || override === account.disabled) return account
-    return { ...account, disabled: override }
+  /** 渠道级动作（批量签到 / 任务、自动签到开关）+ 提示。 */
+  const actions = useChannelActions({
+    plugin,
+    unit: meta.unit,
+    serverAutoCheckin: accountsResource.data?.autoCheckin,
+    t,
+    onReload: () => void reload({ force: true }),
   })
 
-  /**
-   * 重读落地后，清掉**已被后端确认**的覆盖项。
-   *
-   * 放在 effect 里而不是渲染阶段：渲染阶段不能 setState。
-   * 依赖 `accountsResource.data` —— 每次重读落地都会跑一次。
-   */
-  useEffect(() => {
-    const confirmed = accountsResource.data?.accounts
-    if (confirmed === undefined || confirmed.length === 0) return
-    setDisabledOverrides((prev) => {
-      let changed = false
-      const next = { ...prev }
-      for (const account of confirmed) {
-        for (const id of [account.authIndex ?? '', account.authId ?? '']) {
-          if (id === '') continue
-          const key = overrideKey(id)
-          // 后端说的与覆盖一致 → 覆盖已无信息量，删掉
-          if (next[key] !== undefined && next[key] === account.disabled) {
-            delete next[key]
-            changed = true
-          }
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [accountsResource.data, overrideKey])
-
-  /** 把一次写成功回读到的**权威值**记进覆盖层（单卡开关路径）。 */
-  const applyDisabled = useCallback(
-    (authIndex: string, disabled: boolean): void => {
-      setDisabledOverrides((prev) => ({ ...prev, [overrideKey(authIndex)]: disabled }))
-      // 通知宿主层（目前没有别的订阅者，但契约先立住：卡片不直接改父级的数据）
-      onAccountDisabled(authIndex, disabled)
-    },
-    [onAccountDisabled, overrideKey],
-  )
-
-  /**
-   * 把一次「设为唯一」回读确认过的**整渠道状态**记进覆盖层。
-   *
-   * 键用**凭据文件名**（`authId`），因为这条路径的数据来自 `/auth-files` ——
-   * 与 {@link applyDisabled} 的 `authIndex` 是两套标识，所以两者**各写各的键**，
-   * 渲染时两个键都查（见下面的 `accounts`）。
-   */
-  const applySelectState = useCallback(
-    (authId: string, disabled: boolean): void => {
-      setDisabledOverrides((prev) => ({ ...prev, [overrideKey(authId)]: disabled }))
-    },
-    [overrideKey],
-  )
-
-  /** 用户刚切过开关就以它为准，否则用宿主读到的值。 */
-  const auto = autoOverride ?? accountsResource.data?.autoCheckin ?? false
-
-  /** 起一次登录。 */
-  const startLogin = useCallback(async (): Promise<void> => {
-    setLogin({ phase: 'starting' })
-    const result = await startAuth(plugin)
-    if (!result.ok) {
-      setLogin({ phase: 'error', error: String(result.error ?? 'failed') })
-      return
-    }
-    // 顺便自动打开一次授权页 —— 但保留链接让用户能手动再点
-    try {
-      globalThis.open(String(result.url), '_blank', 'noreferrer')
-    } catch {
-      /* 弹窗被拦就算了，界面上有链接 */
-    }
-    setLogin({ phase: 'wait', url: String(result.url), state: String(result.state) })
-  }, [plugin])
-
-  /** 关闭弹窗时顺手取消 CPA 侧的会话，避免留下悬挂状态。 */
-  const closeLogin = useCallback(async (): Promise<void> => {
-    setLogin((current) => {
-      if (current !== null && 'state' in current && typeof current.state === 'string') {
-        void authCancel(current.state)
-      }
-      return null
-    })
-  }, [])
-
-  /**
-   * 登录进度。
-   *
-   * ⚠️ 走 `useResource` 的轮询，**不再自己 `setInterval`** —— 轮询的清理、
-   * 竞态与「读完再排下一次」只有一处实现（见 `use-resource.ts`）。
-   * 轮询的每一次都绕过缓存，否则读到的永远是上一轮那份、状态永远不变。
-   *
-   * key 带 `state`：这是**一次会话**的进度，不是可复用的资源。
-   */
-  const authProbe = useResource<{ readonly status: string }>({
-    key: 'auth:' + (authState ?? ''),
-    path: paths.authStatus(authState ?? ''),
-    select: (result) => ({ status: String(result.status ?? 'unknown') }),
-    pollMs: authState === undefined ? undefined : 2500,
+  /** 启用态的即时覆盖层（按渠道认领，后端一确认就自我删除）。 */
+  const overrides = useDisabledOverrides({
+    plugin,
+    accounts: accountsResource.data?.accounts,
+    onAccountDisabled,
   })
 
-  /**
-   * 授权完成的那一刻做两件事。
-   *
-   * ⚠️ 判定挂在**资源的值**上，不挂在定时器回调里：`wait` 之外的取值都表示这次
-   * 会话结束了（CPA 在用户完成授权后自己写好认证文件）。那时缓存里那份账号列表
-   * 一定是旧的 —— 强制重取。
-   */
-  useEffect(() => {
-    if (authState === undefined) return
-    const status = authProbe.data?.status
-    if (status === undefined || status === 'wait') return
-    setLogin(null)
-    invalidateReads('accounts:' + plugin)
-    void reload({ force: true })
-  }, [authState, authProbe.data, plugin, reload])
-
-  /**
-   * 上报一条操作结果。
-   *
-   * 文案、图标、停留时长全部由 `report.ts` 组装 —— 这里只负责**给它原料**
-   * （这次做的是什么事、成没成）。`AccountCard` 也走同一个出口，所以两处不会漂移。
-   *
-   * 自增序号是给 `Toast` 的 `key`：文案相同的两次连着报（比如连点两次签到），
-   * 没有它 React 会认为是同一次渲染，`Toast` 不会重新播放。
-   */
-  const report = useCallback(
-    (result: { ok: boolean; error?: string | undefined }, action: string): void => {
-      toastSeq.current += 1
-      setToast({ ...reportOf(t, result, action), key: toastSeq.current })
-    },
-    [t],
-  )
-
-  /**
-   * 批量动作：全部签到 / 全部任务。
-   *
-   * 范围是**本渠道全部账号，含已禁用的** —— 签到攒的是额度，与调度无关。
-   * 详见 `operations.action` 顶上那张语义边界表。
-   *
-   * 反馈用 {@link actionReport} 而不是 `report`：归一结果里带着
-   * 「签了几个 / 加了多少 / 哪个失败」，只弹一个「签到 ✓」等于把这些全丢掉
-   * （2026-10-04 实机反馈）。
-   */
-  const runAll = useCallback(
-    async (kind: string): Promise<void> => {
-      setBusy(true)
-      setCardBusy('')
-      try {
-        const result = await act(plugin, kind)
-        if (!result.ok) {
-          report(result, t(kind as 'checkin'))
-          return
-        }
-        const outcome = result.outcome as ActionOutcome | undefined
-        setToast({ ...actionReport(t, outcome, meta.unit), key: (toastSeq.current += 1) })
-        await reload({ force: true })
-      } finally {
-        setBusy(false)
-      }
-    },
-    [meta.unit, plugin, reload, report, t],
-  )
-
-  const toggleAuto = useCallback(
-    async (next: boolean): Promise<void> => {
-      setBusy(true)
-      // 立刻反映用户的意图：开关的手感不能等一个往返
-      setAutoOverride(next)
-      const result = await setAutoCheckin(plugin, next)
-      setBusy(false)
-      // 无论成没成都撤掉 override：之后一律以宿主读到的值为准，别让界面撒谎
-      setAutoOverride(null)
-      report(result, t('autoCheckin'))
-    },
-    [plugin, report, t],
-  )
-
-  const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
-  /**
-   * 合计。
-   *
-   * ⚠️ **缺的字段不参与累加** —— 上游不给就是 `undefined`，不是 0。
-   * 把 `undefined` 当 0 加进去，合计会显示成一个偏小的假数
-   * （trae 完全没有 `used`，加进去等于说「它用了 0」）。
-   *
-   * 所以每格各自统计「有几个账号真的贡献了这个数」，一个都没有时界面显示 `—`
-   * 而不是 0。见 `credits.used` / `credits.size` 的可选性
-   * （[架构说明](../../docs/ARCHITECTURE.md) 的渠道能力表）。
-   */
-  const totals = accounts.reduce(
-    (acc, account) => {
-      const c = account.credits
-      if (c === null) return acc
-      acc.remain += Number(c.remain ?? 0)
-      acc.remainCount += 1
-      if (typeof c.used === 'number' && Number.isFinite(c.used)) {
-        acc.used += c.used
-        acc.usedCount += 1
-      }
-      if (typeof c.size === 'number' && Number.isFinite(c.size)) {
-        acc.size += c.size
-        acc.sizeCount += 1
-      }
-      return acc
-    },
-    { remain: 0, remainCount: 0, used: 0, usedCount: 0, size: 0, sizeCount: 0 },
-  )
+  /** 添加账号弹窗（自己一套 `idle`/`starting`/`wait`/`error` 状态机）。 */
+  const accountLogin = useAccountLogin({
+    plugin,
+    onAuthorized: () => void reload({ force: true }),
+  })
 
   /**
    * 本渠道额度单位的**文案**（`积分` / `token`）。
@@ -476,6 +165,15 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
    * `meta.unit === 'tokens' ? ... : ...`，那种重复迟早会漂。
    */
   const unitText = meta.unit === 'tokens' ? t('unitTokens') : t('unitCredits')
+
+  const accounts = overrides.accounts
+  const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
+
+  /**
+   * 合计。判据在 `sumCredits`（纯函数）—— **缺的字段不参与累加**，
+   * 而每格各配一个「有几个账号真的贡献了这个数」，为 0 时界面填 `—` 而不是 0。
+   */
+  const totals = sumCredits(accounts)
 
   /**
    * 汇总格里的「数字 + 单位」。
@@ -499,6 +197,10 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       </>
     )
   }
+
+  const openLogin = useCallback((): void => {
+    accountLogin.open()
+  }, [accountLogin])
 
   return (
     <>
@@ -555,7 +257,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         <Button
           variant="outline"
           size="sm"
-          disabled={busy || accountsResource.loading}
+          disabled={actions.busy || accountsResource.loading}
           onClick={() => void reload({ force: true })}
         >
           {t('refresh')}
@@ -565,8 +267,8 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
             variant="primary"
             size="sm"
             // 有卡片在飞时也禁用：否则批量与单号并发，后到的覆盖先到的
-            disabled={busy || cardBusy !== '' || accountsResource.loading}
-            onClick={() => void runAll('checkin')}
+            disabled={actions.busy || actions.cardBusy !== '' || accountsResource.loading}
+            onClick={() => void actions.runAll('checkin')}
           >
             {t('checkinAll')}
           </Button>
@@ -576,8 +278,8 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
           <Button
             variant="outline"
             size="sm"
-            disabled={busy || cardBusy !== '' || accountsResource.loading}
-            onClick={() => void runAll('tasks')}
+            disabled={actions.busy || actions.cardBusy !== '' || accountsResource.loading}
+            onClick={() => void actions.runAll('tasks')}
           >
             {t('tasksAll')}
           </Button>
@@ -595,11 +297,11 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         {capabilities.autoCheckin && (
           <div className={css.switchRow}>
             <Switch
-              checked={auto}
-              disabled={busy}
+              checked={actions.auto}
+              disabled={actions.busy}
               label={t('autoCheckin')}
               title={t('autoCheckinHint')}
-              onChange={(next) => void toggleAuto(next)}
+              onChange={(next) => void actions.toggleAuto(next)}
             />
             <span className={css.switchText} title={t('autoCheckinHint')}>
               {t('autoCheckin')}
@@ -633,16 +335,18 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               unit={unitText}
               capabilities={capabilities}
               t={t}
-              onReport={report}
-              onAccountDisabled={(id, disabled) => applyDisabled(id, disabled)}
-              onAccountSelectState={(authId, disabled) => applySelectState(authId, disabled)}
-              onBusyChange={setCardBusy}
+              onReport={actions.report}
+              onAccountDisabled={(id, disabled) => overrides.applyDisabled(id, disabled)}
+              onAccountSelectState={(authId, disabled) =>
+                overrides.applySelectState(authId, disabled)
+              }
+              onBusyChange={actions.setCardBusy}
               /* 渠道级动作在飞时禁掉所有卡片按钮（反向由按钮上的 `cardBusy` 负责） */
-              locked={busy}
+              locked={actions.busy}
               onReload={() => reload({ force: true })}
             />
           ))}
-          <button type="button" className={css.addCard} onClick={() => setLogin({ phase: 'idle' })}>
+          <button type="button" className={css.addCard} onClick={openLogin}>
             <span className={css.addPlus}>+</span>
             <span>{t('addAccount')}</span>
           </button>
@@ -663,44 +367,44 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        * 自绘的固定定位遮罩没有焦点管理，键盘用户会被困在里面。
        */}
       <Modal
-        open={login !== null}
-        onClose={() => void closeLogin()}
+        open={accountLogin.login !== null}
+        onClose={accountLogin.close}
         title={t('addAccount') + ' · ' + meta.label}
         closeLabel={t('cancel')}
         footer={
           <>
-            <Button variant="ghost" size="sm" onClick={() => void closeLogin()}>
+            <Button variant="ghost" size="sm" onClick={accountLogin.close}>
               {t('cancel')}
             </Button>
-            {(login?.phase === 'idle' || login?.phase === 'error') && (
-              <Button variant="primary" size="sm" onClick={() => void startLogin()}>
+            {(accountLogin.login?.phase === 'idle' || accountLogin.login?.phase === 'error') && (
+              <Button variant="primary" size="sm" onClick={() => void accountLogin.start()}>
                 {t('startLogin')}
               </Button>
             )}
           </>
         }
       >
-        {login?.phase === 'wait' && (
+        {accountLogin.login?.phase === 'wait' && (
           <>
             <div className={css.hint}>{t('loginHint')}</div>
             <a
               className={css.hint}
-              href={login.url}
+              href={accountLogin.login.url}
               target="_blank"
               rel="noreferrer noopener"
               style={{ wordBreak: 'break-all' }}
             >
-              {login.url}
+              {accountLogin.login.url}
             </a>
             <div className={css.hint}>{t('loginWaiting')}</div>
           </>
         )}
-        {login?.phase === 'error' && (
+        {accountLogin.login?.phase === 'error' && (
           <div className={css.hint + ' ' + css.error}>
-            {t('failedWith', { action: t('startLogin'), reason: login.error })}
+            {t('failedWith', { action: t('startLogin'), reason: accountLogin.login.error })}
           </div>
         )}
-        {(login?.phase === 'idle' || login?.phase === 'starting') && (
+        {(accountLogin.login?.phase === 'idle' || accountLogin.login?.phase === 'starting') && (
           <div className={css.hint}>{t('loginIntro')}</div>
         )}
       </Modal>
@@ -712,17 +416,15 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        * 画那个绿勾，失败时我们显式给一个警告三角。⚠️ 文案里**不再**拼 `✓`/`✗`：
        * 那样就成了「签到✓」配一个勾（2026-10-04 用户实机指出）。
        */}
-      {toast !== null && (
+      {actions.toast !== null && (
         <Toast
-          key={toast.key}
-          text={toast.text}
+          key={actions.toast.key}
+          text={actions.toast.text}
           // `exactOptionalPropertyTypes`：这两个不接受显式 undefined，只在有值时给
-          {...(toast.tone === undefined ? {} : { tone: toast.tone })}
-          {...(toast.icon === undefined ? {} : { icon: toast.icon })}
-          {...(toast.holdMs === undefined ? {} : { holdMs: toast.holdMs })}
-          onDone={() => {
-            setToast(null)
-          }}
+          {...(actions.toast.tone === undefined ? {} : { tone: actions.toast.tone })}
+          {...(actions.toast.icon === undefined ? {} : { icon: actions.toast.icon })}
+          {...(actions.toast.holdMs === undefined ? {} : { holdMs: actions.toast.holdMs })}
+          onDone={actions.clearToast}
         />
       )}
     </>
