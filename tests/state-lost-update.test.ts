@@ -30,7 +30,12 @@ import { CHANNEL_WIDE } from '../src/checkin-ledger.ts'
 import type { AccountIntent } from '../src/state.ts'
 import type { CpaGateway } from '../src/gateway.ts'
 import { createOperations } from '../src/ops/index.ts'
-import { localDay, readAccountIntent, readCheckinLedger, writeAccountIntent } from '../src/state.ts'
+import {
+  localDay,
+  readAccountIntent,
+  readCheckinLedger,
+  updateAccountIntent,
+} from '../src/state.ts'
 
 let home: string
 let original: string | undefined
@@ -113,17 +118,16 @@ describe('状态文件的并发写', () => {
   })
 
   /**
-   * ⚠️ **这条现在是 `it.fails`** —— 它证明 bug **存在**（见文件头）。修法见本 PR 第二个提交：
-   * 状态写入改成**单入口读改写**（读、合并、写在同一个同步块里完成，不再有「快照跨越 await」）。
-   * 修完把 `.fails` 去掉，它就是防回归的判据。
+   * 这条曾经是 `it.fails`（先证明 bug 存在），修完摘掉当防回归用 ——
+   * 修法是状态写入**单入口读改写**：不再有「读到的快照跨越 `await`」。
    */
-  it.fails('开机补签与手动签到重叠时，两条记录都要留下', async () => {
+  it('开机补签与手动签到重叠时，两条记录都要留下', async () => {
     const gate = makeGate()
     const ops = createOperations({ gateway: gate.gateway })
     const day = localDay()
 
     const startup = ops.actions.startupCheckin({ enabled: true })
-    // 补签已经读完账本、请求正在飞 —— 用户此刻签了一个号
+    // 补签已经读完记录、请求正在飞 —— 用户此刻签了一个号
     await gate.sent
     const manual = await ops.actions.run(plugin, 'checkin', 'acct-7')
     expect(manual.ok).toBe(true)
@@ -131,7 +135,7 @@ describe('状态文件的并发写', () => {
     await startup
 
     const ledger = readCheckinLedger()[plugin] ?? {}
-    expect(ledger['acct-7']).toBe(day) // ← 现在会丢：补签拿旧快照整份覆盖
+    expect(ledger['acct-7']).toBe(day) // 修之前这里丢：补签拿旧快照整份覆盖
     expect(ledger[CHANNEL_WIDE]).toBe(day)
   })
 
@@ -182,30 +186,29 @@ describe('状态文件的并发写', () => {
    * 状态层对错误的策略是吞掉（见 `src/state.ts` 文件头），所以这条只能靠**文件内容**验。
    */
   it('序列化失败时旧内容原样保留', () => {
-    writeAccountIntent({ enabled: { 'keep-me.json': true } })
-    const before = readFileSync(join(home, 'storages', 'cpa-panel-accounts.json'), 'utf8')
+    updateAccountIntent(() => ({ enabled: { 'keep-me.json': true } }))
+    const before = readFileSync(intentFile(), 'utf8')
 
     const circular: Record<string, unknown> = {}
     circular.self = circular
     const bad = { enabled: circular } as unknown as AccountIntent
     expect(() => {
-      writeAccountIntent(bad)
+      updateAccountIntent(() => bad)
     }).not.toThrow()
 
     expect(readFileSync(intentFile(), 'utf8')).toBe(before)
   })
 
   /**
-   * ⚠️ **这条现在也是 `it.fails`** —— 同一类毛病的第二处：**写入口允许「读的内部信号」落盘**。
+   * 这条也曾经是 `it.fails` —— 同一类毛病的第二处：**写入口让「读的内部信号」落了盘**。
    *
-   * `src/state.ts` 的注释写着 `ignored` 「绝不写回磁盘」，读的时候也显式剥了一层；
-   * 但写入口是**整份覆盖**：调用方把读出来的对象原样交回去（`src/ops/enable.ts` 的
-   * `rememberIntent` 就是这么写的），`ignored: 'untrusted-source'` 就跟着进了文件。
+   * `src/state.ts` 的注释写着 `ignored`「绝不写回磁盘」，读的时候也剥了一层；
+   * 但旧的写入口是**整份覆盖**，调用方把读出来的对象原样交回去就写进去了
+   * （`src/ops/enable.ts` 的 `rememberIntent` 曾经就是那样）。
    *
-   * 今天不致命（可信文件在读的时候还会再剥一次），但「磁盘上不会有这个字段」这条不变量
-   * 只靠调用方自觉 —— 单入口化之后由写入口保证。
+   * 现在「磁盘上没有这个字段」由**写入口**保证 —— 调用方交回什么都不影响。
    */
-  it.fails('不可信文件的 ignored 不许被写回磁盘', () => {
+  it('不可信文件的 ignored 不许被写回磁盘', () => {
     mkdirSync(dirname(intentFile()), { recursive: true })
     writeFileSync(
       intentFile(),
@@ -215,7 +218,7 @@ describe('状态文件的并发写', () => {
 
     const intent = readAccountIntent()
     expect(intent.ignored).toBe('untrusted-source') // 读这一步的内部信号
-    writeAccountIntent(intent) // 调用方把它交了回去
+    updateAccountIntent(() => intent) // 调用方原样交回去也不许落盘
 
     expect(readFileSync(intentFile(), 'utf8')).not.toContain('ignored')
   })

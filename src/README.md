@@ -48,12 +48,16 @@
   - 优先级与宿主 `dsh-home-paths` 一致：非空白 `DSH_HOME` > `~/.dsh`；空白按未设置
   - 改后必测：`tests/paths.test.ts`
 - **`state.ts`** —— 状态文件读写，**纯 IO、无网络**。
-  - 导出：`localDay` / `readExeMemory` / `writeExeMemory` / `readStamp` / `writeStamp` /
-    `readCheckinLedger` / `writeCheckinLedger` / `readAccountIntent` / `writeAccountIntent` /
-    类型 `AccountIntent`
+  - 读：`localDay` / `readExeMemory` / `readStamp` / `readCheckinLedger` / `readAccountIntent`
+    / 类型 `AccountIntent`、`CheckinStamp`
+  - 写：**只有读改写单入口** —— `writeExeMemory`（单字段，普通写）/
+    `updateStamp` / `updateCheckinLedger` / `updateAccountIntent`。
+    ⚠️ **传的是「改法」不是「算好的值」**：值只能来自更早的某次读，而 `await` 之后的旧快照
+    会盖掉别人刚写的东西（实踩，见[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)）
   - 三份状态分开存：exe 记忆（长期）、签到 stamp + **今日签到账本**（按天，同一文件）、
     账号意图（长期，仅面板写）
-  - 改后必测：账号意图的 `source !== 'panel'` 拒绝、`ignored` 剥离
+  - 改后必测：账号意图的 `source !== 'panel'` 拒绝、`ignored` 剥离（读与写**两头**都要）、
+    并发写的丢更新（`tests/state-lost-update.test.ts`）
 - **`select-plan.ts`** —— 「设为唯一」的**目标状态计算 + 回读验证**（纯函数，不碰 IO）。
   - 导出：`planSelect` / `verifySelect` / 类型 `SelectableFile` / `SelectChange` / `SelectPlan`
   - 为什么需要：`accountSelect` 要改同渠道**多个**账号，而上游

@@ -14,7 +14,7 @@ import { normalizeActionOutcome } from '../action-outcome.ts'
 import { ACTION_PATHS, CHANNELS, channelOf } from '../channels/registry.ts'
 import { CHANNEL_WIDE, recordToday } from '../checkin-ledger.ts'
 import type { CpaGateway } from '../gateway.ts'
-import { localDay, readCheckinLedger, readStamp, writeCheckinLedger, writeStamp } from '../state.ts'
+import { localDay, readStamp, updateCheckinLedger, updateStamp } from '../state.ts'
 import { messageOf, type OpsResult, requireReady, requireRunning } from './result.ts'
 
 /** 动作域的依赖。 */
@@ -38,8 +38,7 @@ export interface ActionsOps {
  */
 function recordCheckinSuccess(plugin: string, authIndex: string | undefined): void {
   const day = localDay()
-  const ledger = readCheckinLedger()
-  writeCheckinLedger(recordToday(ledger, plugin, authIndex ?? CHANNEL_WIDE, day))
+  updateCheckinLedger((ledger) => recordToday(ledger, plugin, authIndex ?? CHANNEL_WIDE, day))
 }
 
 /** 组装动作域。 */
@@ -131,13 +130,8 @@ export function createActionsOps(deps: ActionsDeps): ActionsOps {
 
     const day = localDay()
     const stamp = readStamp()
-    const done: Record<string, string> = {
-      ...((stamp.startupCheckinDays as Record<string, string> | undefined) ?? {}),
-    }
-
-    /** 今天还没补过、且渠道支持签到的。 */
     const pending = CHANNELS.filter(
-      (channel) => channel.capabilities.checkin && done[channel.id] !== day,
+      (channel) => channel.capabilities.checkin && stamp.startupCheckinDays[channel.id] !== day,
     ).map((channel) => channel.id)
     if (pending.length === 0) return { ok: true, skipped: 'already-done-today' }
 
@@ -147,17 +141,19 @@ export function createActionsOps(deps: ActionsDeps): ActionsOps {
 
     const results: Record<string, unknown> = {}
     /**
-     * 补签成功的渠道要**同时记进今日签到账本**。
+     * 补签成功的渠道**先攒着，跑完再一次性记**。
      *
-     * 补签是渠道级（`body: '{}'` ＝ 签该渠道全部账号），所以记
-     * {@link CHANNEL_WIDE} —— 这正是这个保留键的用途：那一刻我们并不知道
-     * 渠道里有哪些账号，只能记「整渠道今天签过」。
+     * 这里刻意不提前取账本快照、也不在循环里写盘：`await` 之后写回的任何东西都必须
+     * **基于写之前那一刻的磁盘内容**，否则会吞掉这个窗口里用户手动签到记下的账
+     * （见 `tests/state-lost-update.test.ts`）。
+     *
+     * 记 {@link CHANNEL_WIDE}：补签是渠道级（`body: '{}'` ＝ 签该渠道全部账号），
+     * 那一刻并不知道渠道里有哪些账号，只能记「整渠道今天签过」。
      *
      * ⚠️ 少了这一步，补签过的渠道在界面上仍然可能显示成「没签到」——
      * 上游那份缓存不会因为我们补签了就立刻回报。
      */
-    const ledger = readCheckinLedger()
-    let nextLedger = ledger
+    const succeeded: string[] = []
     for (const plugin of pending) {
       const path = ACTION_PATHS[plugin]?.checkin
       if (path === undefined) continue
@@ -167,21 +163,29 @@ export function createActionsOps(deps: ActionsDeps): ActionsOps {
           body: '{}',
         })) as { summary?: unknown } | undefined
         results[plugin] = result?.summary ?? 'ok'
-        done[plugin] = day
-        nextLedger = recordToday(nextLedger, plugin, CHANNEL_WIDE, day)
+        succeeded.push(plugin)
       } catch (error) {
         // 单个渠道失败不影响其它渠道，也不记 stamp / 账本（下次启动会重试）
         results[plugin] = 'error: ' + messageOf(error)
       }
     }
 
-    writeStamp({
-      ...readStamp(),
-      startupCheckinDays: done,
-      startupCheckinAt: new Date().toISOString(),
+    /**
+     * 收尾**只写一次**，两个字段一起改。
+     *
+     * 拆成两次写（或提前算好值再写）都会重新打开「旧快照覆盖新内容」的窗口：
+     * 第一次写会把第二次要用的字段带成旧值。
+     */
+    const at = new Date().toISOString()
+    updateStamp((current) => {
+      const startupCheckinDays = { ...current.startupCheckinDays }
+      let checkinLedger = current.checkinLedger
+      for (const plugin of succeeded) {
+        startupCheckinDays[plugin] = day
+        checkinLedger = recordToday(checkinLedger, plugin, CHANNEL_WIDE, day)
+      }
+      return { ...current, startupCheckinDays, startupCheckinAt: at, checkinLedger }
     })
-    // 账本单独写：只有真的补签成功的渠道才进去
-    writeCheckinLedger(nextLedger)
     // 补签改的是各渠道余额与签到态
     deps.gateway.invalidateChannel('')
     return { ok: true, checkedIn: true, results }

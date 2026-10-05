@@ -15,7 +15,7 @@ vi.mock('node:os', async (importOriginal) => {
   return { ...actual, homedir: () => home }
 })
 
-const { readAccountIntent, writeAccountIntent, readExeMemory, writeExeMemory, localDay } =
+const { readAccountIntent, updateAccountIntent, readExeMemory, writeExeMemory, localDay } =
   await import('../src/state.ts')
 
 beforeEach(() => {
@@ -41,7 +41,7 @@ function writeIntentFile(value: unknown): void {
 
 describe('账号意图', () => {
   it('面板写的（source=panel）能读回来', () => {
-    writeAccountIntent({ enabled: { 'a.json': true, 'b.json': false } })
+    updateAccountIntent(() => ({ enabled: { 'a.json': true, 'b.json': false } }))
     const intent = readAccountIntent()
     expect(intent.enabled).toEqual({ 'a.json': true, 'b.json': false })
     expect(intent.ignored).toBeUndefined()
@@ -76,7 +76,7 @@ describe('账号意图', () => {
   })
 
   it('写回的 updatedAt 能读回来', () => {
-    writeAccountIntent({ enabled: {}, updatedAt: '2026-01-01T00:00:00.000Z' })
+    updateAccountIntent(() => ({ enabled: {}, updatedAt: '2026-01-01T00:00:00.000Z' }))
     expect(readAccountIntent().updatedAt).toBe('2026-01-01T00:00:00.000Z')
   })
 })

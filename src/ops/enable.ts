@@ -23,7 +23,7 @@
 import type { LoggerLike } from '../credentials.ts'
 import type { CpaGateway } from '../gateway.ts'
 import { planSelect, verifySelect } from '../select-plan.ts'
-import { readAccountIntent, writeAccountIntent } from '../state.ts'
+import { readAccountIntent, updateAccountIntent } from '../state.ts'
 import { messageOf, type OpsResult, requireReady, requireRunning } from './result.ts'
 
 /** 启用域的依赖。 */
@@ -145,10 +145,11 @@ export function createEnableOps(deps: EnableDeps): EnableOps {
    */
   function rememberIntent(entries: readonly { name: string; enabled: boolean }[]): void {
     if (entries.length === 0) return
-    const intent = readAccountIntent()
-    for (const entry of entries) intent.enabled[entry.name] = entry.enabled
-    ;(intent as { updatedAt?: string }).updatedAt = new Date().toISOString()
-    writeAccountIntent(intent)
+    updateAccountIntent((current) => {
+      const enabled = { ...current.enabled }
+      for (const entry of entries) enabled[entry.name] = entry.enabled
+      return { enabled, updatedAt: new Date().toISOString() }
+    })
   }
 
   /**
