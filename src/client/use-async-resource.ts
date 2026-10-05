@@ -19,7 +19,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { cachedGet, readCache, type ApiResult } from './api.ts'
+import { cachedGet, readCache } from './read-cache.ts'
+import type { ApiResult } from './transport.ts'
 
 /** 一个异步资源的对外形状。 */
 export interface AsyncResource<T> {

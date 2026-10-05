@@ -1,5 +1,5 @@
 /**
- * 浏览器半边读缓存（`src/client/api.ts` 的 `ReadCache`）的红线。
+ * 浏览器半边读缓存（`src/client/read-cache.ts` 的 `ReadCache`）的红线。
  *
  * 它守的是两件**静默**的事：
  * - `freshMs` 之内不再发请求（否则「点一下等很久」原样回来）；
@@ -10,7 +10,8 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { ReadCache, prefetch, readCache, type ApiResult } from '../src/client/api.ts'
+import { ReadCache, prefetch, readCache } from '../src/client/read-cache.ts'
+import type { ApiResult } from '../src/client/transport.ts'
 
 /**
  * 模块级单例（`readCache`）是**跨用例共享**的：一个用例 put 进去的 key 会漏到下一个。
