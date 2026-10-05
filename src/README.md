@@ -189,10 +189,12 @@
     而过期意味着「该拆的没拆」—— 静默失效
   - 改后必测：`tests/model-alias.test.ts`
 - **`model-caps.ts`** —— 模型能力（上下文窗口）校准表。
-  - 导出：`capsOf` / `calibratedChannels` / 类型 `ModelCaps`
+  - 导出：`capsOf` / `calibratedChannels` / `capSources` / 类型 `ModelCaps` / `CapSources`
   - ⚠️ **262144 是宿主 `dsh-llm-pi-ai` 的兜底值，不是模型真实能力**；
     CPA 的 `/v1/models` 不报容量，渠道插件的能力字段只存在于 dll 内部
   - 校准值按**渠道**存 —— 同一模型名在不同渠道上限可能不同；查不到就留兜底
+  - **出处分三档**（官方 / 第三方 / 无来源），第三方档的值**未官方确认**：
+    分档由 `capSources()` 现查，理由见[决策记录](../.agents/notes/2026-10-06-model-caps-source-tiers.md)
   - 改后必测：`tests/model-caps.test.ts`
 
 ## 子目录

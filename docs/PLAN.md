@@ -116,12 +116,6 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
       `/v0/management/*`（`auth-files`、`routing/strategy`、`plugins/*`）。
       上游把 v0 定位为 legacy，长期会消失。
       建议先抽一个 `CpaManagementClient`，业务层不再直接拼路径，再按版本 fallback。
-- [ ] **补齐 Trae / Qoder 渠道的上下文窗口校准值**：现在只有 workbuddy 与 zcode 有
-      （表在 `src/model-caps.ts`）。trae 的值要从 `trae/upstream` 的
-      `context_window_tokens.dev` 现查。
-      ⚠️ **262144 是宿主 `llm-pi-ai` 的 `DEFAULT_CONTEXT_WINDOW` 兜底，不是模型真实能力** ——
-      CPA 的 `/v1/models` 只给 `id` / `object` / `owned_by`，渠道插件的能力字段
-      只存在于 dll 内部、任何接口都不透出（2026-10-04 逐渠道实测）。未校准的留兜底。
 - [ ] **`route-registry.ts` 的两次 map + 两次 filter**：第一组是历史遗留的重复过滤，
       等价于只做一次，可清理（无功能影响）。
 
@@ -259,6 +253,13 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   「等到上限就收场」那条判据随端口一起落地：
   [决策记录](../.agents/notes/2026-10-06-route-clock-injection.md)、
   判据 [tests/route-registry.test.ts](../tests/route-registry.test.ts)。
+
+- **模型窗口校准表的分档**（`model-caps.ts`）—— 先把「四渠道全覆盖 + 出处分档」
+  钉成判据（`capSources` 当时还不存在，两条用例是红的），再补表：
+  官方档（workbuddy / zcode）与第三方推断档（qoder / trae）在代码里分开，
+  无来源的按口径填 1M：
+  [决策记录](../.agents/notes/2026-10-06-model-caps-source-tiers.md)、
+  判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts)。
 
 ⚠️ 本节**当前没有立项项** —— 新条目照上面的口径办：先补判据，再动结构。
 
