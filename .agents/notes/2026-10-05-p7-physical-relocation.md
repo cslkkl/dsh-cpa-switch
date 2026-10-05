@@ -66,5 +66,10 @@ P7 收窄成**纯物理位置整理**：只搬文件位置，不改任何行为�
 - 判据：`pnpm check` 全绿（`check:layering` 7 条规则、348 用例）+ 六条判据逐条核对 +
   `git diff --cached --stat` 的 move-only 形状。落地与验收记录见
   [PR #25](https://github.com/cslkkl/dsh-cpa-switch/pull/25)。
-- 待办（**不属于 P7**）：`state.ts` 单入口读改写、模型路由时钟注入 ——
-  各自立项，先补判据。
+- **P7 到此收官（2026-10-05）**：纯物理迁移只有 `net.ts` 一件。其余候选都不是纯位置问题 ——
+  `src/` 根剩下的是基础登记处（`ids` / `paths` / `state`）、装配与传输层
+  （`index` / `boot` / `route-table` / `routes` / `gateway` / `runtime` / `process`）、
+  以及判据类；判据类留在根是因为「判据层」目录按 §3.1 不建，由守卫的清单规则守着。
+- 两件改行为的（`state.ts` 单入口读改写、模型路由时钟注入）**已立项、未开工**：
+  见 [PLAN §2.9](../../docs/PLAN.md)。**先补判据再动结构** ——
+  「读改写」先要并发用例，时钟注入先把等待间隔变成可断言的判据。

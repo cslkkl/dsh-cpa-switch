@@ -20,7 +20,9 @@ const SRC = path.join(ROOT, 'src')
 /**
  * 纯判据文件：只做「输入 → 判据」，因此**不许有任何依赖**（契约类型除外）。
  *
- * ⚠️ 这份清单要跟着拆分走：判据搬进 `src/domain/` 之后，这里换成目录规则。
+ * 判据留在 `src/` 根，靠这份清单表达 —— 「判据层」这个目录按 §3.1 的尺子不建
+ * （它没有独立于本规则的东西可写，见 docs/ARCHITECTURE.md §3.1）。
+ * 新增判据文件要加进来，判据的自证用例见 tests/layering-guard.test.ts。
  */
 const JUDGEMENT_FILES = new Set([
   'src/select-plan.ts',

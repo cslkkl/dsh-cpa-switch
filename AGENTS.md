@@ -179,6 +179,8 @@ python check-line-endings.py <本仓根> --target lf
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
 - [ ] **研究方向见 [docs/PLAN.md](docs/PLAN.md)** —— 额度显示位置、每代理独立用号、
       调度维护界面等**尚未立项**的想法记在那里；本清单只放「确定要做、照做即可」的动作。
+      **已立项但要先补判据的**（`state.ts` 单入口读改写、模型路由时钟注入）也在那份的
+      §2.9 —— 没有判据之前不许动结构。
 
 ## 活跃坑
 
