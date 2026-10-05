@@ -20,13 +20,16 @@
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
   - 导出：`renderConfig` / `patchModelAlias` / `writeConfig` / `generateSecretKey` /
     `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`
-  - ⚠️ 渠道必须**逐个** `enabled: true`；漏了 dll 全部未激活 → 账号接口一律 404
+  - ⚠️ 渠道必须**逐个** `enabled: true`；漏了 dll 全部未激活 → 账号接口一律 404。
+    这份清单**由调用方给**（`prepare()` 传磁盘上的 dll，见 `listPluginIds`），
+    不再是一份会漂的手写常量
   - ⚠️ `readSecretKeyFromConfig` **必须挡掉 bcrypt 哈希** —— 那是校验用的，拿去当 Bearer 必然 401
   - ⚠️ 别名表只能在 **CPA 起来之后**才算得出，所以 `renderConfig` 写的那份没有别名；
     `patchModelAlias` 是起来之后补写的那条路（只追加、找不到 `oauth:` 段就放弃）
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
   - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
-    `removeDir` / `inspect` / `humanSize` / 类型
+    `listPluginIds` / `removeDir` / `inspect` / `humanSize` / 类型
+  - `listPluginIds` 是生成配置那条路的**启用清单来源**（磁盘上有什么就启用什么）
   - 解压用系统 `tar`（Windows 10+ 自带 bsdtar）—— 不引 zip 依赖，插件保持零 npm 依赖
   - `inspect()` 返回的 `ok` 含义是「**环境齐不齐**」，与路由层的 `ok`（查询成功没）不是一件事
 
