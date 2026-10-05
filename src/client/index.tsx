@@ -26,20 +26,7 @@ import type { LocaleKey } from './locales.ts'
  */
 import './panel.module.css'
 
-/** 本插件那一行的 Loader 条目 id —— 0.1.7 起它就是设置命名空间。 */
-const NS = 'cpa-panel'
-
-/** 设置页标签的 id（次要入口 `settings.plugins.tab` 用）。 */
-const TAB_ID = 'cpa-panel'
-
-/**
- * **包名**，必须与 `package.json` 的 `name` 逐字一致。
- *
- * 它是 `plugins.bundle.config` 的 **slot key** —— 宿主按 `pkg.name` 派发，
- * 喂错会让区块**静默不渲染**（不报错，极难查）。
- * 注意它与 `TAB_ID`（短名 `cpa-panel`）不是同一个字符串。
- */
-const PKG_NAME = 'dsh-cpa-switch'
+import { LOCALE_NS as NS, PKG_NAME, TAB_ID } from './ids.ts'
 
 /** 槽位注册面。 */
 interface SlotSeat {

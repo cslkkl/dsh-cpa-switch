@@ -201,7 +201,30 @@ const required = []
  * 产物是 CJS 包装，需要 `window` / `document` 在作用域内，`vm` 给的正是这个沙箱语义。
  */
 vm.runInNewContext(clientSrc, sandbox)
-check('加载后拿到 id', captured && captured.id === 'dsh-cpa-switch', captured && captured.id)
+
+/**
+ * 包名从 `package.json` 现读 —— **不在这里抄字面量**。
+ *
+ * 抄一份的后果：改名时漏改断言，CI 照样绿，而槽位 key 已经和宿主对不上了 ——
+ * 那正是「静默不渲染」的成因。现读之后，改名漏改任何一处都会在这里红。
+ */
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+
+/**
+ * 随包发布的 `cordis.patch.yml` 里的条目 id / name 也是包名 ——
+ * 它是宿主插入插件行的依据，写错的后果同样是静默的。
+ */
+const patchYml = fs.readFileSync(path.join(ROOT, 'cordis.patch.yml'), 'utf8')
+check(
+  'cordis.patch.yml 的条目 id / name 都是包名',
+  patchYml.includes(`id: ${pkg.name}`) && patchYml.includes(`name: ${pkg.name}`),
+  pkg.name,
+)
+check(
+  '加载后拿到 id（= package.json 的 name）',
+  captured && captured.id === pkg.name,
+  captured && captured.id,
+)
 
 /**
  * 宿主加载器提供的模块。与 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 对应 ——
@@ -277,7 +300,7 @@ check(
 const bundleCfg = registered.find((r) => r.name === 'plugins.bundle.config')
 check(
   'bundle.config 的 key 是包名',
-  bundleCfg && bundleCfg.key === 'dsh-cpa-switch',
+  bundleCfg && bundleCfg.key === pkg.name,
   bundleCfg && bundleCfg.key,
 )
 check(

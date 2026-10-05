@@ -20,6 +20,7 @@
 import { cpaFetch, json } from './cpa.ts'
 import { Config, makeReadConfig } from './config.ts'
 import type { ConfigRefs, PluginConfig } from './config.ts'
+import { PLUGIN_ID } from './ids.ts'
 import { AdminKeyStore, ensureApiKey, resolveApiKey } from './credentials.ts'
 import { attachRouteRegistry } from './route-registry.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
@@ -32,7 +33,7 @@ import { readAccountIntent, writeExeMemory } from './state.ts'
 import { registerRoutes } from './routes.ts'
 
 /** 本插件那一行的 Loader 条目 id —— 0.1.7 起它就是设置命名空间。 */
-export const ENTRY_ID = 'dsh-cpa-switch'
+export const ENTRY_ID = PLUGIN_ID
 
 /** loader 诊断用的插件名。 */
 export const name = 'cpa-panel'
