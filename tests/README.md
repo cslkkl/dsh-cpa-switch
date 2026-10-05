@@ -10,6 +10,7 @@
 | `channels-registry.test.ts` | **渠道注册表的一致性**：能力与路径必须对得上（正反两向）、每条路径都写着自己的渠道 id、派生表覆盖全部渠道、托管 vs 非托管的展示名与顺序、`ROUTE_PREFIXES` 不收别名前缀 |
 | `layering-guard.test.ts`    | **分层检查脚本的自证**：剥注释保留换行（行号不漂）、路径值里的 `import` 不算依赖、跨行 import 与行号、契约层只许类型、四条规则的判定与适用范围                         |
 | `routes.test.ts`            | 路由归一化（同 path 合并 / 非法方法剔除）、逐条注册、单条失败不拖垮其余                                                                                                |
+| `route-table.test.ts`       | **路由表的结构**：path 唯一、方法只有三档、前缀统一、每条有 handler；**README 的可读索引与代码的 path/方法完全一致**                                                   |
 | `state.test.ts`             | 账号意图的 `source` 校验与 `ignored` 剥离、exe 记忆、`localDay`                                                                                                        |
 | `paths.test.ts`             | **DSH 家目录解析**：未设 `DSH_HOME` 用 `~/.dsh`、设了就用它、**空白按未设置**（空值会把家目录变成当前目录）、派生目录跟着走                                            |
 | `cache.test.ts`             | 读缓存的 TTL / 并发合并 / 前缀失效 / 失败不留缓存；探活记忆与显式作废。**判据在行为上**                                                                                |
