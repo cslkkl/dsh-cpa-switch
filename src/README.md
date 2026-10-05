@@ -12,11 +12,12 @@
 
 ## 装配层
 
-- **`index.ts`** —— 唯一的出口，只做**装配**（约 185 行）。
+- **`index.ts`** —— 唯一的出口，只做**装配**（约 190 行）。
   - 导出：`ENTRY_ID` / `name` / `inject` / `Config`（再导出）/ `apply`
-  - `apply` 的内容：造 `AdminKeyStore` / `CpaProcess` / `Operations` / `SetupSession`，
-    挂生命周期 effect（转手给 [`boot.ts`](boot.ts)）与 HTTP 路由（转手给
-    [`route-table.ts`](route-table.ts)）—— **流程与表都不在这里**
+  - `apply` 的内容：造 `AdminKeyStore` / `CpaProcess` / **`CpaRuntime`** / **`CpaGateway`** /
+    `Operations` / `SetupSession`，挂生命周期 effect（转手给 [`boot.ts`](boot.ts)）
+    与 HTTP 路由（转手给 [`route-table.ts`](route-table.ts)）—— **流程与表都不在这里**
+  - ⚠️ 装配层只交出「端口从哪来、密钥从哪来」；`CpaOptions` 由 [gateway.ts](gateway.ts) 自己拼
   - 改动理由见[决策记录](../.agents/notes/2026-10-05-assembly-layer.md)
   - 被谁依赖：宿主 loader 按 `package.json` 的 `.` 导出加载
   - 改后必测：`pnpm build` 后确认 `lib/index.js` 的导出面未变
@@ -24,11 +25,14 @@
   - 导出：`runBoot` / 类型 `BootDeps`
   - ⚠️ 每一步都要看 `isCancelled()`：宿主可能在任何一步之间重建 fiber
   - ⚠️ 补装失败**只记日志**：网络抖动的异常放任冒出去会拖死整个 DSH 宿主（见 F17）
+  - 探活与拉起都经 [`runtime.ts`](runtime.ts)，这里不直接碰 `CpaProcess`
 - **`route-table.ts`** —— 路由表（声明式数据，16 条）。
   - 导出：`buildRoutes` / 类型 `RouteDeps`
   - ⚠️ handler 只做三件事：解码请求 → 调用例 → `json()`；业务规则在 [operations.ts](operations.ts)
   - ⚠️ **同一 path 只能注册一次**、方法只有 `GET`/`HEAD`/`POST`；判据在 `tests/route-table.test.ts`
     （含 README 那张表与代码的一致性）
+  - `/status` 用 `runtime.status()`（只读）、`/start` 用 `runtime.ensure()`——
+    **别在「只是想知道」的地方用 `ensure`**，那会悄悄拉起进程
 
 ## 基础模块（无业务依赖，可独立测）
 
@@ -68,9 +72,19 @@
   - ⚠️ 存**日期**不存布尔：跨天自动失效，不需要清理逻辑
   - 实测与替代方案见[决策记录](../.agents/notes/2026-10-05-checkin-ledger.md)，判据在
     `tests/checkin-ledger.test.ts`
-- **`cpa.ts`** —— CPA 管理接口 HTTP 客户端。
-  - 导出：`cpaFetch` / `json` / `CpaHttpError` / 类型 `CpaOptions`
-  - 一切对 CPA 的请求都从这里走，密钥只在这一侧
+- **`cpa.ts`** —— CPA 管理接口 HTTP 客户端（**只负责发包与错误形状**）。
+  - 导出：`cpaFetch` / `json` / `CpaHttpError` / 类型 `CpaOptions` / `CpaRequestInit`
+  - ⚠️ **调用点一律经 [gateway.ts](gateway.ts)**，不要自己拼 `cpaFetch(options(), …)` ——
+    拼错一次就是「改了配置不生效」，且不报错
+  - 密钥只在这一侧（宿主半边）流动，永不进缓存、永不下发浏览器
+- **`gateway.ts`** —— 对 CPA 的**唯一通道**：就绪前置 + 读写 + 读缓存 + 失效。
+  - 导出：`CpaGateway`（类）/ `cacheKeys` / 类型 `GatewayDeps` / `GateRefusal` / `CpaFetchLike`
+  - `requireRunning()`（读前置）/ `requireReady()`（写前置，多一条密钥检查）——
+    前者是**确保**在跑，必要时会按配置拉起 CPA（`manageLifecycle` 关着时不会）
+  - ⚠️ 缓存键**必须**用 `cacheKeys` 构造器产出，`invalidateChannel` 用的就是它 ——
+    手写字符串与失效前缀分开写时漏一个尾冒号就静默失效（实踩）
+  - ⚠️ 新增一个读 key 就要在 `invalidateChannel` 加一行；判据在
+    `tests/gateway.test.ts`（会遍历 `cacheKeys` 的产出）与 `tests/cache.test.ts`
 - **`config.ts`** —— 配置 schema 与读取。
   - 导出：`Config` / `makeReadConfig` / 类型 `ConfigRefs` / `PluginConfig`
   - ⚠️ 全字段 `.volatile()`；值一律现读
@@ -78,9 +92,10 @@
   - 导出：`normalizeRoutes` / `registerRoutes` / 类型 `RouteSpec` / `RoutesContext`
   - 兜住宿主路由契约（同 path 只注册一次、方法只有 GET/HEAD/POST）
   - 改后必测：同 path 多条目合并、非法方法被剔除、单条失败不拖垮其余
-- **`cache.ts`** —— 读缓存与端口探活记忆。
-  - 导出：`CpaCache`（类）/ `ProbeCache`（类）
-  - 折叠面板一次点击里的并发读；写操作后按前缀失效（见[架构说明](../docs/ARCHITECTURE.md)）
+- **`cache.ts`** —— 读缓存与端口探活记忆（**机制**，不含策略）。
+  - 导出：`CpaCache`（类）/ `ProbeCache`（类）/ 类型 `CacheStats`
+  - 折叠面板一次点击里的并发读；失效由调用方按前缀发起 ——
+    **清哪个前缀是 [gateway.ts](gateway.ts) 的事**，这里只提供能力
   - ⚠️ 两条缓存都**不抛错**，失效坏了只会静默变慢或显示旧值
   - 改后必测：`tests/cache.test.ts`（并发合并、写后失效、失败不留缓存）
 
@@ -93,12 +108,23 @@
 - **`process.ts`** —— CPA 子进程托管。
   - 导出：`CpaProcess`（类）/ `resolveExe` / `probePort` / `waitForPort` / `defaultExeCandidates` / `DEFAULT_PORT`
   - `CpaProcess` 只关自己启的进程；`resolveExe` 的优先级见架构
+  - ⚠️ `isListening`（只读）与 `ensure`（可拉起）**语义不同**，别混用 ——
+    调用方请走 [runtime.ts](runtime.ts) 的两个显式名字
   - 改后必测：清空代理变量、带 `-no-browser`、只关 owned
-- **`operations.ts`** —— 业务操作集合（本目录最大的模块）。
-  - 导出：`Operations`（类）
-  - 用类是为了让「CPA 在跑 + 有密钥」这两个前置集中在 `#ready()` / `#running()`
-  - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `invalidateChannel(plugin)`，否则用户看到旧值
-  - 被谁依赖：`index.ts` 的 `buildRoutes`
+- **`runtime.ts`** —— 「CPA 在不在跑」的唯一回答者。
+  - 导出：`CpaRuntime`（类）/ 类型 `RuntimeDeps` / `RuntimeStatus`
+  - `status()` 只读探活、**绝不起进程**（面板 `/status` 与路由注册表的判据用它）；
+    `ensure()` 才可能按配置拉起（面板 `/start`、启动流程、读前置用它）
+  - ⚠️ 两者共用 `CpaProcess` 的探活记忆 —— **别再自己 `probePort`**，
+    否则两条路径会给出相反的答案（状态条说「运行中」、列表报 `cpa-unavailable`）
+  - 改后必测：`tests/runtime.test.ts`（含「`status` 一次都不许调 `ensure`」）
+- **`operations.ts`** —— 业务操作集合（本目录最大的模块，待按业务域拆）。
+  - 导出：`Operations`（类）/ `normalizeActionOutcome`
+  - ⚠️ **一切对 CPA 的调用都经 `gateway`**，本文件不拼 `CpaOptions`、不碰缓存键
+  - `#ready()` / `#running()` 只是通道层前置结论的翻译（补一个 `ok: false`）
+  - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `invalidateChannel(plugin)`，
+    否则用户看到旧值 —— 清哪些 key 由 [gateway.ts](gateway.ts) 决定
+  - 被谁依赖：`route-table.ts` 的 `buildRoutes`
   - 改后必测：对应路由的返回值形状；读路径别再顺带拉没人消费的数据
 
 ## 渠道与网络
@@ -127,6 +153,8 @@
   - 目录稳定检测用**指数退避**（250ms 起、翻倍、4s 封顶），不许固定间隔 ——
     冷启动等凭据分批加载，已稳定场景两次快读即收敛；
     判据在 `tests/route-registry.test.ts`
+  - ⚠️ 目录与 `baseURL` 都经 [gateway.ts](gateway.ts)、探活经 [runtime.ts](runtime.ts) ——
+    **别自己 `probePort`**：那会另开一条探活路径，与面板的 `/status` 给出相反答案
   - ⚠️ **必须订阅 `app-boot/config-reload`**：宿主每次重建 profile 都 emit 它，
     而重建会抹掉运行时注入的 volatile 值（`app-boot/src/index.ts:289` → `:300`）。
     不订阅 = 路由在第一次设置写入后永久消失，2026-10-04 实测（[issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)）
@@ -172,7 +200,7 @@
 | `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                 |
 | `/api/v1/cpa/start`            | POST     | 手动拉起 CPA                                                        |
 
-> 上表是**可读索引**；权威事实源是 [index.ts](index.ts) 的 `buildRoutes()`。
+> 上表是**可读索引**；权威事实源是 [route-table.ts](route-table.ts) 的 `buildRoutes()`。
 
 **改路由前必读**：同一 `path` 只能注册一次（多方法合并在一个条目里）、
 方法只有 `GET`/`HEAD`/`POST`。违反任一条会让**所有**路由失效。
@@ -188,6 +216,9 @@
 - 改路由表 → 同步本文件的路由表
 - 改对外契约 → 同步 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 与 `package.json` 版本
 - 改 `operations.ts` → 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段
+- 改 `gateway.ts` → 缓存键与失效前缀必须同源（判据在 `tests/gateway.test.ts`）；
+  新增读 key 要同步 `invalidateChannel`
+- 改 `runtime.ts` → `status` 不许变成会拉起进程的实现（判据在 `tests/runtime.test.ts`）
 - 改渠道差异 → 同步根 [../README.md](../README.md) 的渠道能力矩阵
 - 改配置项 → 同步根 [../README.md](../README.md) 的配置表
 - 新增模块 → 回填本文件
