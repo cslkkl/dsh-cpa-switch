@@ -105,6 +105,10 @@
   - 导出：`zh`（`as const`）/ `en`（`Record<LocaleKey, string>`）/ `makeTranslate` /
     类型 `LocaleKey` / `Translate` / `RawTranslate`
   - **加键必须两张表一起加** —— `Record<LocaleKey, string>` 会挡住漏项
+  - ⚠️ **删键没有任何信号，留键同样没有** —— 界面上少一句话不会报错，
+    而**没人用的键**会让人以为「界面上应该有这句话」，改文案时白改一遍。
+    判据 `tests/locales.test.ts`：`src/client/**` 里每个键都必须以带引号的字面量
+    出现过至少一次（扫描**排除表自己**，否则定义本身就算一次引用）。
   - ⚠️ **占位符用 `{名字}`，标点写在字符串里**：界面上不拼 `'：'`、`'（'` ——
     那是中文标点，英文下就成了 `Current strategy：Round robin`（2026-10-04 实机）
   - 列表分隔符也是文案（`listSeparator`），不在代码里写死

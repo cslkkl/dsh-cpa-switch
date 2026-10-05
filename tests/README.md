@@ -27,6 +27,7 @@
 | `meter-text.test.ts`        | 余额区判据：**没有分母就不画条**（trae）、`used` 缺失时 `hasUsed` 为 false、无限量不画条；**条宽取「剩余占比」（绿=还有）**、**不矫枉过正**（三渠道照常画）、宽度夹到 0–100                                      |
 | `routing-text.test.ts`      | 路由策略本地化：**三个合法值都不许露出英文**、认不出的原样透传、两个 round-robin 变体都警告、警告文案点明前提                                                                                                    |
 | `card-slots.test.ts`        | **账号卡六槽位契约**：每个槽位只含一种东西（head 无启用文字 / tagRow 无套餐名 / numbers 永远两格 / meterSlot 无文字）、禁用卡不 grayscale、汇总三格、卡片高度算式                                                |
+| `locales.test.ts`           | **文案表没有无引用的键**：扫 `src/client/**` 的带引号字面量（**排除表自己**，否则定义就算一次引用）、扫描范围本身有自证、清掉的 7 个遗留键没复活、中英键集合一致                                                 |
 | `checkin-ledger.test.ts`    | **今日签到账本**：按天失效、渠道级保留键、**只补不覆盖**（上游说 `false` 不许翻成 `true`）、不知道时不猜「未签到」                                                                                               |
 | `select-plan.test.ts`       | **设为唯一**：计划只改该改的、`expected` 覆盖全渠道、`disabled` 判据与 `normalizeAccounts` 一致、**回读说了算**（回读说没改成就不谎报、半成品能分别报告）                                                        |
 
