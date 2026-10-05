@@ -3,6 +3,13 @@
 宿主半端的模块索引。每个文件：职责 / 关键导出 / 被谁依赖 / 改后必测。
 设计理由见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)，不在本文件重复。
 
+## 契约层
+
+- **`contracts/`** —— 两半共享的**纯类型**：渠道能力、额度、签到、账号、批量动作结果。
+  - 只有类型、零运行时依赖；宿主与浏览器都 `import type`（[决策记录](../.agents/notes/2026-10-05-contract-type-sharing.md)）
+  - 被谁依赖：`adapters.ts`（生产方）、`operations.ts`、`src/client/**`
+  - 模块手册 → [contracts/README.md](contracts/README.md)；越界由 `pnpm check:layering` 拦
+
 ## 装配层
 
 - **`index.ts`** —— 唯一的出口，其余模块都为它服务。
@@ -77,7 +84,8 @@
 
 - **`adapters.ts`** —— 四渠道接口差异收敛。
   - 导出：`PLUGIN_ADAPTERS` / `PLUGIN_ORDER` / `ACTION_PATHS` / `AUTO_CHECKIN_PATHS` /
-    `PLUGIN_CONFIG_PATH` / `SCHEDULER_MODE` / `normalizeAccounts` / 类型
+    `PLUGIN_CONFIG_PATH` / `SCHEDULER_MODE` / `normalizeAccounts` / 类型 `ChannelId` /
+    `PluginAdapter`（**跨两半的形状在 [contracts/](contracts/README.md)**，不在这里）
   - 上层只看统一形状；新增渠道只改这里
   - ⚠️ **`CreditEntry` 只有 `remain` 必有**，`used` / `size` / `packages` 上游不给
     就是 `undefined` —— **绝不用 0 冒充**（trae 实测不给 used/size）。

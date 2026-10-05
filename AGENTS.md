@@ -23,6 +23,8 @@
 | `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）；**改启用态要回读确认 + 逐个容错**（F43）                    |
 | `src/select-plan.ts`            | 「设为唯一」的目标状态计算与回读验证（纯函数）；改动同步 [决策记录](.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                            |
 | `src/adapters.ts`               | [架构说明](docs/ARCHITECTURE.md)、渠道能力表                                                                                                                                                                      |
+| `src/contracts/**`              | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红（[决策记录](.agents/notes/2026-10-05-contract-type-sharing.md)）                            |
+| `scripts/check-layering.cjs`    | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                               |
 | `src/checkin-ledger.ts`         | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；改动同步 [决策记录](.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                    |
 | `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                   |
 | `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构说明](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                      |
@@ -112,8 +114,8 @@ python check-line-endings.py <本仓根> --target lf
 > 变模糊的要么补清背景、要么降级到 PLAN.md 的研究方向；新想法**先入 PLAN.md §2.6**，
 > 别直接塞这里 —— 待办混入未立项的想法就不再是「照做即可」的清单了。
 
-- [ ] **边界重构（进行中）** —— 批次、验收与停止点见 [docs/REFACTOR.md](docs/REFACTOR.md)。
-      当前批次：P0 方案落盘。**不要另起炉灶**：每批开工前先读那份文件的 §4 纪律。
+- [ ] **边界重构（进行中）** —— 批次、验收与停止点见 [docs/REFACTOR.md](docs/REFACTOR.md)，
+      进度以那份文件的进度表为准。**不要另起炉灶**：每批开工前先读它的 §4 纪律。
 
 - [ ] **发布 0.3.0（卡权限：需 npm 所有者 `cslkkl` 操作）**
 

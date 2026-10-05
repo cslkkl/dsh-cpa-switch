@@ -197,7 +197,9 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 
 - 被谁依赖：宿主 loader；`Panel` 是唯一的根组件
 - 依赖方向：只能依赖 `api` / `locales` / 样式表与本目录其他组件；
-  **不得**引用 `../` 下的宿主模块（两半运行在不同进程）
+  **不得**引用 `../` 下的宿主模块（两半运行在不同进程）—— 唯一例外是
+  [../contracts/](../contracts/README.md)（两半共享的纯类型）。
+  这条由 `pnpm check:layering` 的 `client-no-host` 规则拦，别只靠自觉。
 - 外部依赖：`react`、`@deepseek-ai/dsh-client-ui-primitives` —— 都由宿主注入，
   **不能打进产物**（见 `tsdown.config.ts` 的 `CLIENT_EXTERNALS`）
 
