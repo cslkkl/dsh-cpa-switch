@@ -11,9 +11,10 @@
   - 流程：逐来源「已有则跳过 → 查 release → 下载 → 校验 sha256 → 解压」→ 写配置
   - ⚠️ **只补缺件，绝不重下**：判据是 exe 存在 / dll 数 > 0，刻意宽松而不是比版本
   - ⚠️ 配置只在**文件不存在**时写 —— 用户手改过的不能被覆盖
-- **`paths.ts`** —— 路径布局与下载源。
-  - 导出：`SOURCES` / `runtimeDir` / `managedCpaDir` / `managedExePath` /
+- **`paths.ts`** —— 插件自己的运行时布局与下载源。
+  - 导出：`SOURCES` / `managedCpaDir` / `managedExePath` /
     `managedConfigPath` / `managedPluginsDir` / 类型 `SourceKey`
+  - **家目录解析不在这里** —— 认 `DSH_HOME` 的那一层在 [`../paths.ts`](../paths.ts)
   - exe、`config.yaml`、`plugins/` **刻意同层** —— CPA 的 `plugins.dir` 相对工作目录解析
   - ⚠️ `SOURCES.cpa` **绝不能指向没有 Release 的仓库**（没有兜底）
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。

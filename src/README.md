@@ -22,6 +22,17 @@
 
 ## 基础模块见无业务依赖，可独立测）
 
+- **`ids.ts`** —— 宿主半边的入口标识（包名 = loader 条目 id = slot key = 设置命名空间）。
+  - 导出：`PLUGIN_ID`
+  - ⚠️ 必须与 `package.json` 的 `name` 逐字一致；喂错 slot key 的后果是**静默不渲染**
+  - 判据：`scripts/verify-artifacts.cjs` 直读 `package.json` 对照
+  - 浏览器那半的同名登记在 [client/ids.ts](client/ids.ts)（那里的标识不止一个）
+- **`paths.ts`** —— DSH 家目录与插件目录的**唯一解析入口**。
+  - 导出：`DSH_HOME_ENV` / `dshHome` / `storagesDir` / `pluginRuntimeDir`
+  - ⚠️ **不许自己拼 `homedir()/.dsh`** —— `DSH_HOME` 覆盖会被静默忽略，
+    状态与运行时写到别处而没有任何报错
+  - 优先级与宿主 `dsh-home-paths` 一致：非空白 `DSH_HOME` > `~/.dsh`；空白按未设置
+  - 改后必测：`tests/paths.test.ts`
 - **`state.ts`** —— 状态文件读写，**纯 IO、无网络**。
   - 导出：`localDay` / `readExeMemory` / `writeExeMemory` / `readStamp` / `writeStamp` /
     `readCheckinLedger` / `writeCheckinLedger` / `readAccountIntent` / `writeAccountIntent` /
