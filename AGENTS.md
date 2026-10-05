@@ -241,6 +241,7 @@ python check-line-endings.py <本仓根> --target lf
 - **`.gitignore` 只对未追踪的文件生效** —— 加了忽略规则还要 `git rm -r --cached`
   才真的生效；验收走 `gh api`，⚠️ **别用 PowerShell 查中文路径**（引用与编码不一致
   会让 `git ls-tree` / `cat-file` 给出自相矛盾的结果）。
-- **PR 正文与评论里的链接要写绝对 URL** —— 相对路径会被 GitHub 解析到 `.../compare/<path>`
-  这个空视图，点开什么都没有（**仓库内的文档**照旧用相对路径）。判据与背景见
+- **PR 正文与评论里的链接要写绝对 URL，且 ref 用 `main`** —— 相对路径会被 GitHub 解析到
+  `.../compare/<path>` 这个空视图；写功能分支名则更糟：分支合并后会被删，链接**永久 404**
+  （**仓库内的文档**照旧用相对路径）。判据与背景见
   [边界重构方案](docs/REFACTOR.md) 的 PR 纪律。
