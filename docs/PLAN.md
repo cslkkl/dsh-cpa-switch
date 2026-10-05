@@ -260,6 +260,12 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   无来源的按口径填 1M：
   [决策记录](../.agents/notes/2026-10-06-model-caps-source-tiers.md)、
   判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts)。
+- **签到账本的判定语义**（`checkin-ledger.ts`）—— 先把实机现象钉成判据
+  （「账号级昨天 + 渠道级今天 → 仍算签过」，两条用例当时是红的），
+  再把 `isRecordedToday` 从「优先哪个键」改成「任一键是今天」；
+  「只补不覆盖」与「不污染其它账号」两条既有判据原样保留：
+  [决策记录](../.agents/notes/2026-10-05-checkin-ledger.md)「修正」一节、
+  判据 [tests/checkin-ledger.test.ts](../tests/checkin-ledger.test.ts)。
 
 ⚠️ 本节**当前没有立项项** —— 新条目照上面的口径办：先补判据，再动结构。
 
