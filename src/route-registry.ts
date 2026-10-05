@@ -38,6 +38,30 @@ import { patchModelAlias } from './setup/config.ts'
 import { CPA_API_KEY_REF, type LoggerLike } from './credentials.ts'
 
 /**
+ * 时钟：**「等多久」的唯一入口**。
+ *
+ * 为什么是个端口，而不是到处直接 `setTimeout` / `Date.now`：等待策略是**行为契约**
+ * （退避到 4s 封顶、loader 最多等 10 秒），而拿真时间测它只能跑满秒级窗口 ——
+ * 既慢又不稳；整条 attach/refresh 路径套全局假定时器又会卡住
+ * （vitest 的 fake timers 与本路径上的真实异步不兼容，实测超时而非断言失败）。
+ * 注入之后，「间隔序列」与「不无限等」都能用确定性时钟断言（见
+ * `tests/route-registry.test.ts`）。
+ *
+ * 默认值就是真实的 `setTimeout` / `Date.now`：加的是**可选**字段，
+ * 生产行为与加之前逐字相同。
+ */
+export interface Clock {
+  now(): number
+  sleep(ms: number): Promise<void>
+}
+
+/** 生产用的时钟。测试注入自己的实现（见 `tests/route-registry.test.ts`）。 */
+export const systemClock: Clock = {
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}
+
+/**
  * 渠道展示名与顺序**一律从渠道注册表派生**，这里不再抄第二份清单。
  *
  * 原先这里手写了六个渠道的展示名与顺序，而面板只认四个、生成配置的启用清单又少一个 ——
@@ -134,6 +158,8 @@ export interface RouteRegistryDeps {
   readonly resolveApiKey: () => Promise<string>
   readonly adminKey: () => string
   readonly logger?: LoggerLike | undefined
+  /** 等多久的入口；不传就用真实时钟（见 {@link Clock}）。 */
+  readonly clock?: Clock | undefined
 }
 
 /** `auth-files` 里一个凭据的形状（归属识别用）。 */
@@ -334,12 +360,13 @@ function buildCpaRouteProfile(
 export async function readStableCatalog(
   deps: RouteRegistryDeps,
 ): Promise<{ data?: unknown[] } | undefined> {
+  const clock = deps.clock ?? systemClock
   const apiKey = await deps.resolveApiKey()
   const bearer = apiKey !== '' ? apiKey : deps.adminKey()
-  const deadline = Date.now() + 120000
+  const deadline = clock.now() + 120000
   let previous = -1
   let delayMs = 250
-  while (Date.now() < deadline) {
+  while (clock.now() < deadline) {
     const fetched = (await deps.gateway.fetch('/v1/models', {
       headers: { authorization: `Bearer ${bearer}` },
       timeoutMs: 15000,
@@ -347,7 +374,7 @@ export async function readStableCatalog(
     const count = (fetched.data ?? []).length
     if (count > 0 && count === previous) return fetched
     previous = count
-    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    await clock.sleep(delayMs)
     delayMs = Math.min(delayMs * 2, 4000)
   }
   return undefined
@@ -364,6 +391,7 @@ export function attachRouteRegistry(
   host: RouteRegistryHost,
   deps: RouteRegistryDeps,
 ): (trigger?: string) => Promise<SyncResult> {
+  const clock = deps.clock ?? systemClock
   let loaderRef: LoaderLike | undefined
   host.inject(['loader'], (scope) => {
     loaderRef = (scope as { loader?: LoaderLike }).loader
@@ -384,9 +412,9 @@ export function attachRouteRegistry(
 
   /** inject 是异步解析的，boot 可能先跑到这里 —— 最多等 10 秒。 */
   const findEntry = async (): Promise<LoaderEntryLike | undefined> => {
-    const deadline = Date.now() + 10000
-    while (loaderRef === undefined && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 250))
+    const deadline = clock.now() + 10000
+    while (loaderRef === undefined && clock.now() < deadline) {
+      await clock.sleep(250)
     }
     return [...(loaderRef?.entries() ?? [])].find(
       (candidate) => candidate.options.name === '@deepseek-ai/dsh-llm-pi-ai',
@@ -558,7 +586,7 @@ export function attachRouteRegistry(
     )
   }
   emitter.on('app-boot/config-reload', () => {
-    const startedAt = Date.now()
+    const startedAt = clock.now()
     deps.logger?.info?.('cpa-panel: host config-reload received, repushing models')
     /**
      * 快路径：重建刚把清单抹掉（基线里 `cpa` 只有骨架、没有 models），
@@ -571,7 +599,7 @@ export function attachRouteRegistry(
         .then((result) => {
           deps.logger?.info?.(
             'cpa-panel: 重载空窗补回（%d ms）：%s',
-            Date.now() - startedAt,
+            clock.now() - startedAt,
             result.ok ? `${String(result.models ?? 0)} models` : (result.reason ?? 'failed'),
           )
         })

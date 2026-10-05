@@ -159,7 +159,7 @@
 ## 模型路由
 
 - **`route-registry.ts`** —— **保证 CPA 路由可用的唯一入口**。
-  - 导出：`attachRouteRegistry` / `readStableCatalog` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `SyncResult`
+  - 导出：`attachRouteRegistry` / `readStableCatalog` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `Clock` / `SyncResult` / `systemClock`
   - 一条链：**查 CPA 目录 → 算别名 → 补写配置 → 推 models**
   - 骨架在 `cordis.patch.yml`（随包发布），清单走 volatile —— **两层缺一不可**
   - **重载前后可见状态必须连续**：收到 `app-boot/config-reload` 先用**零 CPA 读**推回上一份成功清单
@@ -172,6 +172,10 @@
   - 目录稳定检测用**指数退避**（250ms 起、翻倍、4s 封顶），不许固定间隔 ——
     冷启动等凭据分批加载，已稳定场景两次快读即收敛；
     判据在 `tests/route-registry.test.ts`
+  - **「等多久」只有一处入口：注入的 `Clock`**（`deps.clock`，默认 `systemClock` = 真实计时器）。
+    ⚠️ 别在等待路径上直接写 `setTimeout` / `Date.now`：那会让「间隔序列」和
+    「等到上限就收场」变得只能拿真时间测（10 秒级），退化了也未必红 ——
+    见[决策记录](../.agents/notes/2026-10-06-route-clock-injection.md)
   - ⚠️ 目录与 `baseURL` 都经 [gateway.ts](gateway.ts)、探活经 [runtime.ts](runtime.ts) ——
     **别自己 `probePort`**：那会另开一条探活路径，与面板的 `/status` 给出相反答案
   - ⚠️ **必须订阅 `app-boot/config-reload`**：宿主每次重建 profile 都 emit 它，
