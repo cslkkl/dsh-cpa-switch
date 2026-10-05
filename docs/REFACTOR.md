@@ -181,8 +181,12 @@
 - **正文与评论一律走 `--body-file` / `-F body=@文件`**，不要内联在命令行里：
   PowerShell 把反引号当转义符，内联的 markdown 会变成 `\`sha\`` 这种乱码（2026-10-05 实踩，
   四条已发评论逐个 PATCH 修回）。
-- **标签**：每个 PR 打 `boundary-refactor`（本工作流）＋ 类型标签（`refactor` / `fix` / `docs` /
-  `test` / `chore`）；标签集由维护者在仓库设置里维护，脚本只管贴上。
+- **标签**：每个 PR 打 `boundary-refactor`（本工作流）＋ 类型标签
+  （`feat` / `refactor` / `docs` / `test` / `chore` / `perf` / `bug` / `a11y`）。
+  ⚠️ **打之前先 `gh label list` 确认，不要凭记忆写** —— 标签集由维护者在仓库设置里维护，
+  改过名之后旧名会成为「贴不上去」的错误（2026-10-05 维护者更新过一次：
+  `fix` / `documentation` 已删、`enhancement` → `feat`、`accessibility` → `a11y`、新增 `perf`，
+  本行就是照 `gh label list` 的实际输出改的）。脚本只管贴，不管标签集。
 - **PR 正文与评论里的链接一律写绝对 URL**：`https://github.com/<owner>/<repo>/blob/main/<path>`。
   理由：GitHub 把 PR 页面里的相对链接解析到**页面路径**上，实测落到
   `.../compare/<path>` 这个空视图，点开什么都没有（2026-10-05 维护者实机踩到，
