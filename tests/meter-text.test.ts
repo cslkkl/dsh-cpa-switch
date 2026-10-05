@@ -12,6 +12,8 @@
  * 4. **条宽是「剩余占比」（`remain / size`），不是「已用占比」** ——
  *    条恒为成功色（绿），绿色直观读作「还有 / 可用」；按已用画就成了
  *    「用得越多绿得越多」，与想表达的意思**正好相反**（2026-10-05 真机验收发现）。
+ *    **两个端点都钉住**：满额画满条、**用光（`remain: 0`）画空条且仍然 `show`** ——
+ *    「画不画条」问的是有没有分母，不是有没有剩余。
  *
  * ⚠️ 反面对照（防止矫枉过正）：workbuddy / qoder / zcode 三个渠道的
  * `used` 与 `size` 都是**真的**，必须照常画条、照常显示已用。
@@ -80,11 +82,27 @@ describe('meterDecision', () => {
     expect(d.unlimited).toBe(true)
   })
 
-  it('used 缺失但 size 在 → 仍然画（分母是真的），一点没用就满格', () => {
-    const d = meterDecision({ remain: 100, size: 100 })
-    expect(d.show).toBe(true)
-    expect(d.percent).toBe(100)
-    expect(d.hasUsed).toBe(false)
+  it('⚠️ 两个端点：满额画满条、用光画空条 —— 都必须 show', () => {
+    // 这是新旧语义相差最大的一对：旧代码分子取 `used`，用光时 used=size → 满格、
+    // 满额时 used=0 → 空条，**两个端点都画反**。现在分子取 `remain`，方向才顺：
+    // 满格 = 一点没用，空 = 用光。
+    expect(meterDecision({ remain: 100, size: 100 })).toEqual({
+      show: true,
+      percent: 100,
+      hasUsed: false,
+      unlimited: false,
+    })
+
+    // ⚠️ 空条**也要 `show: true`**：画不画条问的是「有没有分母」，不是「有没有剩余」。
+    // 顺手写成「percent 是 0 就不画」**不报错**，但「用光了」会和「这个渠道没有额度信息」
+    // 长得一模一样 —— 那正是灰底轨道画在 `.meter` 上、不画在槽位上的原因
+    // （见 AccountCard.tsx 该槽位的注释）。
+    expect(meterDecision({ remain: 0, size: 100 })).toEqual({
+      show: true,
+      percent: 0,
+      hasUsed: false,
+      unlimited: false,
+    })
   })
 
   it('remain 超过 size（赠送额度）夹到 100；用光时条空', () => {
