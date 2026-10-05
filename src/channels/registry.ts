@@ -29,12 +29,13 @@ export const CHANNELS = [WORKBUDDY, TRAE, QODER, ZCODE] as const
 export type ChannelId = (typeof CHANNELS)[number]['id']
 
 /**
- * 同一份清单的**宽化视图**：遍历时只需要 `ChannelSpec` 的形状。
+ * 同一份清单的**宽化视图**：需要读可选字段（`autoCheckin` / `schoolPath`）时用它。
  *
- * 为什么要有它：`CHANNELS` 是字面量元组（为了让 {@link ChannelId} 能推导出来），
- * 而元组里各元素的可选字段不同 —— 直接遍历取 `autoCheckin` 这种可选字段会报错。
+ * 为什么有两个名字：{@link CHANNELS} 是字面量元组（为了让 {@link ChannelId} 能从中推导），
+ * 而元组里各元素的可选字段不同 —— 直接遍历取可选字段会报编译错误。
+ * 注册表内部与判据走这一份；只读必有字段的地方（面板 / 路由）用 `CHANNELS`。
  */
-const SPECS: readonly ChannelSpec[] = CHANNELS
+export const CHANNEL_SPECS: readonly ChannelSpec[] = CHANNELS
 
 /** 托管渠道的 id，按展示顺序。 */
 export const CHANNEL_IDS: readonly ChannelId[] = CHANNELS.map((channel) => channel.id)
@@ -66,7 +67,7 @@ export const ROUTE_PREFIXES: readonly string[] = [...CHANNEL_IDS, ...UNMANAGED_I
 
 /** 按 id 找一个托管渠道；非托管或未知返回 `undefined`。 */
 export function channelOf(id: string): ChannelSpec | undefined {
-  return SPECS.find((channel) => channel.id === id)
+  return CHANNEL_SPECS.find((channel) => channel.id === id)
 }
 
 /** 展示名：托管渠道取 spec，非托管取登记表，都不认识就**原样透传**（不猜）。 */
@@ -114,11 +115,11 @@ export function configPathOf(id: string): string {
 
 /** 写操作路径表：`渠道 -> 动作 -> 路径`。缺失的动作表示该渠道不支持。 */
 export const ACTION_PATHS: Readonly<Record<string, Readonly<Record<string, string>>>> =
-  Object.fromEntries(SPECS.map((channel) => [channel.id, channel.actions]))
+  Object.fromEntries(CHANNEL_SPECS.map((channel) => [channel.id, channel.actions]))
 
 /** 自动签到开关的路径表；不支持的渠道不在表里。 */
 export const AUTO_CHECKIN_PATHS: Readonly<Record<string, AutoCheckinPath>> = Object.fromEntries(
-  SPECS.flatMap((channel) =>
+  CHANNEL_SPECS.flatMap((channel) =>
     channel.autoCheckin === undefined ? [] : [[channel.id, channel.autoCheckin] as const],
   ),
 )
