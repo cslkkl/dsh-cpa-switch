@@ -17,9 +17,29 @@
 
 - **`state.ts`** —— 状态文件读写，**纯 IO、无网络**。
   - 导出：`localDay` / `readExeMemory` / `writeExeMemory` / `readStamp` / `writeStamp` /
-    `readAccountIntent` / `writeAccountIntent` / 类型 `AccountIntent`
-  - 三份状态分开存：exe 记忆见长期）、签到 stamp见按天）、账号意图见长期，仅面板写）
+    `readCheckinLedger` / `writeCheckinLedger` / `readAccountIntent` / `writeAccountIntent` /
+    类型 `AccountIntent`
+  - 三份状态分开存：exe 记忆（长期）、签到 stamp + **今日签到账本**（按天，同一文件）、
+    账号意图（长期，仅面板写）
   - 改后必测：账号意图的 `source !== 'panel'` 拒绝、`ignored` 剥离
+- **`select-plan.ts`** —— 「设为唯一」的**目标状态计算 + 回读验证**（纯函数，不碰 IO）。
+  - 导出：`planSelect` / `verifySelect` / 类型 `SelectableFile` / `SelectChange` / `SelectPlan`
+  - 为什么需要：`accountSelect` 要改同渠道**多个**账号，而上游
+    `PATCH /auth-files/status` **一次只改一个文件、没有批量接口**，且写没有事务
+  - `planSelect`：先算出「要改哪些 + 改完应该是什么样」，**不做 IO**
+  - `verifySelect`：拿**回读值**当权威，得出「到底改成了什么」
+  - ⚠️ 修的是「设为唯一**间歇性失灵**」（2026-10-05）：原来 `try` 包在循环外 →
+    半成品既不回滚也不报告；且不回读 → `ok` 只表示「没抛异常」
+  - 实测与替代方案见[决策记录](../.agents/notes/2026-10-05-account-status-readback.md)，
+    判据在 `tests/select-plan.test.ts`
+- **`checkin-ledger.ts`** —— **今日签到账本**（纯函数，不碰 IO）。
+  - 导出：`applyLedger` / `recordToday` / `isRecordedToday` / `CHANNEL_WIDE` / 类型 `CheckinLedger`
+  - 为什么需要：上游 CPA **自己缓存** `credits`（签到态随它回来），实测 `fetched_at`
+    冻结 ≥3 分钟，只有写操作才推动刷新 → 「今天签过了却显示没签到，非得再点一次」
+  - ⚠️ **只补不覆盖**：上游明确说 `false` 时不许翻成 `true`（上游能撤销签到）
+  - ⚠️ 存**日期**不存布尔：跨天自动失效，不需要清理逻辑
+  - 实测与替代方案见[决策记录](../.agents/notes/2026-10-05-checkin-ledger.md)，判据在
+    `tests/checkin-ledger.test.ts`
 - **`cpa.ts`** —— CPA 管理接口 HTTP 客户端。
   - 导出：`cpaFetch` / `json` / `CpaHttpError` / 类型 `CpaOptions`
   - 一切对 CPA 的请求都从这里走，密钥只在这一侧
@@ -59,7 +79,12 @@
   - 导出：`PLUGIN_ADAPTERS` / `PLUGIN_ORDER` / `ACTION_PATHS` / `AUTO_CHECKIN_PATHS` /
     `PLUGIN_CONFIG_PATH` / `SCHEDULER_MODE` / `normalizeAccounts` / 类型
   - 上层只看统一形状；新增渠道只改这里
-  - 改后必测：`normalizeAccounts` 对四种返回结构的解析
+  - ⚠️ **`CreditEntry` 只有 `remain` 必有**，`used` / `size` / `packages` 上游不给
+    就是 `undefined` —— **绝不用 0 冒充**（trae 实测不给 used/size）。
+    见[架构说明](../docs/ARCHITECTURE.md) F40 与
+    [决策记录](../.agents/notes/2026-10-05-credit-shape-per-channel.md)
+  - ⚠️ **`credits_pool_known` 与 `remain_known` 是两条轴**，别合并成一个字段
+  - 改后必测：`normalizeAccounts` 对四种返回结构的解析、缺失字段是 `undefined`
 - **`net.ts`** —— 带代理支持的 HTTP（下载用）。
   - 导出：`detectProxy` / `getJson` / `downloadTo` / `describeProxy`
   - 为什么不用内置 `fetch`：它默认忽略 `HTTPS_PROXY`
