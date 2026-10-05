@@ -78,6 +78,21 @@ check(
 check('jsx-runtime 是外部引用（未内联）', /require\(["']react\/jsx-runtime["']\)/.test(clientSrc))
 
 /**
+ * 浏览器产物里不许出现宿主侧的痕迹。
+ *
+ * ⚠️ **这是最后一道网，不是主判据。** 主判据是 `scripts/check-layering.cjs` 的
+ * `client-no-host` 规则（源码级，任何越界都拦）。这里只拦**真的进了产物**的那种：
+ * 实测把 `../state.ts` 引进来却没被用到时，打包器会 tree-shake 掉、产物里一个字节
+ * 都不留 —— 那时只有源码级规则看得见。两层都要，但别以为这一层能兜住全部。
+ *
+ * 三个特征串只可能来自宿主侧，且都不与合法客户端常量冲突
+ * （插件的命名空间是 `cpa-panel`，与状态目录 `.dsh` 不是一回事）。
+ */
+check('浏览器产物不含 CPA 管理接口路径', !/\/(?:v0|v8)\/management\//.test(clientSrc))
+check('浏览器产物不含 node: 内置引用', !/["']node:[a-z]/i.test(clientSrc))
+check('浏览器产物不含 DSH 状态目录', !clientSrc.includes('.dsh'))
+
+/**
  * 样式表必须真的被注入。
  *
  * CSS Module 靠 import 产生副作用。少 import 一次不会报错，只是面板变成**完全
