@@ -19,6 +19,22 @@
 
 /** 中文文案（键的权威来源）。 */
 export const zh = {
+  /**
+   * ⚠️ 七个**已删除**的键（2026-10-05，边界重构 P6d）：`disableThis` / `selected` /
+   * `selectedHint` / `setupFailed` / `noAccounts` / `noCredits` / `remainUnknown`。
+   *
+   * 它们**没有任何引用**，是历次界面改版的遗留 —— 留着只会让人以为
+   * 「界面上应该有这句话」，改文案时白改一遍：
+   *
+   * - `selected` / `selectedHint`：「使用中」标签已被**选中绿环**取代（开关即选择）；
+   * - `disableThis`：开关文案固定用 `enableThis` + `enableHint` / `disableHint`；
+   * - `setupFailed`：被带原因的 `setupFailedWith` 取代；
+   * - `noAccounts`：空列表时**照样渲染添加卡片**，不需要空态文案；
+   * - `noCredits` / `remainUnknown`：余量未知由卡片用 `remain` + `?` 表达。
+   *
+   * 别因为「键少了不对称」把任何一个加回来 —— 判据 `tests/locales.test.ts`
+   * 钉住「**每个键都必须有引用**」，加了无引用的键那条就红。
+   */
   tab: 'CPA 面板',
   running: '运行中',
   stopped: '未运行',
@@ -41,13 +57,10 @@ export const zh = {
   enable: '启用',
   disable: '禁用',
   enableThis: '启用这个账号',
-  disableThis: '禁用这个账号',
   enableHint: '启用后它才会参与请求调度',
   disableHint: '禁用后它完全不参与调度',
   select: '设为唯一',
-  selected: '使用中',
   selectHint: '只用这个账号，同渠道其余自动禁用',
-  selectedHint: '当前就是它在服务',
   addAccount: '添加账号',
   startLogin: '开始登录',
   cancel: '取消',
@@ -69,7 +82,6 @@ export const zh = {
   setupStepProgress: '正在下载',
   setupStepVerify: '正在校验完整性',
   setupStepExtract: '正在解压',
-  setupFailed: '准备失败',
   setupNote: '不会覆盖你自己装的 CPA。想用它，就在插件设置里把 exePath 指过去。',
   exhausted: '已耗尽',
   remain: '可用',
@@ -87,7 +99,6 @@ export const zh = {
   loadFailed: '读取失败',
   loadFailedWith: '读取失败：{reason}',
   failedWith: '{action}失败：{reason}',
-  noAccounts: '该渠道没有账号',
   checkedIn: '已签到',
   notCheckedIn: '未签到',
   streak: '连签',
@@ -113,8 +124,6 @@ export const zh = {
    * 用户能自己对上「我是不是开了多个号」。
    */
   strategyWarn: '同渠道启用多个账号时，每个请求都会换号。上游缓存因此几乎不命中，会明显多花额度。',
-  noCredits: '余额未知',
-  remainUnknown: '可用 未知',
   /**
    * ⚠️ 曾经有个 `noTotal: '无总额度，仅显示剩余'` 键，**已删除**（2026-10-05）：
    * 它填在进度条槽位里解释「为什么没有条」，但那个槽位的语义被钉死为
@@ -176,13 +185,10 @@ export const en: Record<LocaleKey, string> = {
   enable: 'Enable',
   disable: 'Disable',
   enableThis: 'Enable this account',
-  disableThis: 'Disable this account',
   enableHint: 'It only takes requests while enabled',
   disableHint: 'A disabled account never takes requests',
   select: 'Use only this',
-  selected: 'In use',
   selectHint: 'Use only this account and disable the rest of the channel',
-  selectedHint: 'This account is currently serving',
   addAccount: 'Add account',
   startLogin: 'Sign in',
   cancel: 'Cancel',
@@ -205,7 +211,6 @@ export const en: Record<LocaleKey, string> = {
   setupStepProgress: 'Downloading',
   setupStepVerify: 'Verifying checksum',
   setupStepExtract: 'Extracting',
-  setupFailed: 'Setup failed',
   setupNote:
     'An existing CPA install is never overwritten. To use one, point exePath at it in settings.',
   exhausted: 'Exhausted',
@@ -222,7 +227,6 @@ export const en: Record<LocaleKey, string> = {
   loadFailed: 'Could not load',
   loadFailedWith: 'Could not load: {reason}',
   failedWith: '{action} failed: {reason}',
-  noAccounts: 'No accounts in this channel',
   checkedIn: 'Checked in',
   notCheckedIn: 'Not checked in',
   streak: 'Streak',
@@ -238,8 +242,6 @@ export const en: Record<LocaleKey, string> = {
   strategyWeightedRoundRobin: 'Weighted round robin',
   strategyWarn:
     'With several accounts enabled in one channel, every request switches accounts. The upstream cache almost never hits, so you spend noticeably more quota.',
-  noCredits: 'Balance unknown',
-  remainUnknown: 'available: unknown',
   planFree: 'Free',
   planBasic: 'Basic',
   planPro: 'Pro',
