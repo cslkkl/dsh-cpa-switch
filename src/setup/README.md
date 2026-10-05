@@ -32,18 +32,30 @@
   - `listPluginIds` 是生成配置那条路的**启用清单来源**（磁盘上有什么就启用什么）
   - 解压用系统 `tar`（Windows 10+ 自带 bsdtar）—— 不引 zip 依赖，插件保持零 npm 依赖
   - `inspect()` 返回的 `ok` 含义是「**环境齐不齐**」，与路由层的 `ok`（查询成功没）不是一件事
+- **`net.ts`** —— 带代理支持的 HTTP（下载用）。
+  - 导出：`detectProxy` / `getJson` / `downloadTo` / `describeProxy`
+  - 为什么不用内置 `fetch`：它默认忽略 `HTTPS_PROXY`，受限网络下用户会永远装不上
+  - 改后必测：代理探测优先级、重定向跟随、sha256 边下边算（**目前没有独立测试文件**）
+  - 2026-10-05 从 `src/` 根搬进本层（唯一消费者是 `download.ts`）——
+    [决策记录](../../.agents/notes/2026-10-05-p7-physical-relocation.md)
 
 ## 归属与依赖
 
 - 被谁依赖：`src/index.ts`（`prepare` / `inspect` / `managedExePath`）、
   `src/process.ts`（`managedExePath`）、`src/credentials.ts`（`readSecretKeyFromConfig` / 生成密钥）
 - 依赖方向：`setup/` 内部三段互相独立；对外只暴露 `index.ts` 的再导出
+- ⚠️ **本层不许反向依赖装配层、业务层与对 CPA 的通道** —— `index` / `boot` / `route-table` /
+  `routes` / `route-registry` / `gateway` / `runtime` / `ops/**` 都不许进，由
+  `pnpm check:layering` 的 `setup-no-outer` 拦。理由：本层下的是**公开 release**，
+  不是 CPA 的 API —— 走 `gateway` 会同时要求管理密钥与运行态前置，两件事都错。
 
 ## 变更影响路由
 
 - 改下载源 → `SOURCES` + [架构说明](../../docs/ARCHITECTURE.md) 的范围边界
 - 改 `config.yaml` 字段 → 与 CPA 上游 `internal/config` 对照后同步本文件
 - 改 `prepare` 的跳过判据 → 同步 [架构说明](../../docs/ARCHITECTURE.md) 的 F5
+- 改 `net.ts` → 它是本层的网络工具（代理探测 / 重定向 / 边下边算 sha256），
+  分层规矩由 `setup-no-outer` 拦
 - 新增文件 → 回填本文件
 
 ## 参考

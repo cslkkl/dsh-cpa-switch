@@ -232,8 +232,10 @@ clone 后没有这个目录；拉取方式见 [reference/README.md](../reference
 ### 2.8 边界重构（已完成，2026-10-05）
 
 批次的逐条历史看 `git log`（P0–P6，九次 PR）；**结论已并入
-[架构说明](ARCHITECTURE.md)**（§3.1 的三条尺子与目录裁决、§7 的 P7 缓办），
-PR 与合并的纪律见[决策记录](../.agents/notes/2026-10-05-pr-discipline.md)。
+[架构说明](ARCHITECTURE.md)**（§3.1 的三条尺子与目录裁决、§7 的 P7 口径：
+**只搬位置、不改行为**，一次移动一个提交），
+PR 与合并的纪律见[决策记录](../.agents/notes/2026-10-05-pr-discipline.md)，
+P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-physical-relocation.md)。
 
 ⚠️ 原方案文件 `docs/REFACTOR.md` 已按约定删除 —— 不要再引用它。
 

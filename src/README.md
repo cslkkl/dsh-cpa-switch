@@ -149,10 +149,8 @@
     [决策记录](../.agents/notes/2026-10-05-credit-shape-per-channel.md)
   - ⚠️ **`credits_pool_known` 与 `remain_known` 是两条轴**，别合并成一个字段
   - 改后必测：`normalizeAccounts` 对四种返回结构的解析、缺失字段是 `undefined`
-- **`net.ts`** —— 带代理支持的 HTTP（下载用）。
-  - 导出：`detectProxy` / `getJson` / `downloadTo` / `describeProxy`
-  - 为什么不用内置 `fetch`：它默认忽略 `HTTPS_PROXY`
-  - 改后必测：代理探测优先级、重定向跟随、sha256 边下边算
+- **`net.ts`** —— 带代理支持的 HTTP（下载用）→ **已归入 [`setup/`](setup/README.md)**
+  （2026-10-05 纯物理迁移，见[决策记录](../.agents/notes/2026-10-05-p7-physical-relocation.md)）
 
 ## 模型路由
 
