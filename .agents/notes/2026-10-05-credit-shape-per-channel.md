@@ -122,5 +122,7 @@ trae 的原始返回（关键部分）：
 ## 参考
 
 - 判据：`src/client/meter-text.ts`，用例 `tests/meter-text.test.ts`
-- 解析：`src/adapters.ts` 的 `CreditEntry` / `parseNestedCredits` / trae 的 `parseCredits`
-- 用例：`tests/adapters.test.ts` 的「trae 的 used 与 size 是 undefined」组
+- 解析：`CreditEntry` 在 `src/contracts/domain.ts`、`parseNestedCredits` 在
+  `src/channels/spec.ts`、trae 的 `parseCredits` 在 `src/channels/trae.ts`
+  （域拆分后 `src/adapters.ts` 已删除）
+- 用例：`tests/channels.test.ts` 的「trae 的 used 与 size 是 undefined —— 上游不给就不许编」
