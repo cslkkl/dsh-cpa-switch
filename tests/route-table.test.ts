@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import type { PluginConfig } from '../src/config.ts'
 import { AdminKeyStore } from '../src/credentials.ts'
 import { CpaGateway } from '../src/gateway.ts'
-import { Operations } from '../src/operations.ts'
+import { createOperations } from '../src/ops/index.ts'
 import { CpaProcess } from '../src/process.ts'
 import { CpaRuntime } from '../src/runtime.ts'
 import { buildRoutes } from '../src/route-table.ts'
@@ -63,7 +63,7 @@ function makeDeps(): RouteDeps {
     cpaFetch: async () => ({}),
     runtime,
   })
-  const ops = new Operations({ gateway })
+  const ops = createOperations({ gateway })
   const setup = new SetupSession({ readConfig, adminKey, onPrepared: () => {} })
   return { ops, adminKey, readConfig, setup, runtime }
 }

@@ -28,7 +28,7 @@ import { runBoot } from './boot.ts'
 import { CpaProcess } from './process.ts'
 import { CpaRuntime } from './runtime.ts'
 import { CpaGateway } from './gateway.ts'
-import { Operations } from './operations.ts'
+import { createOperations } from './ops/index.ts'
 import { SetupSession } from './setup/index.ts'
 import { registerRoutes } from './routes.ts'
 import { buildRoutes } from './route-table.ts'
@@ -134,7 +134,7 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     logger: ctx.logger,
   })
 
-  const ops = new Operations({
+  const ops = createOperations({
     gateway,
     logger: ctx.logger,
     /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */

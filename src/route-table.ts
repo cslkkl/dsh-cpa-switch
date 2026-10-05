@@ -18,7 +18,7 @@ import { json } from './cpa.ts'
 import { CHANNEL_IDS, CHANNELS } from './channels/registry.ts'
 import type { PluginConfig } from './config.ts'
 import type { AdminKeyStore } from './credentials.ts'
-import type { Operations } from './operations.ts'
+import type { Operations } from './ops/index.ts'
 import type { CpaRuntime } from './runtime.ts'
 import type { RouteSpec } from './routes.ts'
 import type { SetupSession } from './setup/index.ts'
@@ -143,7 +143,7 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
         const url = new URL(request.url)
         const plugin = url.searchParams.get('plugin') ?? 'workbuddy'
         const fresh = url.searchParams.get('fresh') === '1'
-        return json(await ops.accountsOf(plugin, fresh))
+        return json(await ops.accounts.list(plugin, fresh))
       },
     },
     {
@@ -151,21 +151,21 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       methods: ['GET'],
       handle: async (request) => {
         const url = new URL(request.url)
-        return json(await ops.modelsOf(url.searchParams.get('plugin') ?? 'workbuddy'))
+        return json(await ops.accounts.models(url.searchParams.get('plugin') ?? 'workbuddy'))
       },
     },
     {
       path: '/api/v1/cpa/school',
       methods: ['GET'],
-      handle: async () => json(await ops.school()),
+      handle: async () => json(await ops.accounts.school()),
     },
     {
       path: '/api/v1/cpa/routing',
       methods: ['GET', 'POST'],
       handle: async (request) => {
-        if (request.method === 'GET') return json(await ops.routingGet())
+        if (request.method === 'GET') return json(await ops.scheduling.getRouting())
         const body = await readBody(request)
-        return json(await ops.routingSet(String(body.strategy ?? '')))
+        return json(await ops.scheduling.setRouting(String(body.strategy ?? '')))
       },
     },
     {
@@ -177,7 +177,7 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
        */
       path: '/api/v1/cpa/scheduler-mode',
       methods: ['POST'],
-      handle: async () => json(await ops.schedulerModeNormalize()),
+      handle: async () => json(await ops.scheduling.normalizeSchedulerMode()),
     },
     {
       /**
@@ -199,12 +199,12 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async (request) => {
         if (request.method === 'POST') {
           const body = await readBody(request)
-          return json(await ops.authCancel(typeof body.state === 'string' ? body.state : ''))
+          return json(await ops.oauth.cancel(typeof body.state === 'string' ? body.state : ''))
         }
         const url = new URL(request.url)
         const state = url.searchParams.get('state')
-        if (state !== null) return json(await ops.authStatus(state))
-        return json(await ops.authStart(url.searchParams.get('plugin') ?? ''))
+        if (state !== null) return json(await ops.oauth.status(state))
+        return json(await ops.oauth.start(url.searchParams.get('plugin') ?? ''))
       },
     },
     {
@@ -213,9 +213,9 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async (request) => {
         const url = new URL(request.url)
         const plugin = url.searchParams.get('plugin') ?? 'workbuddy'
-        if (request.method === 'GET') return json(await ops.priorityGet(plugin))
+        if (request.method === 'GET') return json(await ops.enable.getPriority(plugin))
         const body = await readBody(request)
-        return json(await ops.prioritySet(plugin, body.order))
+        return json(await ops.enable.setPriority(plugin, body.order))
       },
     },
     {
@@ -224,7 +224,7 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async (request) => {
         const body = await readBody(request)
         return json(
-          await ops.action(
+          await ops.actions.run(
             String(body.plugin ?? ''),
             String(body.kind ?? ''),
             typeof body.authIndex === 'string' ? body.authIndex : undefined,
@@ -244,7 +244,7 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async (request) => {
         const body = await readBody(request)
         return json(
-          await ops.accountEnabled(
+          await ops.enable.setEnabled(
             String(body.plugin ?? ''),
             body.authIndex,
             body.enabled === true,
@@ -262,7 +262,7 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       methods: ['POST'],
       handle: async (request) => {
         const body = await readBody(request)
-        return json(await ops.accountSelect(String(body.plugin ?? ''), body.authIndex))
+        return json(await ops.enable.select(String(body.plugin ?? ''), body.authIndex))
       },
     },
     {
@@ -275,7 +275,7 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       path: '/api/v1/cpa/account-intent',
       methods: ['GET', 'POST'],
       handle: async (request) => {
-        if (request.method === 'POST') return json(await ops.restoreAccountIntent())
+        if (request.method === 'POST') return json(await ops.enable.restoreIntent())
         const intent = readAccountIntent()
         return json({
           ok: true,
@@ -290,9 +290,9 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async (request) => {
         const url = new URL(request.url)
         const plugin = url.searchParams.get('plugin') ?? 'workbuddy'
-        if (request.method === 'GET') return json(await ops.autoCheckin(plugin, 'GET'))
+        if (request.method === 'GET') return json(await ops.scheduling.getAutoCheckin(plugin))
         const body = await readBody(request)
-        return json(await ops.autoCheckin(plugin, 'POST', body.enabled === true))
+        return json(await ops.scheduling.setAutoCheckin(plugin, body.enabled === true))
       },
     },
     {

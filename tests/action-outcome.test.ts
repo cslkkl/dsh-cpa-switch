@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { normalizeActionOutcome } from '../src/operations.ts'
+import { normalizeActionOutcome } from '../src/action-outcome.ts'
 
 describe('normalizeActionOutcome', () => {
   it('读 summary（有 summary 的渠道，如 trae）', () => {

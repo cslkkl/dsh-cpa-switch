@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CpaCache, ProbeCache } from '../src/cache.ts'
 import { CpaGateway } from '../src/gateway.ts'
-import { Operations } from '../src/operations.ts'
+import { createOperations, type Operations } from '../src/ops/index.ts'
 import type { CpaRuntime } from '../src/runtime.ts'
 
 describe('CpaCache', () => {
@@ -157,23 +157,24 @@ describe('CpaCache', () => {
 })
 
 /**
- * `Operations.invalidateChannel` 的契约：**一个渠道的每一个读 key 都要被清掉**。
+ * 读作废的**调用方一侧**：一个渠道的每一个读 key 都要被清掉。
  *
  * ⚠️ 这条是被一个真 bug 逼出来的：`autockin:workbuddy`（无尾冒号，形状与
  * `accounts:workbuddy:false` 不同）曾被漏掉，于是切换自动签到后开关一直显示
  * 旧值 —— 不报错，只是「看起来没生效」。
  *
- * ⚠️ 为什么这一条不能只写在 `CpaCache` 那一节里：那里断言的是「这两个前缀
- * 能清掉这些 key」，而真正的风险是**调用方只传了其中一个前缀**。
- * 前缀拼写是这里的真实契约，所以判据必须打在 `Operations` 上。
- *
- * ⚠️ 键与前缀的形状现在由 [gateway.ts](../src/gateway.ts) 的 `cacheKeys` 统一产出
+ * ⚠️ 键与前缀的形状由 [gateway.ts](../src/gateway.ts) 的 `cacheKeys` 统一产出
  * （`tests/gateway.test.ts` 守那一层）；**这一节守的是另一半**：
- * `Operations` 的读路径用的确实是同一批键 —— 两边各写各的，谁改了都会在这里红。
+ * 业务层的读路径（账号域 + 调度域）用的确实是那批键 ——
+ * 两边各写各的，谁改了都会在这里红。
  */
-describe('Operations 的读作废覆盖', () => {
-  /** 一个只用到缓存的假 `Operations`：这些用例只走缓存，不碰网络。 */
-  function makeOps(): { ops: Operations; cpaFetch: ReturnType<typeof vi.fn> } {
+describe('业务层读路径与作废覆盖', () => {
+  /** 一个只用到缓存的假业务层：这些用例只走缓存，不碰网络。 */
+  function makeOps(): {
+    ops: Operations
+    gateway: CpaGateway
+    cpaFetch: ReturnType<typeof vi.fn>
+  } {
     const cpaFetch = vi.fn(async (_options: unknown, path: string) => {
       if (path.endsWith('/accounts')) return { accounts: [], checkin_auto: false }
       if (path.endsWith('/routing/strategy')) return { strategy: 'fill-first' }
@@ -187,50 +188,50 @@ describe('Operations 的读作废覆盖', () => {
         ensure: async () => ({ running: true, owned: false }),
       } as unknown as CpaRuntime,
     })
-    const ops = new Operations({ gateway })
-    return { ops, cpaFetch }
+    const ops = createOperations({ gateway })
+    return { ops, gateway, cpaFetch }
   }
 
-  it('作废一个渠道会清掉它的 accounts 与 auto-checkin 两份读', async () => {
-    const { ops, cpaFetch } = makeOps()
+  it('作废一个渠道会清掉它的账号与自动签到两份读', async () => {
+    const { ops, gateway, cpaFetch } = makeOps()
 
-    await ops.accountsOf('workbuddy')
-    await ops.autoCheckin('workbuddy', 'GET')
+    await ops.accounts.list('workbuddy')
+    await ops.scheduling.getAutoCheckin('workbuddy')
     const afterRead = cpaFetch.mock.calls.length
     expect(afterRead).toBeGreaterThan(0)
 
-    ops.invalidateChannel('workbuddy')
+    gateway.invalidateChannel('workbuddy')
 
     // 两条**分别**再读一次，各自都必须真的重新打 CPA。
     // ⚠️ 之所以要分开断言：只断言「总调用数变多」的话，accounts 那条重新打了
     // 就会把数字顶上去，autockin 仍然命中缓存也看不出来 —— 那样这条判据就
     // 守不住它真正的目标。
     const beforeAccounts = cpaFetch.mock.calls.length
-    await ops.accountsOf('workbuddy')
+    await ops.accounts.list('workbuddy')
     expect(cpaFetch.mock.calls.length).toBeGreaterThan(beforeAccounts)
 
     const beforeAuto = cpaFetch.mock.calls.length
-    await ops.autoCheckin('workbuddy', 'GET')
+    await ops.scheduling.getAutoCheckin('workbuddy')
     expect(cpaFetch.mock.calls.length).toBeGreaterThan(beforeAuto)
   })
 
   it('作废一个渠道不影响另一个渠道', async () => {
-    const { ops, cpaFetch } = makeOps()
-    await ops.accountsOf('workbuddy')
-    ops.invalidateChannel('trae')
+    const { ops, gateway, cpaFetch } = makeOps()
+    await ops.accounts.list('workbuddy')
+    gateway.invalidateChannel('trae')
     const before = cpaFetch.mock.calls.length
-    await ops.accountsOf('workbuddy')
+    await ops.accounts.list('workbuddy')
     // 另一个渠道的作废不该把 workbuddy 的读也清掉
     expect(cpaFetch.mock.calls.length).toBe(before)
   })
 
   it('空串作废全部渠道', async () => {
-    const { ops, cpaFetch } = makeOps()
-    await ops.accountsOf('workbuddy')
-    await ops.accountsOf('trae')
-    ops.invalidateChannel('')
+    const { ops, gateway, cpaFetch } = makeOps()
+    await ops.accounts.list('workbuddy')
+    await ops.accounts.list('trae')
+    gateway.invalidateChannel('')
     const before = cpaFetch.mock.calls.length
-    await ops.accountsOf('workbuddy')
+    await ops.accounts.list('workbuddy')
     expect(cpaFetch.mock.calls.length).toBeGreaterThan(before)
   })
 })

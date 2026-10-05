@@ -15,7 +15,7 @@ import { ensureApiKey } from './credentials.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import type { PluginConfig } from './config.ts'
 import type { CpaRuntime } from './runtime.ts'
-import type { Operations } from './operations.ts'
+import type { Operations } from './ops/index.ts'
 import type { SyncResult } from './route-registry.ts'
 import { inspect } from './setup/index.ts'
 import type { SetupSession } from './setup/index.ts'
@@ -104,9 +104,9 @@ export async function runBoot(deps: BootDeps): Promise<void> {
      * 顺序有讲究：恢复要在补签之前 —— 补签是按渠道整体调的，与具体账号无关；
      * 但先恢复能让日志反映真实的调度面。
      */
-    const restored = await ops.restoreAccountIntent()
+    const restored = await ops.enable.restoreIntent()
     deps.logger?.info?.('cpa-panel: restore account intent %o', restored)
-    const result = await ops.runStartupCheckin({ enabled: readConfig().autoCheckinOnStart })
+    const result = await ops.actions.startupCheckin({ enabled: readConfig().autoCheckinOnStart })
     deps.logger?.info?.('cpa-panel: startup checkin %o', result)
     /**
      * CPA 就绪后立即注册路由 —— 新用户装完插件、CPA 首次跑起来，
