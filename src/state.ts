@@ -13,13 +13,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { homedir } from 'node:os'
 import type { CheckinLedger } from './checkin-ledger.ts'
-
-/** DSH 的状态目录。所有状态文件都落在这里，便于统一清理。 */
-function storagesDir(): string {
-  return join(homedir(), '.dsh', 'storages')
-}
+import { storagesDir } from './paths.ts'
 
 /** 本地日期串 `YYYY-MM-DD`。按本地时区算，不是 UTC —— 用户看到的「今天」。 */
 export function localDay(): string {

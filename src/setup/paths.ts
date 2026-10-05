@@ -6,8 +6,9 @@
  * 三者同层就不用在配置里写绝对路径。
  */
 
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+
+import { pluginRuntimeDir } from '../paths.ts'
 
 /**
  * 各平台的下载源。
@@ -46,14 +47,14 @@ export const SOURCES = {
 /** 下载源的两个类别。 */
 export type SourceKey = keyof typeof SOURCES
 
-/** 插件自带的运行时目录。下载物落这里，不污染用户主目录根。 */
-export function runtimeDir(): string {
-  return join(homedir(), '.dsh', 'cpa-panel', 'runtime')
-}
-
-/** 托管 CPA 的工作目录（exe / config.yaml / plugins 同层）。 */
+/**
+ * 托管 CPA 的工作目录（exe / `config.yaml` / `plugins` 同层）。
+ *
+ * 路径的**家目录解析**在 [`src/paths.ts`](../paths.ts) —— 那里认 `DSH_HOME`；
+ * 这里只负责插件自己的那一层布局。
+ */
 export function managedCpaDir(): string {
-  return join(runtimeDir(), 'cpa')
+  return join(pluginRuntimeDir(), 'cpa')
 }
 
 /** 解压出来的 CPA 可执行文件应在的位置。 */
