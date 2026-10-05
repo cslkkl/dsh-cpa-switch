@@ -9,6 +9,7 @@
 | `adapters.test.ts`       | `normalizeAccounts` 对四种返回结构的解析、能力表、单位区分；**显示名兜底链**（空串 / 渠道名 / auth_id）；**缺失额度字段是 `undefined` 不是 0**（trae）            |
 | `routes.test.ts`         | 路由归一化（同 path 合并 / 非法方法剔除）、逐条注册、单条失败不拖垮其余                                                                                           |
 | `state.test.ts`          | 账号意图的 `source` 校验与 `ignored` 剥离、exe 记忆、`localDay`                                                                                                   |
+| `paths.test.ts`          | **DSH 家目录解析**：未设 `DSH_HOME` 用 `~/.dsh`、设了就用它、**空白按未设置**（空值会把家目录变成当前目录）、派生目录跟着走                                       |
 | `cache.test.ts`          | 读缓存的 TTL / 并发合并 / 前缀失效 / 失败不留缓存；探活记忆与显式作废。**判据在行为上**                                                                           |
 | `read-cache.test.ts`     | 浏览器侧 `ReadCache` 的新鲜 / 陈旧两档、跨 key 隔离与按前缀作废；切渠道的按 key 认领；预取                                                                        |
 | `action-outcome.test.ts` | 写操作返回的**归一**：`summary` 缺失时从 `results` 累加、净增量累加、失败项带名字与原因                                                                           |

@@ -25,6 +25,7 @@
 | `src/adapters.ts`               | [架构说明](docs/ARCHITECTURE.md)、渠道能力表                                                                                                                                                                      |
 | `src/contracts/**`              | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红（[决策记录](.agents/notes/2026-10-05-contract-type-sharing.md)）                            |
 | `scripts/check-layering.cjs`    | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                               |
+| `src/ids.ts` / `src/paths.ts`   | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                           |
 | `src/checkin-ledger.ts`         | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；改动同步 [决策记录](.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                    |
 | `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                   |
 | `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构说明](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                      |
@@ -87,7 +88,7 @@ python check-line-endings.py <本仓根> --target lf
 - 产物清单与体积 → `Get-ChildItem lib` 现查
 - 路由表 → [src/index.ts](src/index.ts) 的 `buildRoutes()`（README 那张表是可读索引，代码是事实源）
 - 渠道能力与单位 → [src/adapters.ts](src/adapters.ts) 的 `PLUGIN_ADAPTERS`
-- 状态文件路径 → [src/state.ts](src/state.ts)
+- 状态文件与运行时目录 → [src/paths.ts](src/paths.ts)（**认 `DSH_HOME`**；别自己拼 `homedir()/.dsh`）
 - 产物该有什么 → `scripts/verify-artifacts.cjs` 的断言集合
 - 宿主槽名与 `kind`、客户端服务名 → 实装宿主包：
   `<DSH 安装目录>/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-*/**`
@@ -196,6 +197,9 @@ python check-line-endings.py <本仓根> --target lf
 - **两级读缓存都「坏了也不报错」** —— 合并失效只是慢、漏失效只是数字不对。
   新增改变 CPA 状态的写操作时，宿主侧调 `Operations.invalidateChannel()`、
   浏览器侧调 `invalidateReads()`；判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`。
+- **路径不许自己拼 `homedir()/.dsh`** —— 走 [src/paths.ts](src/paths.ts)。
+  `DSH_HOME` 覆盖被忽略时**零报错**：状态与 40MB 运行时会落到另一个目录，
+  用户看到的是「设置老是不生效」。
 - **`--dsw-alias-bg-layer-N` 只定义到 3** —— 宿主自己的 `fields.module.css` 引用了
   不存在的 layer-4，照抄那个引用会得到一条**静默失效**的背景色声明。
 
