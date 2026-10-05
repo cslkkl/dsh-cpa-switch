@@ -205,4 +205,13 @@ function main() {
   process.exitCode = 1
 }
 
-main()
+/**
+ * 直接跑才扫全仓；被 `require` 时只导出判据所需的纯函数。
+ *
+ * 为什么必须是这个形状：这个脚本自己出过两个**静默**的 bug（行号漂、把路径值里的
+ * `import` 当成依赖），修完就只剩一次临时探针。导出之后 `tests/layering-guard.test.ts`
+ * 能把它们钉住 —— 判据要能被判据测。
+ */
+if (require.main === module) main()
+
+module.exports = { RULES, main, specifiersOf, stripComments, valueStatementsIn, listSources }
