@@ -53,6 +53,11 @@ jobs:
       - name: Lint
         run: pnpm exec eslint .
 
+      # 分层依赖检查：浏览器引宿主、判据碰 IO、契约层混入值依赖都不报错，
+      # 只会静默烂掉 —— 所以放在门禁上，与 `pnpm check` 跑同一份脚本。
+      - name: Check layering
+        run: pnpm check:layering
+
       - name: Format check
         run: pnpm exec prettier --check "**/*.{ts,json,md,yml,yaml}"
 
