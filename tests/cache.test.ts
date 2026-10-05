@@ -8,8 +8,9 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { CpaCache, ProbeCache } from '../src/cache.ts'
+import { CpaGateway } from '../src/gateway.ts'
 import { Operations } from '../src/operations.ts'
-import type { CpaProcess } from '../src/process.ts'
+import type { CpaRuntime } from '../src/runtime.ts'
 
 describe('CpaCache', () => {
   it('同一个 key 在 TTL 内只取一次', async () => {
@@ -166,8 +167,9 @@ describe('CpaCache', () => {
  * 能清掉这些 key」，而真正的风险是**调用方只传了其中一个前缀**。
  * 前缀拼写是这里的真实契约，所以判据必须打在 `Operations` 上。
  *
- * 顺带守住的还有「新加一个读 key 却忘了加进作废列表」—— 那会让新字段永远
- * 显示写之前的值。
+ * ⚠️ 键与前缀的形状现在由 [gateway.ts](../src/gateway.ts) 的 `cacheKeys` 统一产出
+ * （`tests/gateway.test.ts` 守那一层）；**这一节守的是另一半**：
+ * `Operations` 的读路径用的确实是同一批键 —— 两边各写各的，谁改了都会在这里红。
  */
 describe('Operations 的读作废覆盖', () => {
   /** 一个只用到缓存的假 `Operations`：这些用例只走缓存，不碰网络。 */
@@ -177,25 +179,15 @@ describe('Operations 的读作废覆盖', () => {
       if (path.endsWith('/routing/strategy')) return { strategy: 'fill-first' }
       return {}
     })
-    const ops = new Operations({
-      options: () => ({ port: 8317, adminKey: 'k' }),
-      cpaFetch,
-      process: {
-        ensure: async () => ({ running: true, owned: false }),
-        isListening: async () => true,
-        invalidateProbe: () => {},
-        stopIfOwned: () => {},
-        owned: false,
-      } as unknown as CpaProcess,
-      processOptions: () => ({
-        port: 8317,
-        exePath: '',
-        manageLifecycle: false,
-        openControlPanel: false,
-        startTimeoutSeconds: 5,
-      }),
+    const gateway = new CpaGateway({
+      port: () => 8317,
       adminKey: () => 'k',
+      cpaFetch,
+      runtime: {
+        ensure: async () => ({ running: true, owned: false }),
+      } as unknown as CpaRuntime,
     })
+    const ops = new Operations({ gateway })
     return { ops, cpaFetch }
   }
 

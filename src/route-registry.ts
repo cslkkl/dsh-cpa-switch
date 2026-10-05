@@ -22,7 +22,8 @@
  * @module dsh-cpa-switch/route-registry
  */
 
-import type { CpaOptions, CpaRequestInit } from './cpa.ts'
+import type { CpaGateway } from './gateway.ts'
+import type { CpaRuntime } from './runtime.ts'
 import { ROUTE_PREFIXES, channelLabel, channelOrder } from './channels/registry.ts'
 import { buildAliasTable, type AliasTable } from './model-alias.ts'
 import { capsOf } from './model-caps.ts'
@@ -111,11 +112,10 @@ export interface SyncResult {
 
 /** 目录读取与凭据解析所需的依赖。 */
 export interface RouteRegistryDeps {
-  /** 每次调用现求值 —— 配置改了立刻生效。 */
-  readonly options: () => CpaOptions
-  readonly cpaFetch: (options: CpaOptions, path: string, init?: CpaRequestInit) => Promise<unknown>
-  readonly probePort: (port: number, timeoutMs?: number) => Promise<boolean>
-  readonly currentPort: () => number
+  /** 对 CPA 的唯一通道（连接参数现取、读缓存、失效都在里面）。 */
+  readonly gateway: CpaGateway
+  /** 「CPA 在不在跑」也走同一份探活记忆 —— 别自己 `probePort`。 */
+  readonly runtime: CpaRuntime
   /** 读回 CPA_API_KEY 的值（空串表示未备好，调用方回退管理密钥）。 */
   readonly resolveApiKey: () => Promise<string>
   readonly adminKey: () => string
@@ -133,7 +133,7 @@ async function channelModelsOf(deps: RouteRegistryDeps): Promise<Record<string, 
   const map: Record<string, string[]> = {}
   let files: AuthFileRef[]
   try {
-    const list = (await deps.cpaFetch(deps.options(), '/v0/management/auth-files')) as {
+    const list = (await deps.gateway.fetch('/v0/management/auth-files')) as {
       files?: unknown
     }
     files = Array.isArray(list?.files) ? (list.files as AuthFileRef[]) : []
@@ -145,8 +145,7 @@ async function channelModelsOf(deps: RouteRegistryDeps): Promise<Record<string, 
       const provider = String(file?.provider ?? '')
       if (provider === '') return
       try {
-        const data = (await deps.cpaFetch(
-          deps.options(),
+        const data = (await deps.gateway.fetch(
           `/v0/management/auth-files/models?name=${encodeURIComponent(String(file.name))}`,
           { timeoutMs: 60000 },
         )) as { models?: unknown }
@@ -269,7 +268,7 @@ async function buildCpaRouteProfile(
   return {
     displayName: 'CPA Switch',
     api: 'openai-completions',
-    baseURL: `http://127.0.0.1:${String(deps.currentPort())}/v1`,
+    baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
     apiKeyEnv: CPA_API_KEY_REF,
     models: rows.map((row) => {
       // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
@@ -301,7 +300,7 @@ export async function readStableCatalog(
   let previous = -1
   let delayMs = 250
   while (Date.now() < deadline) {
-    const fetched = (await deps.cpaFetch(deps.options(), '/v1/models', {
+    const fetched = (await deps.gateway.fetch('/v1/models', {
       headers: { authorization: `Bearer ${bearer}` },
       timeoutMs: 15000,
     })) as { data?: unknown[] }
@@ -364,7 +363,13 @@ export function attachRouteRegistry(
     /** CPA 不在跑或目录为空 → 撤下 models（骨架仍在，路由不消失）。 */
     let profile: RouteProfile | undefined
     try {
-      if (await deps.probePort(deps.currentPort())) {
+      /**
+       * ⚠️ 用 {@link CpaRuntime.status}（只读探活），**不是** `ensure()`：
+       * 这里只是在决定「要不要撤下清单」，不该因为一次设置写入就把 CPA 拉起来。
+       * 也别绕开它自己 `probePort` —— 那会另开一条探活路径，
+       * 与面板的 `/status` 给出**相反**的答案（曾踩）。
+       */
+      if ((await deps.runtime.status()).running) {
         const catalog = await readStableCatalog(deps)
         if (catalog !== undefined) profile = await buildCpaRouteProfile(catalog, deps)
       }

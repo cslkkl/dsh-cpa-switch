@@ -25,7 +25,9 @@ import { AdminKeyStore, resolveApiKey } from './credentials.ts'
 import { attachRouteRegistry } from './route-registry.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import { runBoot } from './boot.ts'
-import { CpaProcess, probePort } from './process.ts'
+import { CpaProcess } from './process.ts'
+import { CpaRuntime } from './runtime.ts'
+import { CpaGateway } from './gateway.ts'
 import { Operations } from './operations.ts'
 import { SetupSession } from './setup/index.ts'
 import { registerRoutes } from './routes.ts'
@@ -91,13 +93,6 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
 
   const cpaProcess = new CpaProcess()
 
-  /** 每次调用现求值 —— 配置改了立刻生效。 */
-  const options = () => ({
-    port: readConfig().port,
-    adminKey: adminKey.value,
-    timeoutMs: 20000,
-  })
-
   const processOptions = () => {
     const config = readConfig()
     return {
@@ -109,6 +104,22 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     }
   }
 
+  /** 「CPA 在不在跑」的唯一回答者：`status`（只读）与 `ensure`（可拉起）两个语义。 */
+  const runtime = new CpaRuntime({ process: cpaProcess, processOptions })
+
+  /**
+   * 对 CPA 的唯一通道：连接参数现取、前置判据、读缓存、失效都在里面。
+   *
+   * 装配层只交出「端口从哪来、密钥从哪来」两件事 —— `CpaOptions` 由通道自己拼，
+   * 于是没有任何调用点能拼错它。
+   */
+  const gateway = new CpaGateway({
+    port: () => readConfig().port,
+    adminKey: () => adminKey.value,
+    cpaFetch: (options, path, init) => cpaFetch(options, path, init),
+    runtime,
+  })
+
   /**
    * 路由注册表：**保证 CPA 路由可用的唯一入口**。
    *
@@ -116,21 +127,15 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
    * `app-boot/config-reload` 时自动重推 —— 机制与根因见 `route-registry.ts`。
    */
   const ensureRoutesFresh = attachRouteRegistry(ctx, {
-    options,
-    cpaFetch: (opts, path, init) => cpaFetch(opts, path, init),
-    probePort,
-    currentPort: () => readConfig().port,
+    gateway,
+    runtime,
     resolveApiKey: () => resolveApiKey({ credentials: ctx.credentials }),
     adminKey: () => adminKey.value,
     logger: ctx.logger,
   })
 
   const ops = new Operations({
-    options,
-    cpaFetch: (opts, path, init) => cpaFetch(opts, path, init),
-    process: cpaProcess,
-    processOptions,
-    adminKey: () => adminKey.value,
+    gateway,
     logger: ctx.logger,
     /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */
     onAccountsChanged: () => void ensureRoutesFresh('oauth').catch(() => {}),
@@ -152,8 +157,7 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     void runBoot({
       readConfig,
       credentials: ctx.credentials,
-      process: cpaProcess,
-      processOptions,
+      runtime,
       ops,
       setup,
       ensureRoutesFresh,
@@ -174,7 +178,7 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
         adminKey,
         readConfig,
         setup,
-        cpaProcess,
+        runtime,
       })
       return registerRoutes(routes, {
         register: (opts) => connectionCtx.connection.fetch.register(opts),

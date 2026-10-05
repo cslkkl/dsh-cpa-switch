@@ -13,12 +13,14 @@ import type { RouteRegistryDeps } from '../src/route-registry.ts'
  */
 function depsOf(models: () => number): RouteRegistryDeps {
   return {
-    options: () => ({}) as RouteRegistryDeps['options'] extends () => infer T ? T : never,
-    cpaFetch: async () => ({
-      data: Array.from({ length: models() }, (_, i) => ({ id: `m${i}` })),
-    }),
-    probePort: async () => true,
-    currentPort: () => 8317,
+    gateway: {
+      fetch: async () => ({
+        data: Array.from({ length: models() }, (_, i) => ({ id: `m${i}` })),
+      }),
+    } as unknown as RouteRegistryDeps['gateway'],
+    runtime: {
+      status: async () => ({ running: true, owned: false }),
+    } as unknown as RouteRegistryDeps['runtime'],
     resolveApiKey: async () => 'test-key',
     adminKey: () => 'admin',
   }

@@ -14,8 +14,7 @@
 import { ensureApiKey } from './credentials.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import type { PluginConfig } from './config.ts'
-import type { CpaProcess } from './process.ts'
-import { probePort } from './process.ts'
+import type { CpaRuntime } from './runtime.ts'
 import type { Operations } from './operations.ts'
 import type { SyncResult } from './route-registry.ts'
 import { inspect } from './setup/index.ts'
@@ -26,9 +25,8 @@ export interface BootDeps {
   /** 每次调用现求值 —— 配置改了立刻生效。 */
   readonly readConfig: () => PluginConfig
   readonly credentials: CredentialsService
-  readonly process: CpaProcess
-  /** 交给 `process.ensure()` 的启动参数。 */
-  readonly processOptions: () => Parameters<CpaProcess['ensure']>[0]
+  /** 「看」与「要」两个语义都在它身上 —— 这里两处都要用对。 */
+  readonly runtime: CpaRuntime
   readonly ops: Operations
   readonly setup: SetupSession
   /** 推模型路由（内部已兜错）。 */
@@ -40,7 +38,7 @@ export interface BootDeps {
 
 /** 跑一次启动流程。卸载后不再继续，也不抛（各步各自兜错）。 */
 export async function runBoot(deps: BootDeps): Promise<void> {
-  const { readConfig, process: cpaProcess, processOptions, ops, setup, ensureRoutesFresh } = deps
+  const { readConfig, runtime, ops, setup, ensureRoutesFresh } = deps
   const cancelled = (): boolean => deps.isCancelled()
 
   /**
@@ -69,9 +67,13 @@ export async function runBoot(deps: BootDeps): Promise<void> {
    *
    * `prepare()` 只补缺件、绝不覆盖已有 exe/dll，所以放它进来是安全的。
    * 补装自身的异常由 `SetupSession.autoInstall` 就地吞掉（见那里的说明）。
+   *
+   * 探活走 `runtime.status()`（只读，与面板共用同一份记忆）：万一记忆把「在跑」
+   * 看成「没跑」，多补一次也只是补齐缺件、不覆盖任何东西；反过来漏装的场景由
+   * 下面的 `exe-not-found` 兜底接住。所以这里不需要另开一条「新鲜探活」路径。
    */
   const preflight = readConfig()
-  const portBusy = await probePort(preflight.port)
+  const portBusy = (await runtime.status()).running
   const missing = inspect({ port: preflight.port }).missing
   if (!portBusy && preflight.manageLifecycle && missing.length > 0) {
     deps.logger?.info?.('cpa-panel: environment incomplete (%o), preparing before start', missing)
@@ -79,7 +81,7 @@ export async function runBoot(deps: BootDeps): Promise<void> {
     if (cancelled()) return
   }
 
-  let state = await cpaProcess.ensure(processOptions())
+  let state = await runtime.ensure()
   if (cancelled()) return
 
   /**
@@ -90,7 +92,7 @@ export async function runBoot(deps: BootDeps): Promise<void> {
    */
   if (!state.running && state.reason === 'exe-not-found') {
     const installed = await setup.autoInstall()
-    if (installed) state = await cpaProcess.ensure(processOptions())
+    if (installed) state = await runtime.ensure()
     if (cancelled()) return
   }
 
