@@ -157,9 +157,15 @@
 ## 模型路由
 
 - **`route-registry.ts`** —— **保证 CPA 路由可用的唯一入口**。
-  - 导出：`attachRouteRegistry` / `readAliasTable` / `readStableCatalog` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `SyncResult`
+  - 导出：`attachRouteRegistry` / `readStableCatalog` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `SyncResult`
   - 一条链：**查 CPA 目录 → 算别名 → 补写配置 → 推 models**
   - 骨架在 `cordis.patch.yml`（随包发布），清单走 volatile —— **两层缺一不可**
+  - **重载前后可见状态必须连续**：收到 `app-boot/config-reload` 先用**零 CPA 读**推回上一份成功清单
+    （此刻基线只有骨架、没有 models，选择器会退化成显示 `provider/model` 并**停用 composer**），
+    再读目录核对；读失败或读不全回推上一份，**无历史则保持空**；
+    渠道读不全**不推清单也不写别名段**（别名段整段替换，半截等于删别名），
+    别名与清单**共用同一次渠道读**。判据在 `tests/route-registry.test.ts`，
+    见[决策记录](../.agents/notes/2026-10-05-route-reload-blank-window.md)
   - 同名模型按渠道拆行：每渠道一项，id 用该渠道别名、展示名仍是「渠道 · 模型名」
   - 目录稳定检测用**指数退避**（250ms 起、翻倍、4s 封顶），不许固定间隔 ——
     冷启动等凭据分批加载，已稳定场景两次快读即收敛；
