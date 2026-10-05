@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { attachRouteRegistry, readStableCatalog } from '../src/route-registry.ts'
-import type { RouteRegistryDeps, RouteRegistryHost } from '../src/route-registry.ts'
+import type { Clock, RouteRegistryDeps, RouteRegistryHost } from '../src/route-registry.ts'
 
 /**
  * `readStableCatalog` 的间隔策略是**行为契约**，不是实现细节：
@@ -13,7 +13,9 @@ import type { RouteRegistryDeps, RouteRegistryHost } from '../src/route-registry
  * 用户看到「切个语言，模型要两三秒才回来」（2026-10-04 实测，issue #9）。
  * 退避策略让已稳定的读取两次快读即收敛，冷启动仍能等到目录齐。
  *
- * 用 fake timers：既不拖慢套件，也测得到「真的等了」这个行为。
+ * 用**注入的假时钟**，不用全局假定时器：交付的 `clock` 立刻返回、只把「等了多久」
+ * 记下来 —— 于是「间隔序列」与「等到上限就收场」都在毫秒内断言完，且不牵动进程里
+ * 别的计时器（整条 attach/refresh 路径套全局假定时器会卡住，实测超时）。
  */
 function depsOf(models: () => number): RouteRegistryDeps {
   return {
@@ -30,75 +32,79 @@ function depsOf(models: () => number): RouteRegistryDeps {
   }
 }
 
-/** 推进 fake 时钟直到 promise 落定；落不了定（次数用尽）就失败。 */
-async function settle<T>(promise: Promise<T>, totalMs: number): Promise<T> {
-  let value: T | undefined
-  let done = false
-  void promise.then(
-    (resolved) => {
-      done = true
-      value = resolved
+/**
+ * 假时钟：每次 `sleep` 立刻返回，并把这次等了多久记进 `sleeps`、
+ * 把「现在」往前推同样的量 —— 所以代码里的 deadline 判断照样成立。
+ */
+function fakeClock(): { clock: Clock; sleeps: number[]; total: () => number } {
+  const sleeps: number[] = []
+  let now = 0
+  return {
+    clock: {
+      now: () => now,
+      sleep: (ms: number) => {
+        sleeps.push(ms)
+        now += ms
+        return Promise.resolve()
+      },
     },
-    (error: unknown) => {
-      done = true
-      value = error as T
-    },
-  )
-  let advanced = 0
-  while (!done && advanced < totalMs) {
-    await vi.advanceTimersByTimeAsync(250)
-    advanced += 250
+    sleeps,
+    total: () => now,
   }
-  if (!done) throw new Error('readStableCatalog did not settle within the driven window')
-  return value as T
+}
+
+/** 带上假时钟的 deps（外加离手记录，省得每个用例都写一遍）。 */
+function withClock(models: () => number): {
+  deps: RouteRegistryDeps
+  clock: Clock
+  sleeps: number[]
+  total: () => number
+} {
+  const fake = fakeClock()
+  return { ...fake, deps: { ...depsOf(models), clock: fake.clock } }
 }
 
 describe('readStableCatalog', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
   it('目录已稳定时两次快读即收敛，不按固定间隔傻等', async () => {
-    const promise = readStableCatalog(depsOf(() => 5))
-    const result = (await settle(promise, 2000)) as { data?: unknown[] }
+    const { deps, sleeps } = withClock(() => 5)
+    const result = (await readStableCatalog(deps)) as { data?: unknown[] }
+
     expect(result.data).toHaveLength(5)
+    expect(sleeps).toEqual([250]) // 只等了第一次退避的最小档
   })
 
   it('收敛发生在 1 秒内（固定 4s 间隔做不到）', async () => {
-    let settled = false
-    const promise = readStableCatalog(depsOf(() => 5)).then((value) => {
-      settled = true
-      return value
-    })
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(settled).toBe(true)
-    void promise
+    const { deps, total } = withClock(() => 5)
+    const result = (await readStableCatalog(deps)) as { data?: unknown[] }
+
+    expect(result.data).toHaveLength(5)
+    expect(total()).toBeLessThanOrEqual(1000)
   })
 
   it('计数为 0 不采信（空目录继续等），直到计数稳定', async () => {
-    let count = 0
-    const promise = readStableCatalog(depsOf(() => count))
-    const driver = (async () => {
-      await vi.advanceTimersByTimeAsync(1000)
-      count = 3 // 目录「加载完成」
-    })()
-    const result = (await settle(promise, 10000)) as { data?: unknown[] }
-    await driver
+    const { deps, clock } = withClock(() => 0)
+    // 目录「加载完成」发生在等了 1 秒之后
+    ;(deps.gateway as unknown as { fetch: () => Promise<unknown> }).fetch = async () => {
+      const count = clock.now() >= 1000 ? 3 : 0
+      return { data: Array.from({ length: count }, (_, i) => ({ id: `m${i}` })) }
+    }
+
+    const result = (await readStableCatalog(deps)) as { data?: unknown[] }
+
     expect(result.data).toHaveLength(3)
   })
 
   it('到 deadline 仍拿不到目录则返回 undefined（调用方撤下路由）', async () => {
-    const promise = readStableCatalog(depsOf(() => 0))
-    const result = await settle(promise, 130_000)
+    const { deps, total } = withClock(() => 0)
+    const result = await readStableCatalog(deps)
+
     expect(result).toBeUndefined()
+    expect(total()).toBeGreaterThanOrEqual(120_000) // 等满了预算才放弃
   })
 
   /**
    * 「等多久」是可断言的**行为**：量的是**读出时刻的差**，不是内部调了几次
-   * `setTimeout` —— 换实现（时钟注入等）也不该改这些数。
+   * `sleep` —— 换实现（时钟注入等）也不该改这些数。
    *
    * 为什么值得钉：只断言「1 秒内收敛」挡不住「固定 250ms 间隔」这种退化 ——
    * 那会让冷启动每轮都白读一次，正是这条退避策略要避免的。
@@ -107,14 +113,14 @@ describe('readStableCatalog', () => {
     const at: number[] = []
     // 逐轮「多一个模型」：第 9 轮才连续两次一致（＝稳定）
     const counts = [1, 2, 3, 4, 5, 6, 7, 8, 8]
-    const deps = depsOf(() => 0)
+    const { deps, clock } = withClock(() => 0)
     ;(deps.gateway as unknown as { fetch: () => Promise<unknown> }).fetch = async () => {
-      at.push(Date.now())
+      at.push(clock.now())
       const count = counts[at.length - 1] ?? 8
       return { data: Array.from({ length: count }, (_, i) => ({ id: `m${i}` })) }
     }
 
-    const result = (await settle(readStableCatalog(deps), 60_000)) as { data?: unknown[] }
+    const result = (await readStableCatalog(deps)) as { data?: unknown[] }
 
     expect(result.data).toHaveLength(8)
     expect(at.slice(1).map((ms, i) => ms - (at[i] ?? 0))).toEqual([
@@ -407,10 +413,11 @@ describe('重载空窗', () => {
 
   /**
    * `loader` 是**异步**解析的：`inject` 返回时 loader 可能还没挂上（宿主重建那一瞬
-   * 就常是这样），所以推送路径会等它 —— 但必须有上限，否则一次依赖丢失就把推送挂死。
+   * 就常是这样），所以推送路径会等它 —— 但**必须有上限**，否则一次依赖丢失
+   * 就把推送挂死：用户看到的是「设置写完，模型再也没回来」。
    *
-   * 这一条钉「等到了就推」（真计时器，几十毫秒）；**「不无限等」等时钟可注入之后
-   * 再钉** —— 现在只能拿真时间跑满 10 秒，那种用例既慢又不稳。
+   * 两条一起钉：等到了就推（`tick` + 真计时器，几十毫秒）、等不到就到点收场
+   * （注入时钟，毫秒内跑完 10 秒的逻辑）。
    */
   describe('loader 还没解析出来时', () => {
     /** 假宿主：loader 由测试决定何时交出去；日志按 printf 渲染后留下。 */
@@ -470,6 +477,22 @@ describe('重载空窗', () => {
       late.deliver() // loader 挂上了
       expect(await boot).toMatchObject({ ok: true })
       expect(pushed).toHaveLength(1)
+    })
+
+    it('loader 始终不来：等到上限就收场，不无限等', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+      const late = lateLoaderHost(entry)
+      const fake = fakeClock()
+      const refresh = attachRouteRegistry(late.host, { ...depsFor(cpa), clock: fake.clock })
+
+      // loader 从头到尾不来 —— 推送路径只许等到上限，然后**明确**说清是哪一环缺了
+      const result = await refresh('boot')
+
+      expect(result).toMatchObject({ ok: false, reason: 'loader-unavailable' })
+      expect(pushed).toHaveLength(0)
+      expect(fake.total()).toBeGreaterThanOrEqual(10_000) // 等满了 10 秒的预算
+      expect(fake.total()).toBeLessThan(11_000) // 也没有超出预算乱等
     })
   })
 })
