@@ -76,7 +76,6 @@ python check-line-endings.py <本仓根> --target lf
 | 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)）  |
 | 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                   |
 | 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                   |
-| 边界重构做到哪了             | [docs/REFACTOR.md](docs/REFACTOR.md)                           |
 | 宿主半端各模块               | [src/README.md](src/README.md)                                 |
 | 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                   |
 | 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                     |
@@ -121,9 +120,6 @@ python check-line-endings.py <本仓根> --target lf
 > **两份都要活跃**：做完的**立即删**（历史去 `git log` / 决策记录，不留 `[x]` 充数）；
 > 变模糊的要么补清背景、要么降级到 PLAN.md 的研究方向；新想法**先入 PLAN.md §2.6**，
 > 别直接塞这里 —— 待办混入未立项的想法就不再是「照做即可」的清单了。
-
-- [ ] **边界重构（进行中）** —— 批次、验收与停止点见 [docs/REFACTOR.md](docs/REFACTOR.md)，
-      进度以那份文件的进度表为准。**不要另起炉灶**：每批开工前先读它的 §4 纪律。
 
 - [ ] **发布 0.3.0（卡权限：需 npm 所有者 `cslkkl` 操作）**
 
@@ -245,7 +241,10 @@ python check-line-endings.py <本仓根> --target lf
 - **`.gitignore` 只对未追踪的文件生效** —— 加了忽略规则还要 `git rm -r --cached`
   才真的生效；验收走 `gh api`，⚠️ **别用 PowerShell 查中文路径**（引用与编码不一致
   会让 `git ls-tree` / `cat-file` 给出自相矛盾的结果）。
-- **PR 正文与评论里的链接要写绝对 URL，且 ref 用 `main`** —— 相对路径会被 GitHub 解析到
-  `.../compare/<path>` 这个空视图；写功能分支名则更糟：分支合并后会被删，链接**永久 404**
-  （**仓库内的文档**照旧用相对路径）。判据与背景见
-  [边界重构方案](docs/REFACTOR.md) 的 PR 纪律。
+- **PR 的正文与评论：链接写绝对 URL、ref 用 `main`、文本走文件** —— 相对路径会被 GitHub
+  解析到 `.../compare/<path>` 这个空视图；写功能分支名则更糟：分支合并后会被删，
+  链接**永久 404**；正文**内联**进命令行会被 PowerShell 吃掉反引号（**仓库内的文档**照旧用
+  相对路径）。另两条同样属于「事后才发现」：**打标签前先 `gh label list`**、
+  ⚠️ **rebase merge 会重写 sha** —— 逐提交评论里的 sha 合并后就成了孤儿，要按 subject
+  对回 `main` 的新 sha 并 PATCH 评论。
+  纪律全文与三次实踩见[决策记录](.agents/notes/2026-10-05-pr-discipline.md)。
