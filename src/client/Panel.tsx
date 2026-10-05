@@ -7,7 +7,8 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import { api, prefetch } from './api.ts'
+import { fetchSetup, fetchStatus, paths, runSetup, startCpa } from './endpoints.ts'
+import { prefetch } from './read-cache.ts'
 import { PluginPanel, progressLine } from './PluginPanel.tsx'
 import type { PluginMeta } from './PluginPanel.tsx'
 import { RoutingSection } from './RoutingSection.tsx'
@@ -55,7 +56,7 @@ export function Panel(props: PanelProps): ReactNode {
   const [setup, setSetup] = useState<SetupState>(null)
 
   const refreshSetup = useCallback(async (): Promise<void> => {
-    const result = await api('/api/v1/cpa/setup')
+    const result = await fetchSetup()
     if (result.ok) setSetup(result as SetupState)
   }, [])
 
@@ -73,7 +74,7 @@ export function Panel(props: PanelProps): ReactNode {
     if (setup?.phase !== 'working') return undefined
     const timer = setInterval(() => {
       void (async () => {
-        const result = await api('/api/v1/cpa/setup')
+        const result = await fetchSetup()
         if (!result.ok) return
         /**
          * 宿主 `running` 还是 true 就保持 `working`（并把最新进度带上），
@@ -88,9 +89,9 @@ export function Panel(props: PanelProps): ReactNode {
   }, [setup?.phase])
 
   /** 一键准备环境：下载 + 校验 + 解压 + 写配置。 */
-  const runSetup = useCallback(async (): Promise<void> => {
+  const prepare = useCallback(async (): Promise<void> => {
     setSetup({ phase: 'working' })
-    const result = await api('/api/v1/cpa/setup', { method: 'POST' })
+    const result = await runSetup()
     if (result.ok) {
       const statePart = (result.state ?? {}) as Record<string, unknown>
       setSetup({ ...statePart, ok: true })
@@ -107,7 +108,7 @@ export function Panel(props: PanelProps): ReactNode {
    */
   const pluginsResource = useAsyncResource<readonly PluginMeta[]>({
     key: 'plugins',
-    path: '/api/v1/cpa/plugins',
+    path: paths.plugins,
     select: (result) => {
       const list = result.plugins
       return Array.isArray(list) ? (list as PluginMeta[]) : []
@@ -126,7 +127,7 @@ export function Panel(props: PanelProps): ReactNode {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const statusResponse = await api('/api/v1/cpa/status')
+      const statusResponse = await fetchStatus()
       if (!cancelled) setStatus(statusResponse as StatusInfo)
     })()
     void refreshSetup()
@@ -151,10 +152,7 @@ export function Panel(props: PanelProps): ReactNode {
     const list = pluginsResource.data
     if (list === undefined) return
     for (const channel of list) {
-      prefetch(
-        'accounts:' + channel.id,
-        '/api/v1/cpa/accounts?plugin=' + encodeURIComponent(channel.id),
-      )
+      prefetch('accounts:' + channel.id, paths.accounts(channel.id))
     }
   }, [pluginsResource.data])
 
@@ -172,7 +170,7 @@ export function Panel(props: PanelProps): ReactNode {
   }, [pluginsResource.data, active])
 
   const start = async (): Promise<void> => {
-    const result = await api('/api/v1/cpa/start', { method: 'POST' })
+    const result = await startCpa()
     setStatus((prev) => ({ ...(prev ?? {}), running: result.ok }))
   }
 
@@ -276,7 +274,7 @@ export function Panel(props: PanelProps): ReactNode {
           )}
           {setup.phase !== 'working' && setup.phase !== 'error' && (
             <div className={css.setupActions}>
-              <Button variant="primary" size="sm" onClick={() => void runSetup()}>
+              <Button variant="primary" size="sm" onClick={() => void prepare()}>
                 {t('setupRun')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => void refreshSetup()}>

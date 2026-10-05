@@ -11,7 +11,7 @@
  * 这里不打网络：`buildRoutes` 只组装 handler，不执行它们。
  */
 
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import type { PluginConfig } from '../src/config.ts'
@@ -132,5 +132,50 @@ describe('README 的路由索引与代码一致', () => {
     for (const route of routes) {
       expect(table.get(route.path)).toEqual([...route.methods])
     }
+  })
+})
+
+/**
+ * 浏览器半边那份**路径副本**与宿主路由表的一致性。
+ *
+ * 为什么需要：`src/client/endpoints.ts` 的 `paths` 是浏览器半边的路由副本，
+ * 抄错一个字符就是一次**静默 404** —— 界面某块永远是空的，而唯一的信号是
+ * 控制台里一条 404，没人会为「这块怎么没数据」去翻控制台。
+ *
+ * 两条判据：
+ * 1. `paths` 里的每一项（去掉查询串）都是宿主**确实注册过**的 path；
+ * 2. 单引号字面量形式的 `/api/v1/cpa/...` **只许出现在 `endpoints.ts`** ——
+ *    别处再抄一遍就没人保证它与宿主一致了。
+ */
+describe('浏览器半边的路径副本', () => {
+  const clientDir = new URL('../src/client/', import.meta.url)
+  const registered = new Set(routes.map((route) => route.path))
+
+  /** 单引号字面量里的路径；注释里的反引号写法天然不匹配。 */
+  const LITERAL = /'(\/api\/v1\/cpa\/[^']*)'/gu
+
+  const literalsIn = (source: string): string[] =>
+    [...source.matchAll(LITERAL)].map((match) => (match[1] ?? '').split('?')[0] ?? '')
+
+  it('endpoints.ts 里的每个路径都是宿主注册过的', () => {
+    const source = readFileSync(new URL('endpoints.ts', clientDir), 'utf8')
+    const found = literalsIn(source)
+
+    // 前提断言：一条都没抓到说明正则或文件形状变了，不能让下面的循环空转
+    expect(found.length).toBeGreaterThan(5)
+    for (const path of found) {
+      expect(registered.has(path), `${path} 不在宿主路由表里`).toBe(true)
+    }
+  })
+
+  it('除 endpoints.ts 之外没有第二处路径副本', () => {
+    const offenders: string[] = []
+    for (const entry of readdirSync(clientDir, { withFileTypes: true })) {
+      if (!entry.isFile() || entry.name === 'endpoints.ts') continue
+      if (!/\.tsx?$/u.test(entry.name)) continue
+      const found = literalsIn(readFileSync(new URL(entry.name, clientDir), 'utf8'))
+      if (found.length > 0) offenders.push(`${entry.name}: ${found.join(', ')}`)
+    }
+    expect(offenders).toEqual([])
   })
 })

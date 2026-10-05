@@ -18,6 +18,7 @@
 
 import type { ReactNode } from 'react'
 import { IconWarningOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { paths } from './endpoints.ts'
 import { strategyTextOf, strategyWarns } from './routing-text.ts'
 import { useAsyncResource } from './use-async-resource.ts'
 import type { Translate } from './locales.ts'
@@ -41,7 +42,7 @@ export function RoutingSection(props: RoutingSectionProps): ReactNode {
    */
   const strategy = useAsyncResource<string>({
     key: 'routing',
-    path: '/api/v1/cpa/routing',
+    path: paths.routing,
     select: (result) => (result.strategy === undefined ? '' : String(result.strategy)),
   })
 

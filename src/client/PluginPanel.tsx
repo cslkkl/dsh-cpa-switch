@@ -7,15 +7,9 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
-import {
-  act,
-  authCancel,
-  authStatus,
-  fmt,
-  invalidateReads,
-  setAutoCheckin,
-  startAuth,
-} from './api.ts'
+import { act, authCancel, authStatus, paths, setAutoCheckin, startAuth } from './endpoints.ts'
+import { fmt } from './format.ts'
+import { invalidateReads } from './read-cache.ts'
 import { AccountCard } from './AccountCard.tsx'
 import type { ActionOutcome, Capabilities, NormalizedAccount } from '../contracts/domain.ts'
 import { amountWithUnit } from './meter-text.ts'
@@ -204,7 +198,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
    */
   const accountsResource = useAsyncResource<AccountsPayload>({
     key: 'accounts:' + plugin,
-    path: '/api/v1/cpa/accounts?plugin=' + encodeURIComponent(plugin),
+    path: paths.accounts(plugin),
     select: (result) => {
       const data = result.data as { accounts?: unknown; autoCheckin?: unknown } | undefined
       if (data === undefined || typeof data !== 'object') return undefined
