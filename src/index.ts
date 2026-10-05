@@ -21,14 +21,15 @@ import { cpaFetch, json } from './cpa.ts'
 import { Config, makeReadConfig } from './config.ts'
 import type { ConfigRefs, PluginConfig } from './config.ts'
 import { PLUGIN_ID } from './ids.ts'
-import { AdminKeyStore, ensureApiKey, resolveApiKey } from './credentials.ts'
+import { AdminKeyStore, resolveApiKey } from './credentials.ts'
 import { attachRouteRegistry } from './route-registry.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
+import { runBoot } from './boot.ts'
 import { CpaProcess, probePort } from './process.ts'
 import { Operations } from './operations.ts'
 import type { RouteSpec } from './routes.ts'
 import { CHANNEL_IDS, CHANNELS } from './channels/registry.ts'
-import { SetupSession, inspect as inspectSetup } from './setup/index.ts'
+import { SetupSession } from './setup/index.ts'
 import { readAccountIntent } from './state.ts'
 import { registerRoutes } from './routes.ts'
 
@@ -148,90 +149,18 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
   // ── 生命周期 effect ────────────────────────────────────────────────────
   ctx.effect(() => {
     let stopped = false
-
-    const boot = async (): Promise<void> => {
-      /**
-       * 第一件事：备好模型路由要用的调用密钥。
-       *
-       * **不放在下面的条件分支里** —— 它和「CPA 在不在跑」「生命周期开没开」
-       * 都无关：模型路由是随包声明的，`llm-pi-ai` 一旦被调用就要解析这条凭据。
-       * 漏了它，用户看到的是「模型列表里有、一发就报 MISSING_CREDENTIAL」。
-       */
-      const apiKeyState = await ensureApiKey(ctx)
-      ctx.logger?.info?.('cpa-panel: CPA_API_KEY %s', apiKeyState)
-      if (stopped) return
-
-      /**
-       * **先补环境，再启动** —— 顺序不能反。
-       *
-       * `ensure()` 只要 exe 存在就会把 CPA 拉起来，而**没有配置的 CPA 照样会
-       * 监听端口**：`waitForPort` 一旦成功，`state.running` 就为真，「环境不全」
-       * 这个事实随即被掩盖，配置再也补不回来 —— 表现为管理接口 401/404、
-       * 面板全空，而日志里只有一句「CPA unavailable」甚至什么都没有。
-       *
-       * 三个前提同时满足才补装（少一个都不动手）：
-       * - 端口空闲（已有 CPA 在跑就复用，绝不打扰）；
-       * - 生命周期没被用户关掉（关了就是显式不要这个能力，动手属越权）；
-       * - 缺件清单非空（`exe` / `plugins` / `config` 任一缺失）。
-       *
-       * `prepare()` 只补缺件、绝不覆盖已有 exe/dll，所以放它进来是安全的。
-       */
-      const preflight = readConfig()
-      const portBusy = await probePort(preflight.port)
-      const missing = inspectSetup({ port: preflight.port }).missing
-      if (!portBusy && preflight.manageLifecycle && missing.length > 0) {
-        ctx.logger?.info?.(
-          'cpa-panel: environment incomplete (%o), preparing before start',
-          missing,
-        )
-        /**
-         * 补装在这里**就地吞异常**（见 `SetupSession.autoInstall`）：下载环节的网络抖动
-         * 放任冒出去会**拖死整个 DSH 宿主**（fatal load failure），补装失败只该意味着
-         * 「这次没装上、面板提示重试」。
-         */
-        await setup.autoInstall()
-        if (stopped) return
-      }
-
-      let state = await cpaProcess.ensure(processOptions())
-      if (stopped) return
-
-      /**
-       * 补装之后仍然缺 exe（下载失败、或首次就跑到了这里）→ 再试一次。
-       *
-       * 保留这条兜底是因为 `prepare()` 可能部分失败：渠道插件装上了、exe 没装上。
-       * 此时上面的 preflight 已经放过，得靠这里再兜一次。
-       */
-      if (!state.running && state.reason === 'exe-not-found') {
-        /** 同上：兜底补装的网络异常也必须就地吞掉（`autoInstall` 内部已吞）。 */
-        const installed = await setup.autoInstall()
-        if (installed) state = await cpaProcess.ensure(processOptions())
-        if (stopped) return
-      }
-
-      if (stopped) return
-      if (state.running) {
-        /**
-         * 先恢复「用户上次的选择」，再补签。
-         *
-         * 顺序有讲究：恢复要在补签之前 —— 补签是按渠道整体调的，与具体账号无关；
-         * 但先恢复能让日志反映真实的调度面。
-         */
-        const restored = await ops.restoreAccountIntent()
-        ctx.logger?.info?.('cpa-panel: restore account intent %o', restored)
-        const result = await ops.runStartupCheckin({ enabled: readConfig().autoCheckinOnStart })
-        ctx.logger?.info?.('cpa-panel: startup checkin %o', result)
-        /**
-         * CPA 就绪后立即注册路由 —— 新用户装完插件、CPA 首次跑起来，
-         * 模型就能出现在选择器里。内部已兜错，失败不影响生命周期。
-         */
-        await ensureRoutesFresh('boot')
-      } else {
-        ctx.logger?.warn?.('cpa-panel: CPA unavailable at startup (%s)', state.reason ?? 'unknown')
-      }
-    }
-
-    void boot()
+    /** 启动流程整体在 boot.ts —— 装配层只负责把它挂上、并在卸载时收尾。 */
+    void runBoot({
+      readConfig,
+      credentials: ctx.credentials,
+      process: cpaProcess,
+      processOptions,
+      ops,
+      setup,
+      ensureRoutesFresh,
+      logger: ctx.logger,
+      isCancelled: () => stopped,
+    })
     return () => {
       stopped = true
       cpaProcess.stopIfOwned()
