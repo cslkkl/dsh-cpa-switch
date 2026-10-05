@@ -75,6 +75,64 @@ export function amountWithUnit(value: number | null, unit: string, formatted: st
   return unit === '' ? formatted : formatted + ' ' + unit
 }
 
+/** 一个账号在合计里的贡献面（`NormalizedAccount` 的子集）。 */
+export interface TotalInput {
+  readonly credits: {
+    readonly remain?: number | undefined
+    readonly used?: number | undefined
+    readonly size?: number | undefined
+  } | null
+}
+
+/** 三个合计 + 各自**真有数**的账号个数。 */
+export interface CreditsTotal {
+  readonly remain: number
+  readonly remainCount: number
+  readonly used: number
+  readonly usedCount: number
+  readonly size: number
+  readonly sizeCount: number
+}
+
+/**
+ * 汇总三个数：剩余 / 已用 / 额度池。
+ *
+ * ⚠️ **缺的字段不参与累加** —— 上游不给就是 `undefined`，不是 0。
+ * 把 `undefined` 当 0 加进去，合计会变成一个偏小的假数（trae 完全没有 `used`，
+ * 加进去等于说「它用了 0」）。所以每格各配一个 `xxxCount`：为 0 时界面填 `—`，
+ * **不填 0**（`PluginPanel` 与 `AccountCard` 都按这个判据渲染）。
+ *
+ * ⚠️ 判据是 `typeof === 'number' && Number.isFinite`，与 `meterDecision` 的
+ * `hasUsed` 同一把尺子 —— 两处各写一遍迟早会漂。
+ *
+ * @param accounts - 账号列表；`credits` 为 `null` 的（取不到余额）整条跳过。
+ */
+export function sumCredits(accounts: readonly TotalInput[]): CreditsTotal {
+  let remain = 0
+  let remainCount = 0
+  let used = 0
+  let usedCount = 0
+  let size = 0
+  let sizeCount = 0
+
+  for (const account of accounts) {
+    const c = account.credits
+    if (c === null) continue
+    remain += Number(c.remain ?? 0)
+    remainCount += 1
+    if (typeof c.used === 'number' && Number.isFinite(c.used)) {
+      used += c.used
+      usedCount += 1
+    }
+    if (typeof c.size === 'number' && Number.isFinite(c.size)) {
+      size += c.size
+      sizeCount += 1
+    }
+  }
+
+  return { remain, remainCount, used, usedCount, size, sizeCount }
+}
+
 /**
  * 决定余额区怎么画。
  *

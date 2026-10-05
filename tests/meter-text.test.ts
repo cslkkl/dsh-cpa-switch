@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { amountWithUnit, meterDecision } from '../src/client/meter-text.ts'
+import { amountWithUnit, meterDecision, sumCredits } from '../src/client/meter-text.ts'
 
 describe('meterDecision', () => {
   it('有分母也有已用 → 画条，按占比给宽度，已用可显示', () => {
@@ -128,5 +128,82 @@ describe('amountWithUnit', () => {
     expect(amountWithUnit(1.5, '积分', '1.5')).toBe('1.5 积分')
     // 部分上游用 -1 表示无限 —— 不是 0，所以带单位
     expect(amountWithUnit(-1, '积分', '-1')).toBe('-1 积分')
+  })
+})
+
+/**
+ * 合计（渠道面板顶部那三格）。
+ *
+ * ⚠️ 这条判据原本埋在 `PluginPanel.tsx` 的渲染体里，**一行测试都没有** ——
+ * 而那正是「trae 的合计会不会多出一个假的已用」这个问题的所在地。
+ * 现在它是纯函数（`sumCredits`），判据打在这里。
+ */
+describe('sumCredits', () => {
+  it('三个数各加各的，并记下**真有数**的账号个数', () => {
+    const total = sumCredits([
+      { credits: { remain: 100, used: 10, size: 200 } },
+      { credits: { remain: 50, used: 5, size: 100 } },
+    ])
+    expect(total).toEqual({
+      remain: 150,
+      remainCount: 2,
+      used: 15,
+      usedCount: 2,
+      size: 300,
+      sizeCount: 2,
+    })
+  })
+
+  /**
+   * ⚠️ trae 的真实形状：只有 `remain`。
+   *
+   * 缺的字段**不参与累加**，`xxxCount` 因此是 1 而不是 2 —— 界面照常显示那两格
+   * （有真数），但绝不会把 0 当成「上游说了 0」。
+   */
+  it('缺 used / size 的账号只贡献 remain，不把 0 混进另外两格', () => {
+    const total = sumCredits([
+      { credits: { remain: 100, used: 10, size: 200 } },
+      { credits: { remain: 7 } },
+    ])
+    expect(total.remain).toBe(107)
+    expect(total.remainCount).toBe(2)
+    expect(total.used).toBe(10)
+    expect(total.usedCount).toBe(1)
+    expect(total.size).toBe(200)
+    expect(total.sizeCount).toBe(1)
+  })
+
+  it('一个账号都没上报 used 时计数为 0（界面填 —，不填 0）', () => {
+    const total = sumCredits([{ credits: { remain: 7 } }, { credits: { remain: 8 } }])
+    expect(total.usedCount).toBe(0)
+    expect(total.sizeCount).toBe(0)
+    expect(total.remainCount).toBe(2)
+  })
+
+  it('取不到余额的账号（credits 为 null）整条跳过，不进任何计数', () => {
+    const total = sumCredits([{ credits: null }, { credits: { remain: 3 } }])
+    expect(total.remain).toBe(3)
+    expect(total.remainCount).toBe(1)
+    expect(total.usedCount).toBe(0)
+  })
+
+  it('非有限数不参与累加（否则合计变 NaN，整块显示 —）', () => {
+    const total = sumCredits([
+      { credits: { remain: 5, used: Number.NaN, size: Number.POSITIVE_INFINITY } },
+    ])
+    expect(total.remain).toBe(5)
+    expect(total.usedCount).toBe(0)
+    expect(total.sizeCount).toBe(0)
+  })
+
+  it('空列表 → 全 0 且计数为 0（界面据此显示 —，不显示 0）', () => {
+    expect(sumCredits([])).toEqual({
+      remain: 0,
+      remainCount: 0,
+      used: 0,
+      usedCount: 0,
+      size: 0,
+      sizeCount: 0,
+    })
   })
 })
