@@ -3,7 +3,8 @@
  *
  * 三种状态分开存放，因为**生命周期不同**：
  * - exe 记忆：长期有效，跨版本；
- * - 补签 stamp：按天重置；
+ * - 补签 stamp + 今日签到账本：按天重置（同一个文件，见
+ *   {@link checkinStampPath}）；
  * - 账号意图：长期有效，但只在用户点击面板时写。
  *
  * 全部读写**吞掉错误**：这些文件只影响「下次启动的快慢」或「重启后恢不恢复」，
@@ -13,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import type { CheckinLedger } from './checkin-ledger.ts'
 
 /** DSH 的状态目录。所有状态文件都落在这里，便于统一清理。 */
 function storagesDir(): string {
@@ -73,9 +75,18 @@ export function writeExeMemory(path: string): void {
   writeJson(exeMemoryPath(), { path, at: new Date().toISOString() })
 }
 
-/* ── 补签 stamp ───────────────────────────────────────────────────────── */
+/* ── 补签 stamp + 今日签到账本 ────────────────────────────────────────── */
 
-/** 补签记录的落地文件。 */
+/**
+ * 签到记录的落地文件。**两个用途共用一个文件**：
+ *
+ * - `startupCheckinDays` —— 开机补签的**渠道级**日期（防止同一天重复补签）；
+ * - `checkinLedger` —— **账号级**的今日签到账本（见 `checkin-ledger.ts`）。
+ *
+ * 为什么合成一个文件而不是两个：两者都是**签到这件事**的记录、生命周期
+ * 完全一样（都按 `localDay()` 作废），拆成两个文件只会多一处写入点、
+ * 多一种「一个写成了一个没写」的不一致。字段各自独立，互不影响。
+ */
 function checkinStampPath(): string {
   return join(storagesDir(), 'cpa-panel-checkin.json')
 }
@@ -88,6 +99,33 @@ export function readStamp(): Record<string, unknown> {
 /** 写补签记录。 */
 export function writeStamp(value: Record<string, unknown>): void {
   writeJson(checkinStampPath(), value)
+}
+
+/**
+ * 读今日签到账本（账号级）。
+ *
+ * ⚠️ **结构不对时返回空账本，不抛**：账本是**增益**信息（只用来补上游没说的
+ * 那一格），坏掉时退回「不知道」是安全降级 —— 不能因为一个辅助记录损坏
+ * 就让面板读不出账号。
+ */
+export function readCheckinLedger(): CheckinLedger {
+  const raw = readStamp().checkinLedger
+  if (typeof raw !== 'object' || raw === null) return {}
+  const out: Record<string, Record<string, string>> = {}
+  for (const [plugin, byAccount] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof byAccount !== 'object' || byAccount === null) continue
+    const days: Record<string, string> = {}
+    for (const [authIndex, day] of Object.entries(byAccount as Record<string, unknown>)) {
+      if (typeof day === 'string') days[authIndex] = day
+    }
+    out[plugin] = days
+  }
+  return out
+}
+
+/** 写今日签到账本；与 stamp 的其它字段**合并不覆盖**。 */
+export function writeCheckinLedger(ledger: CheckinLedger): void {
+  writeStamp({ ...readStamp(), checkinLedger: ledger })
 }
 
 /* ── 账号意图 ─────────────────────────────────────────────────────────── */

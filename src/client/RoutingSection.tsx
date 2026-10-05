@@ -18,6 +18,7 @@
 
 import type { ReactNode } from 'react'
 import { IconWarningOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { strategyTextOf, strategyWarns } from './routing-text.ts'
 import { useAsyncResource } from './use-async-resource.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
@@ -47,12 +48,18 @@ export function RoutingSection(props: RoutingSectionProps): ReactNode {
   if (strategy.data === undefined) return null
 
   /**
-   * 策略文案。`round-robin` 那行带一个**警告三角图标**而不是 Emoji ——
-   * Emoji 在不同系统上是不同字形，13px 下糊成一团，也不跟随主题色
-   * （2026-10-04 用户实机指出）。
+   * 策略文案。
+   *
+   * ⚠️ **每个合法策略都要有中文** —— 合法值有三个（见 `operations.routingSet` 的
+   * 白名单）：`round-robin` / `weighted-round-robin` / `fill-first`。
+   * 曾经只翻 `fill-first`、其余原样透传，于是中文界面下直接露出
+   * `round-robin` 这种英文标识符（2026-10-05 用户实机指出）。
+   *
+   * 认不出的取值**原样透传**（与 `plan-text.ts` 同一条原则）：上游随时可能
+   * 新增策略，透传最多不好看，猜着翻会显示错的意思。
    */
-  const warn = strategy.data === 'round-robin'
-  const strategyText = strategy.data === 'fill-first' ? t('strategyFillFirst') : strategy.data
+  const warn = strategyWarns(strategy.data)
+  const strategyText = strategyTextOf(t, strategy.data)
 
   return (
     <div className={css.section}>

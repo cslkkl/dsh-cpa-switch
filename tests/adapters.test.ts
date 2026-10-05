@@ -20,7 +20,7 @@ describe('normalizeAccounts', () => {
             total_remain: 100,
             total_used: 20,
             total_size: 120,
-            packages: [{ id: 'a' }, { id: 'b' }],
+            packages: [{ name: '包A', remain: 60, used: 0, size: 60 }],
           },
         },
       ],
@@ -29,7 +29,8 @@ describe('normalizeAccounts', () => {
     expect(account?.credits?.remain).toBe(100)
     expect(account?.credits?.used).toBe(20)
     expect(account?.credits?.size).toBe(120)
-    expect(account?.credits?.packCount).toBe(2)
+    expect(account?.credits?.packages).toHaveLength(1)
+    expect(account?.credits?.packages[0]?.name).toBe('包A')
   })
 
   it('解析 trae 的 credits_pool 结构，并带上可靠签到信号', () => {
@@ -45,17 +46,65 @@ describe('normalizeAccounts', () => {
     }
     const [account] = normalizeAccounts('trae', { results: [{ auth_index: '7' }] }, payload)
     expect(account?.credits?.remain).toBe(55)
-    expect(account?.credits?.remainKnown).toBe(true)
+    expect(account?.credits?.known).toBe(true)
     expect(account?.checkin?.checkedToday).toBe(true)
   })
 
-  it('trae 的 remain_known=false 时 remain 为 0（是「未知」不是「没额度」）', () => {
+  /**
+   * ⚠️ 这组是这个文件里**最重要**的判据。
+   *
+   * trae 实测**不给** `total_used` 与 `total_size`（2026-10-05 直连 CPA 核实：
+   * 只有 `credits_pool_remain`）。曾经这里填 `used: 0` + `size: remain`，
+   * 界面上就出现一个上游从没说过的「已用 0」，以及一条恒为 0% 的进度条。
+   *
+   * 判据钉在行为上：**缺失就是 `undefined`，不是 0**。
+   * 谁要是又把默认值填回去，这里立刻红。
+   */
+  it('trae 的 used 与 size 是 undefined —— 上游不给就不许编', () => {
     const payload = {
-      results: [{ auth_index: '7', credits_pool_remain: 0, credits_pool_known: false }],
+      results: [{ auth_index: '7', credits_pool_remain: 633, credits_pool_known: true }],
     }
     const [account] = normalizeAccounts('trae', { results: [{ auth_index: '7' }] }, payload)
-    expect(account?.credits?.remain).toBe(0)
-    expect(account?.credits?.remainKnown).toBe(false)
+    expect(account?.credits?.remain).toBe(633)
+    expect(account?.credits?.used).toBeUndefined()
+    expect(account?.credits?.size).toBeUndefined()
+    expect(account?.credits?.packages).toEqual([])
+  })
+
+  it('trae 的 remain_known 与 credits_pool_known 是两条轴，不互相覆盖', () => {
+    // 实测形状：池子已知 true，但 fast/basic 那条 remain_known 是 false
+    const payload = {
+      results: [
+        {
+          auth_index: '7',
+          credits_pool_remain: 633,
+          credits_pool_known: true,
+          remain_known: false,
+          total_remain: null,
+          usage_model: 'unknown',
+        },
+      ],
+    }
+    const [account] = normalizeAccounts('trae', { results: [{ auth_index: '7' }] }, payload)
+    // 池子那条轴才是模型调用真正扣的钱 —— 它是 known
+    expect(account?.credits?.known).toBe(true)
+    // 剩余照常是真实值，没有被 remain_known=false 抹掉
+    expect(account?.credits?.remain).toBe(633)
+  })
+
+  it('trae 无限量标记透传', () => {
+    const payload = {
+      results: [
+        {
+          auth_index: '7',
+          credits_pool_remain: 0,
+          credits_pool_known: true,
+          credits_pool_unlimited: true,
+        },
+      ],
+    }
+    const [account] = normalizeAccounts('trae', { results: [{ auth_index: '7' }] }, payload)
+    expect(account?.credits?.unlimited).toBe(true)
   })
 
   it('无 credits 数据时 credits 为 null', () => {

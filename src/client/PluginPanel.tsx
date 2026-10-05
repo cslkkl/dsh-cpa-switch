@@ -18,6 +18,7 @@ import {
 } from './api.ts'
 import { AccountCard } from './AccountCard.tsx'
 import type { Account, Capabilities } from './AccountCard.tsx'
+import { amountWithUnit } from './meter-text.ts'
 import { useAsyncResource } from './use-async-resource.ts'
 import { reportOf, actionReport, type ActionOutcomeView, type Report } from './report.tsx'
 import type { Translate } from './locales.ts'
@@ -156,14 +157,18 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const toastSeq = useRef(0)
 
   /**
-   * 启用状态的**即时覆盖**：`authIndex` → 写成功后回读到的权威值。
+   * 启用状态的**即时覆盖**：`authIndex` 或 `authId` → 后端确认过的权威值。
    *
-   * 为什么在这里而不在 `AccountCard` 里各存一份：一次「只用这一个」会同时改**多个**
+   * 为什么在这里而不在 `AccountCard` 里各存一份：一次「设为唯一」会同时改**多个**
    * 账号（把其余全禁掉）。覆盖住在父级，那一次改动才能一次落到位；每张卡各存一份
    * 的话，其余卡要等重读才变 —— 于是「关掉的号还亮着」。
    *
-   * 认领键是 `plugin + authIndex`：组件不随渠道重挂载（见 `Panel.tsx`），所以
-   * 切渠道时这份 state 不会自动清空，不认领就会串渠道。
+   * ⚠️ **两种键都要支持**，因为两个来源的标识不同：
+   * - 单卡开关走 `/accounts`，认领键是 `authIndex`；
+   * - 「设为唯一」走 `/auth-files`，认领键是**凭据文件名**（`name`／`authId`）。
+   *
+   * 认领键一律带 `plugin` 前缀：组件不随渠道重挂载（见 `Panel.tsx`），
+   * 不认领就会串渠道。
    */
   const [disabledOverrides, setDisabledOverrides] = useState<Readonly<Record<string, boolean>>>({})
 
@@ -187,8 +192,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     setLogin(null)
     setAutoOverride(null)
     setCardBusy('')
-    // 覆盖层**必须**清：它按 `plugin + authIndex` 认领，可认领是为了避免同一次
-    // 「只用这一个」里其余卡读到旧值，而不是为了跨渠道保留。留着就串渠道了。
+    // 覆盖层**必须**清：它按渠道认领，留着就串渠道了
     setDisabledOverrides({})
   }, [plugin])
 
@@ -222,18 +226,70 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const overrideKey = useCallback((id: string): string => `${plugin}::${id}`, [plugin])
 
   /**
+   * 即时覆盖的查表：**两个键都查，`authIndex` 优先**。
+   *
+   * - `authIndex` —— 单卡开关路径（数据来自 `/accounts`）；
+   * - `authId`（凭据文件名）—— 「设为唯一」路径（数据来自 `/auth-files`）。
+   *
+   * 两个都查是因为两条路径的标识不同，而它们改的**可能是同一个账号**。
+   */
+  const overrideOf = useCallback(
+    (account: Account): boolean | undefined => {
+      const byIndex = disabledOverrides[overrideKey(account.authIndex ?? '')]
+      if (byIndex !== undefined) return byIndex
+      return disabledOverrides[overrideKey(account.authId ?? '')]
+    },
+    [disabledOverrides, overrideKey],
+  )
+
+  /**
    * 把即时覆盖套到账号列表上。
    *
-   * 覆盖优先于读回来的值，直到那次重读落地 —— 重读拿到的新值与覆盖一致时，
-   * 两层自然重合，覆盖就变成无害的冗余。所以**不需要**手动清除它。
+   * ⚠️ **覆盖只活到「后端确认」为止** —— 这是 2026-10-05 修「设为唯一有时好用
+   * 有时不好用」的关键一半。
+   *
+   * 原设计说「重读值与原覆盖一致时两层自然重合，所以不需要清除」。
+   * 那句话只对**写成功**成立；一旦写没生效，覆盖层会**永远**压着后端值，
+   * 界面就停在一个从未存在过的状态上（还看不出错）。
+   *
+   * 现在：重读回来的值与覆盖**一致**时把覆盖**删掉** —— 后端已经确认了，
+   * 覆盖的使命结束，界面回到「只信后端」这一条路上来。于是任何一次失败，
+   * 只要重读拿到真相就自动纠正，不会粘住。
    */
   const accounts = (accountsResource.data?.accounts ?? []).map((account) => {
-    const override = disabledOverrides[overrideKey(account.authIndex ?? '')]
+    const override = overrideOf(account)
     if (override === undefined || override === account.disabled) return account
     return { ...account, disabled: override }
   })
 
-  /** 把一次写成功回读到的**权威值**记进覆盖层。 */
+  /**
+   * 重读落地后，清掉**已被后端确认**的覆盖项。
+   *
+   * 放在 effect 里而不是渲染阶段：渲染阶段不能 setState。
+   * 依赖 `accountsResource.data` —— 每次重读落地都会跑一次。
+   */
+  useEffect(() => {
+    const confirmed = accountsResource.data?.accounts
+    if (confirmed === undefined || confirmed.length === 0) return
+    setDisabledOverrides((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const account of confirmed) {
+        for (const id of [account.authIndex ?? '', account.authId ?? '']) {
+          if (id === '') continue
+          const key = overrideKey(id)
+          // 后端说的与覆盖一致 → 覆盖已无信息量，删掉
+          if (next[key] !== undefined && next[key] === account.disabled) {
+            delete next[key]
+            changed = true
+          }
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [accountsResource.data, overrideKey])
+
+  /** 把一次写成功回读到的**权威值**记进覆盖层（单卡开关路径）。 */
   const applyDisabled = useCallback(
     (authIndex: string, disabled: boolean): void => {
       setDisabledOverrides((prev) => ({ ...prev, [overrideKey(authIndex)]: disabled }))
@@ -241,6 +297,20 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       onAccountDisabled(authIndex, disabled)
     },
     [onAccountDisabled, overrideKey],
+  )
+
+  /**
+   * 把一次「设为唯一」回读确认过的**整渠道状态**记进覆盖层。
+   *
+   * 键用**凭据文件名**（`authId`），因为这条路径的数据来自 `/auth-files` ——
+   * 与 {@link applyDisabled} 的 `authIndex` 是两套标识，所以两者**各写各的键**，
+   * 渲染时两个键都查（见下面的 `accounts`）。
+   */
+  const applySelectState = useCallback(
+    (authId: string, disabled: boolean): void => {
+      setDisabledOverrides((prev) => ({ ...prev, [overrideKey(authId)]: disabled }))
+    },
+    [overrideKey],
   )
 
   /** 用户刚切过开关就以它为准，否则用宿主读到的值。 */
@@ -365,16 +435,66 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   )
 
   const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
+  /**
+   * 合计。
+   *
+   * ⚠️ **缺的字段不参与累加** —— 上游不给就是 `undefined`，不是 0。
+   * 把 `undefined` 当 0 加进去，合计会显示成一个偏小的假数
+   * （trae 完全没有 `used`，加进去等于说「它用了 0」）。
+   *
+   * 所以每格各自统计「有几个账号真的贡献了这个数」，一个都没有时界面显示 `—`
+   * 而不是 0。见 `credits.used` / `credits.size` 的可选性
+   * （[架构说明](../../docs/ARCHITECTURE.md) 的渠道能力表）。
+   */
   const totals = accounts.reduce(
     (acc, account) => {
-      if (account.credits === null) return acc
-      acc.remain += Number(account.credits.remain ?? 0)
-      acc.used += Number(account.credits.used ?? 0)
-      acc.size += Number(account.credits.size ?? 0)
+      const c = account.credits
+      if (c === null) return acc
+      acc.remain += Number(c.remain ?? 0)
+      acc.remainCount += 1
+      if (typeof c.used === 'number' && Number.isFinite(c.used)) {
+        acc.used += c.used
+        acc.usedCount += 1
+      }
+      if (typeof c.size === 'number' && Number.isFinite(c.size)) {
+        acc.size += c.size
+        acc.sizeCount += 1
+      }
       return acc
     },
-    { remain: 0, used: 0, size: 0 },
+    { remain: 0, remainCount: 0, used: 0, usedCount: 0, size: 0, sizeCount: 0 },
   )
+
+  /**
+   * 本渠道额度单位的**文案**（`积分` / `token`）。
+   *
+   * 只在这里翻一次，卡片与汇总都用它 —— 避免两处各写一遍
+   * `meta.unit === 'tokens' ? ... : ...`，那种重复迟早会漂。
+   */
+  const unitText = meta.unit === 'tokens' ? t('unitTokens') : t('unitCredits')
+
+  /**
+   * 汇总格里的「数字 + 单位」。
+   *
+   * ⚠️ **判据不在这里复写** —— 走 `amountWithUnit`（纯函数、Node 侧测得到）。
+   * 这里只做一件它做不到的事：把结果**拆成两个节点**，好让单位单独拿一个
+   * 更轻的 `span`（`summaryUnit`，13px/400/tertiary）。拼成一个字符串的话
+   * 单位会继承数字的 600 字重，`8,000,000 token` 糊成一堵字墙。
+   *
+   * 于是「0 与缺失都不带单位」这条规则**只有一处实现**：`amountWithUnit`。
+   * 拆节点的做法是拿它的输出按单位文案切一刀 —— 单位文案为空（不该发生）时
+   * 整串当数字。
+   */
+  const amountParts = (value: number | null, unit: string): ReactNode => {
+    const text = amountWithUnit(value, unit, fmt(value))
+    if (!text.endsWith(' ' + unit)) return text
+    return (
+      <>
+        {text.slice(0, -(unit.length + 1))}
+        <span className={css.summaryUnit}> {unit}</span>
+      </>
+    )
+  }
 
   return (
     <>
@@ -382,25 +502,42 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        * 汇总。`revalidating` 只在角落留一行提示 —— **不清空下面的网格**。
        * 旧实现是先整块清成「读取中…」再拉，用户看到的是页面消失了一下，
        * 那比多等 200ms 难受得多。
+       *
+       * ⚠️ **三格，不是四格**。原来有独立的第四格「单位」，里面只有 `积分` / `token`
+       * 一个词、**没有任何数字** —— 三格有数、一格光有词，看着头重脚轻。
+       * 现在单位并进额度池那格（`13,683 积分`），三格都有数字
+       * （2026-10-05 维护者定案）。
        */}
       {showSummary && (
         <div className={css.summary}>
           <div className={css.summaryCell}>
             <span className={css.label}>{t('totalRemain')}</span>
-            <span className={css.summaryValue}>{fmt(totals.remain)}</span>
+            <span className={css.summaryValue}>
+              {amountParts(totals.remainCount > 0 ? totals.remain : null, unitText)}
+            </span>
           </div>
           <div className={css.summaryCell}>
             <span className={css.label}>{t('totalUsed')}</span>
-            <span className={css.summaryValue}>{fmt(totals.used)}</span>
+            {/* 一个账号都没上报 used（trae）时显示 —，不加出一个假的 0 */}
+            <span className={css.summaryValue}>
+              {amountParts(totals.usedCount > 0 ? totals.used : null, unitText)}
+            </span>
           </div>
           <div className={css.summaryCell}>
             <span className={css.label}>{t('totalPool')}</span>
-            <span className={css.summaryValue}>{fmt(totals.size)}</span>
-          </div>
-          <div className={css.summaryCell}>
-            <span className={css.label}>{t('unit')}</span>
-            <span className={css.summaryUnit}>
-              {meta.unit === 'tokens' ? t('unitTokens') : t('unitCredits')}
+            {/*
+             * 数字 + 单位**同格**，但**分两个 span**：
+             *
+             * - 数字 19px / 600（`summaryValue`）—— 与上面两格同为「大数」；
+             * - 单位 13px / 400 / tertiary（`summaryUnit`）—— 跟着数字走但更轻。
+             *
+             * ⚠️ 别把两者拼成一个字符串塞进 `summaryValue`：那样单位会继承
+             * 600 字重，`8,000,000 token` 看起来像一堵字墙、单位也失去层级。
+             *
+             * ⚠️ **0 与缺失都不带单位**（与卡片同一条规则，见 `amountParts`）。
+             */}
+            <span className={css.summaryValue}>
+              {amountParts(totals.sizeCount > 0 ? totals.size : null, unitText)}
             </span>
           </div>
         </div>
@@ -484,10 +621,17 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               key={account.authIndex ?? account.authId}
               account={account}
               plugin={plugin}
+              /*
+               * 单位在这里翻好再传 —— 卡片不做 `'credits' | 'tokens'` 到文案的映射：
+               * 单位是**渠道级**属性（写在 `adapters.ts`），这里已经是渠道面板，
+               * 翻一次给所有卡片用，新增渠道时不用回来改卡片。
+               */
+              unit={unitText}
               capabilities={capabilities}
               t={t}
               onReport={report}
               onAccountDisabled={(id, disabled) => applyDisabled(id, disabled)}
+              onAccountSelectState={(authId, disabled) => applySelectState(authId, disabled)}
               onBusyChange={setCardBusy}
               /* 渠道级动作在飞时禁掉所有卡片按钮（反向由按钮上的 `cardBusy` 负责） */
               locked={busy}

@@ -20,13 +20,17 @@
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/index.ts` 路由表           | [src/README.md](src/README.md) 的路由表 + [架构说明](docs/ARCHITECTURE.md)                                                                                                                                        |
 | `src/route-registry.ts`         | 模型路由唯一入口：[架构说明](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证） |
-| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）                                                              |
+| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）；**改启用态要回读确认 + 逐个容错**（F43）                    |
+| `src/select-plan.ts`            | 「设为唯一」的目标状态计算与回读验证（纯函数）；改动同步 [决策记录](.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                            |
 | `src/adapters.ts`               | [架构说明](docs/ARCHITECTURE.md)、渠道能力表                                                                                                                                                                      |
+| `src/checkin-ledger.ts`         | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；改动同步 [决策记录](.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                    |
 | `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                   |
 | `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构说明](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                      |
 | `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](docs/ARCHITECTURE.md)）                                                                                                                  |
 | `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构说明](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                                                                               |
-| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构说明](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查                                                                                                                                  |
+| `src/client/meter-text.ts`      | 余额区判据：**没有分母就不画条、`used` 缺失就留空**；改动同步 [决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md) + `tests/meter-text.test.ts`                                                       |
+| `src/client/routing-text.ts`    | 路由策略的本地化与警示判定：**三个合法值都要有中文**；改动同步 `tests/routing-text.test.ts` + [src/operations.ts](src/operations.ts) 的策略白名单                                                                 |
+| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构说明](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查；**卡片是固定槽位网格**，改行结构先读文件头                                                                                      |
 | `tsdown.config.ts` 的 externals | [架构说明](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                                                                             |
 | 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                                                                                    |
 
@@ -148,14 +152,21 @@ python check-line-endings.py <本仓根> --target lf
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
 - [ ] `providerId` 粒度裁决（按渠道 vs 每单元）。
-- [ ] **渠道额度/积分展示按渠道能力区分** —— 各渠道返回的额度字段不同（有的有
-      总额+已用，有的只有剩余），展示不能统一套模板；改前先查各渠道实际返回字段，
-      现状与判据见[活跃坑](#活跃坑)那条。
-- [ ] **账号卡片高度不统一**（需专门讨论方案）—— 四个渠道卡片高度看着突兀，ZCode 最矮
-      （它没有签到/任务按钮）。反复试过没根治：`min-height` / `grid-auto-rows` 都只治标
-      （见 [架构说明](docs/ARCHITECTURE.md) F29：卡片等高靠 `.card` 的 `min-height`，
-      纯视觉属性断言不了，只能真机看）。**不是改个数值能解决** —— 要么按渠道分模板，
-      要么重新想行结构（操作区用固定槽位占位），需要开一轮讨论再动手。
+- [x] ~~**渠道额度/积分展示按渠道能力区分**~~ —— 已修，**判据在数据层**：
+      `CreditEntry` 只有 `remain` 必有，`used` / `size` / `packages` 上游不给
+      就是 `undefined`（**不是 0**）。界面判据在 `src/client/meter-text.ts`
+      （纯函数、Node 侧测得到），用例 `tests/meter-text.test.ts`。
+      实测 2026-10-05：[决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md)。
+      ⚠️ **`credits_pool_known` 与 `remain_known` 是两条轴**，别合并
+      —— trae 实测是「池子 true + fast/basic false」，曾经只映射一个，
+      把「池子已知」读成了「余量未知」。
+      ⚠️ 进度条判据按「**有没有分母**」判，不按 `known` 判。
+- [x] ~~**账号卡片高度不统一**~~ —— 已改为**固定槽位网格**：每个槽位都有确定高度且
+      **无条件渲染**（空着也占位），卡片总高与内容无关，四渠道严格等高。
+      根因不是标签数量，是 `.cardHead` 的 `flex-wrap`：长昵称
+      （ZCode 的 `zcode-zai-9327dad8-…`）把标签挤到第二行 → +21px，所以昵称**独占一行**。
+      另注：`.card` 改用 `height` 而非 `min-height` —— 旧的 148px 是个**地板**，
+      而四渠道内容本来就有 171–203px，地板从未生效。这类纯视觉属性断言不了，只能真机看。
 - [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
 
@@ -185,10 +196,49 @@ python check-line-endings.py <本仓根> --target lf
   占位符用 `{名字}`、标点写在文案里、列表分隔符也是文案（[架构说明](docs/ARCHITECTURE.md)）。
 - **提示文案里不加 `✓`/`✗`、不用 Emoji** —— `Toast` 在 `tone="success"` 时自带绿勾；
   Emoji 不跟随主题色且 13px 下糊。统一走 [report.tsx](src/client/report.tsx)。
-- **卡片等高靠 `.card` 的 `min-height`** —— 不是 `grid-auto-rows`。
-  `margin-top: auto` 只在容器有**确定高度**时吸收空间，而 auto 行高下高度由内容决定，
-  所以只加 grid 属性**无效**（[架构说明](docs/ARCHITECTURE.md) F29，2026-10-04 两轮没修好）。
-  这类纯视觉属性断言不了，只能真机看。
+- **卡片等高靠「固定槽位」** —— 不是 `min-height`、也不是 `grid-auto-rows`。
+  每个槽位都有**确定高度且无条件渲染**，卡片总高才与内容无关。
+  只写 `min-height` 是**地板**：四渠道内容本来就有 171–203px，地板从未生效。
+  2026-10-05 定为 `height: 222px` = 六个槽位（21+19+36+18+36+28）+ 五个 8px 间距
+  - 两侧 12px 内边距。**改任何槽位高度都要重算这个数**（[架构说明](docs/ARCHITECTURE.md) F29）。
+    这类纯视觉属性断言不了，只能真机看。
+- **卡片是「横向两列」网格，不只是纵向堆叠** —— 「可用 / 已用」用
+  `grid-template-columns: 1fr 1fr` **等分**，中线固定在卡片正中。
+  曾经是 `flex` + `gap`，每格按**自己内容的宽度**排，于是左边的数字一长就把右边推走
+  （2026-10-05 维护者指出「会把右边的东西挤到右边」）。
+  ⚠️ **只有「对等的两个数」才等分** —— 标签行、按钮行的数量随渠道变
+  （ZCode 无标签无按钮），硬套列会留出空洞，所以它们照旧左对齐。
+- **六槽位语义死锁，每个槽位只含一种东西**（2026-10-05 定案，判据在
+  `tests/card-slots.test.ts`）：head=昵称+开关 / tagRow=**状态标签** /
+  numbers=**永远两格**数字 / meterSlot=**只放进度条** / facts=说明 /
+  actions=按钮。空着也占位。目的是切 Tab 时**同一位置永远是同一类信息**，视线不踩空。
+  - ⚠️ **tagRow 不放套餐名**（那是产品名不是状态）；套餐在 facts 行
+  - ⚠️ **head 不放「已启用/已禁用」文字** —— 开关自己已表达；该状态唯一的
+    **文字**处是 tagRow 的灰底灰字标签。`enabled` 文案键**已删除**，别加回来
+  - ⚠️ **meterSlot 无占比时完全空白**，不放条也不放字（放字会让槽位语义漂移）。
+    `noTotal` 键与 `.meterNote` 样式**已删除**，别加回来
+  - ⚠️ **numbers 两格永远都在**，上游没给就填 `—`（不是 0，也不是不渲染）
+- **禁用卡是「降级」不是「擦除」** —— ⚠️ **不许用 `filter: grayscale`**：
+  它会洗掉**额度数字**（禁用不代表余额不值得看），而且 `filter` 新建层叠上下文
+  会**吃掉选中绿环**（`inset` box-shadow）。只降四处：昵称/数字 → secondary、
+  进度条 → `opacity: .5`、开关与按钮 → primitive 自带禁用态。
+  **背景、边框、绿环一律不动。**
+- **「已禁用」标签用 `neutral`（灰底灰字），不用 `danger` 红** —— 禁用时整卡已降级，
+  再挂红标签会与「已签到」的绿**并排打架**（红绿相邻最刺眼），而且红色在这里是**误报**：
+  禁用是用户主动选择，不是错误。排**最后**一位。
+- **昵称与启用开关同一行、两端对齐** —— 昵称 `flex: 1 1 auto; min-width: 0` 自行省略，
+  开关 `flex: none` 保持原尺寸。
+  ⚠️ **缺 `min-width: 0` 时 flex 项不会缩到内容宽度以下** —— 长昵称
+  （`zcode-zai-9327dad8-…`）会把开关**顶出卡片**而不是自己截断。
+  开关原来独占底部一行，既多花一行高度、又与任何东西都不相邻（2026-10-05 合并）。
+- **按钮数量只看渠道能力，不看账号数量** —— 某渠道只开一个号时，卡片「签到」与工具栏
+  「全部签到」功能**确实重叠**，这是刻意接受的：为会变的数字改按钮数量，按钮位置就会
+  随账号数跳动。ZCode 无签到无任务 → 按钮行**空着**（不放灰色假按钮占位）。
+- **「设为唯一」用 `variant="outline"`**（与签到同款灰边框），不是 `ghost` ——
+  ghost 是无边框文字样式，混在按钮行里像一句普通说明。
+- **昵称不许把别的元素挤走** —— `.cardHead` 原来是 `flex-wrap: wrap`，长昵称
+  （ZCode 的 `zcode-zai-9327dad8-…`）会把同行元素挤到第二行（+21px），四张卡高度立刻参差。
+  现在标签行独立成行、`nowrap` + 定高，头部靠 `min-width: 0` 截断。别把它们塞回同一行。
 - **官方 `Switch` 不要包在 `<label>` 里** —— 它是 `<button onClick>`，label 会再转发一次
   点击 → `onChange` **触发两次**，刚改的状态立刻被改回去。表现是「点一下闪回、关不掉」，
   而且**后端被写成原值**、界面上看不出变化。`Switch` 自带 `aria-label`，外层用 `<div>` 即可
@@ -198,9 +248,47 @@ python check-line-endings.py <本仓根> --target lf
   （F32，2026-10-04 **踩了两次**：先修了 label 双触发，漏了这条更基础的）。
 - **写成功后的界面值取后端回读** —— 不取请求值（「我们以为写进去了什么」）、
   不取意图文件（本地记录，CPA 侧被别的东西改过就过期）。只有回读值权威（F33）。
-- **卡片开关独立成底部行**（`.enableRow` + `margin-top: auto`），不要塞进 `.actions`
-  —— 那里 `flex-wrap` 按**按钮数量**决定换行，渠道能力不同（ZCode 无签到/任务）
-  就把开关甩到不同位置，看着「歪」（2026-10-04 实机）。
+- **改账号启用态：逐个写各自容错 + 必须回读** —— 「设为唯一」曾**间歇性失灵**
+  （2026-10-05），三处缺陷叠加：① `try` 包在**循环外** → 第 2 个号失败时第 1 个
+  已改，直接跳 `catch` 报失败，**半成品既没回滚也没报告**；② **不回读** →
+  `ok: true` 只表示「循环跑完了」；③ 客户端拿自报的 `ok` 写**即时覆盖层**，
+  而覆盖层优先于后端值且**永不清除** → 一次失败**粘住**错误显示。
+  ⚠️ `PATCH /auth-files/status` **一次只改一个文件，上游没有批量接口**
+  （已核对全部 `auth-files` 路由），写没有事务 —— 所以只能逐个 + 回读。
+  ⚠️ **覆盖层必须「后端一确认就自我删除」**：它的使命是「写完到重读之间不撒谎」，
+  不是长期真相；留着就会永久压住后端值。
+  ⚠️ 两条路径的键不同：单卡开关用 `authIndex`，「设为唯一」用**凭据文件名**
+  （`authId`）—— 查表时**两个都要查**。
+  ⚠️ `ok` 的判据取**目标号最终是否启用**（那才是「设为唯一」的意图），
+  个别其余号没禁成属降级不致命；报整体失败会把界面打回原样、用户以为白点了。
+  实测与替代方案见[决策记录](.agents/notes/2026-10-05-account-status-readback.md)。
+- ~~**卡片开关独立成底部行**~~ —— **已被「昵称与开关同一行」取代**（2026-10-05）。
+  当时的理由是 `.actions` 按**按钮数量**排布，渠道能力不同（ZCode 无签到/任务）
+  会把开关甩到不同位置。改用头部两端对齐后，这个理由不再成立：开关位置
+  由头部决定，与下面排几个按钮无关。
+- **路由策略值必须**逐个**映射成中文** —— 合法值有三个
+  （`round-robin` / `weighted-round-robin` / `fill-first`，白名单在
+  [operations.ts](src/operations.ts) 的 `routingSet`）。曾经只翻 `fill-first`、
+  其余原样透传，于是中文界面下直接露出 `round-robin` 英文标识符
+  （2026-10-05 用户实机指出）。映射在 [routing-text.ts](src/client/routing-text.ts)，
+  认不出的值**原样透传**；相应用例钉住「三个合法值都不许露出英文」。
+- **警告文案必须点明前提，不能只说代价** —— 调度那行的旧文案是
+  「每个请求换号，缓存几乎不命中」，读起来像渠道的固有行为，而实际只在
+  **同渠道启用多个账号**时才轮询（只开一个号不会换、缓存反而是好的）。
+  新文案分两句：先说前提，再说代价（2026-10-05 维护者指出「让人感觉不到这个意思」）。
+- **「今天签到了但界面没显示」= 上游缓存，不是我们没存** —— 排查时方向很容易搞反。
+  实测有**四层缓存**：上游 CPA（`credits`，签到态随它回来，`fetched_at` 冻结
+  ≥3 分钟，**只有写操作才推动刷新**）、宿主 `CpaCache`（5 秒，写后失效）、
+  浏览器 `ReadCache`（30 秒 / 300 秒）、页面刷新（全清，纯内存 `Map`）。
+  所以「点签到才显示」的根因**在最上游**，我们改不了它。修法是本机记一份
+  **今日签到账本**（`src/checkin-ledger.ts`）：签到是按天、不可逆的事实，
+  记下来补上游**没说**的那一格。⚠️ **只补不覆盖** —— 上游明确说 `false` 时
+  不许翻成 `true`（上游能撤销签到）；⚠️ 账本存**日期**不存布尔，
+  跨天自动失效，不需要清理逻辑；⚠️ 渠道级签到（不带 `authIndex`）记保留键 `''`，
+  读时账号键与渠道键都查。实测与替代方案见
+  [决策记录](.agents/notes/2026-10-05-checkin-ledger.md)。
+  ⚠️ 同时记着：上游**不给已禁用账号的签到块**（实测）—— 那个号其实也被签了
+  （签到按渠道签全部号含禁用的），但状态拿不到，**按「不猜」保持留空**。
 - **上游（CPA）数据不能改，只能适配** —— 它是独立进程，插件只调它的接口。
   **实测过的值才映射，认不出的原样透传**（[架构说明](docs/ARCHITECTURE.md)）。
   ⚠️ 别拿 `plugins/*.dll` 里的字符串当契约 —— 那些大多是 **Go 注释**，
@@ -219,14 +307,17 @@ python check-line-endings.py <本仓根> --target lf
   订阅从未注册却零痕迹，排查无从下手（issue #9）。
   ⚠️ 重推里的目录稳定检测用**指数退避**，不许固定间隔 —— 固定 4s 让每次重推
   白等一轮，用户看到「切个语言，模型两三秒才回来」（`tests/route-registry.test.ts` 钉住）。
-- **额度/积分不能统一套一套模板** —— 各渠道返回的字段根本不同（2026-10-04 逐渠道实测）：
-  workbuddy / qoder / zcode 有 `total_size` + `total_used`，**占比可算**；trae 只有
-  `credits_pool_remain`，且 `credits_pool_known` 可能为 false、`total_remain` 直接是 0
-  ——**算不出占比**。`adapters.ts` 对 trae 老实标了 `remainKnown` 并把 `used` 置 0，
-  但界面仍无条件按 `used / size` 算百分比并画进度条（`AccountCard.tsx`），
-  于是给 trae 画出**假的 0%**；`PluginPanel` 的合计还跨单位相加（积分 vs token），
-  同样是假数。**改之前先查清各渠道实际返回什么字段，别猜、别硬凑假数据** ——
-  展示形态要按渠道实际能力来：有总额的显示进度/占比，只有剩余的只显示剩余数。
+- **额度字段缺了就是 `undefined`，不许编 0** —— 各渠道拿到的数根本不同
+  （2026-10-05 逐渠道实测）：workbuddy / qoder / zcode 有 `total_remain` +
+  `total_used` + `total_size`；**trae 只有 `credits_pool_remain`**，没有 used、
+  没有 size。`CreditEntry` 因此只有 `remain` 是必有的。
+  ⚠️ 改前那版给 trae 填了 `used: 0` + `size: remain`，界面就显示一个上游从没说过的
+  「已用 0」和一条恒 0% 的假条。**哨兵值漏到界面上就是假数据。**
+  ⚠️ **`credits_pool_known` 与 `remain_known` 是两条轴**：trae 实测是
+  「池子 `true` + fast/basic `false`」，只映射一个会把「池子已知」读成「余量未知」。
+  判据在 `src/client/meter-text.ts`（按**有没有分母**判，不按 `known` 判），
+  实测与替代方案见[决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md)。
+  ⚠️ `PluginPanel` 的合计仍跨单位相加（积分 vs token），那个数在跨渠道视图下依然是假的。
 - 宿主槽位的 error boundary 是**锁存**的：一次抛出带走整块配置区，
   用户只能禁用再启用插件。所以 `PanelBoundary` 是必需的，且必须是**类组件**
   （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的

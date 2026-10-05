@@ -22,13 +22,31 @@
   - 导出：`PluginPanel` / `progressLine`（把宿主进度渲染成一行话）/ 类型 `PluginMeta`
   - 刷新**不清空**网格：重验期间只在工具栏末尾多一行「刷新中…」
   - 承担「取消 `key` 重挂载」的清理责任：`plugin` 一变就清 toast / busy / 登录弹窗
-- **`AccountCard.tsx`** —— 单张账号卡。
-  - 内容：昵称、徽标、余额、进度条、**启用开关**、操作按钮（签到 / 任务 / 只用这一个）
+- **`AccountCard.tsx`** —— 单张账号卡。**六个槽位语义死锁**，每个只含一种东西、空着也占位
+  （目的是切页签时同一位置永远是同一类信息，见 [F41](../../docs/ARCHITECTURE.md)、
+  判据 `tests/card-slots.test.ts`）：
+
+  | 槽位        | 高   | 只含                                                      |
+  | ----------- | ---- | --------------------------------------------------------- |
+  | `cardHead`  | 21px | 昵称（左）… 启用开关（右）；**不放「已启用」文字**        |
+  | `tagRow`    | 19px | **状态标签**（已耗尽/已签到/连签/已禁用）；**不放套餐名** |
+  | `numbers`   | 36px | **永远两格**：可用 / 已用，`1fr 1fr` 等分；缺数填 `—`     |
+  | `meterSlot` | 18px | **只放进度条**；无占比时完全空白                          |
+  | `facts`     | 36px | 包数 · 套餐 · 余量未知（夹 2 行）                         |
+  | `actions`   | 28px | 按钮（签到 / 任务 / 设为唯一），按**渠道能力**渲染        |
+  - ⚠️ 禁用卡**降级不擦除**：**不用 `grayscale`**（会洗掉额度数字 + 吃掉选中绿环），
+    只降昵称/数字与进度条透明度（[F42](../../docs/ARCHITECTURE.md)）
+  - ⚠️ 「已禁用」用 `Tag tone="neutral"`（灰底灰字）且**排最后**，不用红色
+  - ⚠️ 按钮数量**只看渠道能力**，不看账号数量（与工具栏重叠也接受，换来位置固定）
+  - ⚠️ 套餐名在 `facts` 行，**不在 `tagRow`**（产品名 ≠ 状态）
   - 开关与「只用这一个」语义**不同**：开关逐个启停，后者一键把同渠道其余全关
   - ⚠️ 高亮判定是 `!disabled`（= 用户的选择），**不做「实际在跑哪个号」的推断**
+  - ⚠️ 昵称 `flex: 1 1 auto; min-width: 0` 自行省略，长昵称不许把开关顶出去
+
 - **`RoutingSection.tsx`** —— 路由策略，**只读**。
   - 拖动排序已删除：控制用哪个号有更直接的手段（启用开关 / 记忆选择）
-  - `round-robin` 的警告用官方 `IconWarningOutlineRegular`，**不用 Emoji**
+  - 策略值与警示判定走 [routing-text.ts](routing-text.ts)；警告用官方
+    `IconWarningOutlineRegular`，**不用 Emoji**
 - **`PanelBoundary.tsx`** —— 渲染错误边界。**必须是类组件**（见[架构说明](../../docs/ARCHITECTURE.md)）
 - **`use-async-resource.ts`** —— 带缓存与竞态保护的异步资源 hook。
   - **同步**在渲染阶段读缓存 → 切渠道 / 刷新不闪；副作用（重验）交给 effect
@@ -47,6 +65,24 @@
   - 规则：**实测过的值才映射，认不出的原样透传**。
     原则见[架构说明](../../docs/ARCHITECTURE.md)，
     实测记录见[决策记录](../../.agents/notes/2026-10-04-upstream-value-translation.md)
+- **`routing-text.ts`** —— 路由策略值的本地化与警示判定。**不含 JSX、不引 UI 包**。
+  - 导出：`strategyTextOf`（策略值 → 文案）/ `strategyWarns`（要不要显示警告）
+  - ⚠️ **三个合法值都要有中文**：`round-robin` / `weighted-round-robin` / `fill-first`
+    （白名单在 [operations.ts](../operations.ts) 的 `routingSet`）。曾经只翻 `fill-first`，
+    中文界面下直接露出 `round-robin` 英文（2026-10-05 用户实机指出）
+  - 认不出的值**原样透传**（与 `plan-text.ts` 同一条原则）
+  - 改动同步 `tests/routing-text.test.ts`
+- **`meter-text.ts`** —— 余额区**怎么画**的判据。**不含 JSX、不引 UI 包**。
+  - 导出：`meterDecision`（`{ show, percent, hasUsed, unlimited }`）/ 类型 `MeterInput`
+  - 规则一：**没有分母（`size`）就不画进度条** —— trae 上游只给 `credits_pool_remain`
+  - 规则二：**`used` 缺失时「已用」格留空**（`hasUsed: false`），**不填 0**
+  - 规则三：`unlimited` 时没有占比可言，也不画
+  - ⚠️ 判据按「**有没有这个数**」判，**不按 `known` 判**：trae 实测是
+    `credits_pool_known: true` 且完全没有 `size`，拿 `known` 判会错判成「数据不可信」
+  - ⚠️ 反面对照：workbuddy / qoder / zcode 的 `used` 与 `size` 都是真的，
+    必须照常画条 —— 判据写成「只有某类渠道才画」会误伤它们
+  - 与 `plan-text.ts` 同一个理由单独成文件：Node 侧测试要 import 得到
+  - 实测与替代方案见[决策记录](../../.agents/notes/2026-10-05-credit-shape-per-channel.md)
 - **`action-text.ts`** —— 批量动作（全部签到 / 全部任务）的反馈文案。**同样不含 JSX**。
   - 导出：`actionText` / `MAX_FAILURES_SHOWN` / 类型 `ActionOutcomeView`
   - 四个分支覆盖四种**用户需要区分**的结论：真做了 / 已经做过 / 部分失败 / 全败；

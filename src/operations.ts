@@ -19,11 +19,33 @@ import {
   normalizeAccounts,
 } from './adapters.ts'
 import type { ChannelId } from './adapters.ts'
-import { readAccountIntent, writeAccountIntent, localDay, readStamp, writeStamp } from './state.ts'
+import { planSelect, verifySelect } from './select-plan.ts'
+import {
+  readAccountIntent,
+  writeAccountIntent,
+  localDay,
+  readStamp,
+  writeStamp,
+  readCheckinLedger,
+  writeCheckinLedger,
+} from './state.ts'
+import { applyLedger, CHANNEL_WIDE, recordToday } from './checkin-ledger.ts'
 import type { CpaOptions } from './cpa.ts'
 import { CpaCache } from './cache.ts'
 import type { LoggerLike } from './credentials.ts'
 import type { CpaProcess, EnsureResult } from './process.ts'
+
+/**
+ * 记一次**成功的**签到。
+ *
+ * 渠道级（`authIndex` 为空）记 {@link CHANNEL_WIDE}；单号记该号。
+ * 两者都由 `applyLedger` 在读的时候查（账号键 + 渠道级键）。
+ */
+function recordCheckinSuccess(plugin: string, authIndex: string | undefined): void {
+  const day = localDay()
+  const ledger = readCheckinLedger()
+  writeCheckinLedger(recordToday(ledger, plugin, authIndex ?? CHANNEL_WIDE, day))
+}
 
 /** 业务失败的统一形状。 */
 export interface OpsFailure {
@@ -333,6 +355,30 @@ export class Operations {
           : Promise.resolve(undefined),
       ])
       const normalized = normalizeAccounts(plugin, base, creditData)
+
+      /**
+       * 叠上**今日签到账本**。
+       *
+       * 上游 CPA 自己缓存 `credits`（签到态随它回来），实测数分钟不刷新 ——
+       * 于是「今天签过了」可能显示成没签，非得再点一次签到才出现
+       * （2026-10-05 维护者实机发现）。签到是**按天、不可逆**的事实，
+       * 所以本机记一份今天签过的账号，在这里补上上游**没说**的那一格。
+       *
+       * ⚠️ **只补不覆盖** —— 上游明确说「没签到」时以上游为准
+       * （见 `applyLedger` 的三段表）。
+       */
+      const day = localDay()
+      const ledger = readCheckinLedger()
+      const accounts = normalized.map((account) => ({
+        ...account,
+        checkin: applyLedger(
+          account.checkin,
+          ledger,
+          plugin,
+          account.authIndex ?? '',
+          day,
+        ) as typeof account.checkin,
+      }))
       const baseRecord = base as
         { server_time?: unknown; schedule?: unknown; checkin_auto?: unknown } | undefined
 
@@ -346,7 +392,7 @@ export class Operations {
           serverTime: baseRecord?.server_time,
           schedule: baseRecord?.schedule,
           autoCheckin: baseRecord?.checkin_auto,
-          accounts: normalized,
+          accounts,
         },
       }
     } catch (error) {
@@ -392,6 +438,23 @@ export class Operations {
       const data = await this.#deps.cpaFetch(this.#deps.options(), path, { method: 'POST', body })
       // 签到 / 任务会改余额与签到态：写完必须作废，否则紧接着的 `load()` 读到旧值
       this.invalidateChannel(plugin)
+      /**
+       * **签到成功就记进今日账本**。
+       *
+       * 上游 CPA 缓存 `credits`（签到态随它回来），实测数分钟不刷新 ——
+       * 不记账的话，签完刷新页面可能又显示成「没签到」，用户会以为白签了
+       * （2026-10-05 维护者实机发现）。
+       *
+       * ⚠️ 只有 `checkin` 记账，**`tasks` 不记** —— 任务不是按天的事实，
+       * 记了会让界面撒谎。
+       *
+       * ⚠️ `authIndex` 为空表示**渠道级**（全部账号），此时记整个渠道：
+       * 读的时候按账号查，需要一个「渠道级也签过」的标记。这里记到
+       * `''` 这个保留键上，`applyLedger` 会**同时**查账号键与它。
+       */
+      if (kind === 'checkin') {
+        recordCheckinSuccess(plugin, authIndex)
+      }
       return { ok: true, data, outcome: normalizeActionOutcome(data) }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -708,6 +771,108 @@ export class Operations {
     }
   }
 
+  /* ── 账号启用态：一个共用骨架 + 两种语义 ─────────────────────────────── */
+
+  /* ── 账号启用态 ─────────────────────────────────────────────────────────
+   *
+   * 两条公开操作（`accountEnabled` 单卡开关、`accountSelect` 设为唯一）共用
+   * 同一套骨架，因为**可靠性要求完全一样**，只差「改哪些号」：
+   *
+   *   读凭据  →  算出要改什么  →  逐个写（各自容错）  →  回读确认  →  记账
+   *
+   * 为什么要这么绕：`PATCH /auth-files/status` **一次只改一个文件**
+   * （上游没有批量接口，已核对全部 `auth-files` 路由），而且写**没有事务** ——
+   * 所以「我以为改成什么」不算数，**只有回读才知道真实状态**（F33、F43）。
+   */
+
+  /**
+   * 读某渠道的凭据文件，并按 `auth_index` 定位目标。
+   *
+   * 抽出来是因为两条路径开头**完全一样**；各写一遍迟早会漂
+   * （一处加了 `provider` 过滤、另一处忘了）。
+   */
+  async #credentialsOf(
+    plugin: string,
+    authIndex: unknown,
+  ): Promise<{ files: AuthFile[]; target: AuthFile | undefined }> {
+    const files = await this.#readCredentials(plugin)
+    return {
+      files,
+      target: files.find((file) => String(file.auth_index) === String(authIndex)),
+    }
+  }
+
+  /**
+   * 读某渠道的全部凭据文件。
+   *
+   * 失败**不吞**：读不到凭据就是读不到，返回空数组会让上层把「网络问题」
+   * 误当成「这个渠道没有账号」。让异常冒到调用方的 `catch`。
+   */
+  async #readCredentials(plugin: string): Promise<AuthFile[]> {
+    const data = await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files')
+    return filesOf(data).filter((file) => file.provider === plugin)
+  }
+
+  /** 改一个文件的启用态。body 里的 `disabled` 就是 `!enabled`，在这里算好。 */
+  async #patchEnabled(name: string, enabled: boolean): Promise<void> {
+    await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ name, disabled: !enabled }),
+    })
+  }
+
+  /**
+   * **逐个写，各自容错**，返回失败清单。
+   *
+   * ⚠️ 一个号失败**不中断其余**：逐个写没有事务，能改多少改多少，
+   * 剩下的靠回读如实报告 —— 比「第 2 个失败就把第 1 个的结果丢掉」
+   * 诚实得多（那正是「设为唯一」原来间歇性失灵的第一处缺陷）。
+   */
+  async #applyChanges(
+    changes: readonly { readonly name: string; readonly enabled: boolean }[],
+  ): Promise<{ name: string; error: string }[]> {
+    const failed: { name: string; error: string }[] = []
+    for (const change of changes) {
+      try {
+        await this.#patchEnabled(change.name, change.enabled)
+      } catch (error) {
+        failed.push({ name: change.name, error: messageOf(error) })
+      }
+    }
+    return failed
+  }
+
+  /**
+   * **回读确认**：把「期望」与「实际」比一比。
+   *
+   * 回读本身失败时**不谎报成功** —— 退回期望值但全部标 `confirmed: false`，
+   * 让界面知道「这次没证实」。这是 F33 在账号启用态上的落地。
+   */
+  async #confirmChanges(
+    plugin: string,
+    expected: readonly { readonly name: string; readonly enabled: boolean }[],
+  ): Promise<ReturnType<typeof verifySelect>> {
+    try {
+      return verifySelect(expected, await this.#readCredentials(plugin))
+    } catch {
+      return expected.map((entry) => ({ ...entry, confirmed: false }))
+    }
+  }
+
+  /**
+   * 把**回读确认过的**启用态记进用户意图，供下次启动恢复。
+   *
+   * ⚠️ 必须传**确认过的**值：意图是「启动时按它恢复」的依据，写进一个
+   * 从未生效的期望值，重启后会恢复成一个**不存在过的状态**。
+   */
+  #rememberIntent(entries: readonly { name: string; enabled: boolean }[]): void {
+    if (entries.length === 0) return
+    const intent = readAccountIntent()
+    for (const entry of entries) intent.enabled[entry.name] = entry.enabled
+    ;(intent as { updatedAt?: string }).updatedAt = new Date().toISOString()
+    writeAccountIntent(intent)
+  }
+
   /**
    * 启用 / 禁用某个账号。
    *
@@ -724,56 +889,35 @@ export class Operations {
     if ('error' in ready) return ready
 
     try {
-      const data = await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files')
-      const files = filesOf(data).filter((file) => file.provider === plugin)
-      const target = files.find((file) => String(file.auth_index) === String(authIndex))
+      const { target } = await this.#credentialsOf(plugin, authIndex)
       if (target === undefined) return { ok: false, error: 'auth-not-found' }
 
-      await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files/status', {
-        method: 'PATCH',
-        body: JSON.stringify({ name: target.name, disabled: !enabled }),
-      })
+      const failed = await this.#applyChanges([{ name: target.name, enabled }])
+      const [confirmed] = await this.#confirmChanges(plugin, [{ name: target.name, enabled }])
 
       /**
-       * 记下用户的决定，供下次启动恢复。
+       * 回读失败或没读到这个文件时**退回请求值**，而不是报错。
        *
-       * 只有**用户主动点击**才会走到这里 —— 所以这是「用户意图」，
-       * 不是「某时刻的状态」。启动时按它恢复，就不会被别的东西改跑偏。
+       * 写已经成功了，为一个「确认」而报错会让用户以为没生效、反而去重复点击。
+       * 最坏是开关慢一次才对上 —— 与「拿到半成品还谎报成功」是两回事。
        */
-      const intent = readAccountIntent()
-      intent.enabled[target.name] = enabled
-      ;(intent as { updatedAt?: string }).updatedAt = new Date().toISOString()
-      writeAccountIntent(intent)
+      const authoritative =
+        confirmed?.confirmed === false ? enabled : (confirmed?.enabled ?? enabled)
 
-      /**
-       * 回读一次，让返回值是 **CPA 真正存下的值**而不是「我们请求的值」。
-       *
-       * 为什么要多这一跳：`disabled: !enabled` 只是把请求取个反 —— 那是**我们以为
-       * 写进去了什么**，不是 CPA 实际存了什么。中间可能隔着校验、规范化，或 CPA
-       * 将来自己改语义。界面上那个开关直接由这个值驱动，所以它必须是权威值。
-       *
-       * 回读失败不当作整体失败：写已经成功了，为一个「确认」而报错会让用户以为
-       * 没生效，反而去重复点击。此时退回「我们请求的值」——最坏是开关慢一次才对上。
-       */
-      const after = (await this.#deps
-        .cpaFetch(this.#deps.options(), '/v0/management/auth-files')
-        .catch(() => undefined)) as { files?: unknown } | undefined
-      const stored = filesOf(after).find((file) => file.name === target.name)
-
+      this.#rememberIntent([{ name: target.name, enabled: authoritative }])
       this.invalidateChannel(plugin)
-      return {
-        ok: true,
-        name: target.name,
-        // 权威值；读不到时退回请求值（见上）
-        disabled: stored === undefined ? !enabled : stored.disabled === true,
-      }
+      /**
+       * `disabled` 保留原字段名与语义（`true` = 已禁用）—— 浏览器侧按它渲染开关。
+       * 值来自**回读**，不是请求值（F33）。
+       */
+      return { ok: true, name: target.name, disabled: !authoritative, failed }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
   }
 
   /**
-   * 「选择」某个账号：启用它，并**禁用同一渠道的其余所有账号**。
+   * 「设为唯一」：启用目标账号，并**禁用同一渠道的其余所有账号**。
    *
    * 这是用户要的语义 —— 「我选哪个就只用哪个」。一次调用把整个渠道收敛到
    * 单账号，不用逐个点禁用。
@@ -787,36 +931,49 @@ export class Operations {
     if ('error' in ready) return ready
 
     try {
-      const data = await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files')
-      const files = filesOf(data).filter((file) => file.provider === plugin)
-      const target = files.find((file) => String(file.auth_index) === String(authIndex))
+      const { files, target } = await this.#credentialsOf(plugin, authIndex)
       if (target === undefined) return { ok: false, error: 'auth-not-found' }
 
-      /** 要和目标一致的账号不动，其余的全部收敛。 */
-      const intent = readAccountIntent()
-      const changed: { name: string; enabled: boolean }[] = []
-      for (const file of files) {
-        const shouldEnable = file.name === target.name
-        if (file.disabled === !shouldEnable) {
-          // 状态已经对了，跳过这次请求
-          intent.enabled[file.name] = shouldEnable
-          continue
-        }
-        await this.#deps.cpaFetch(this.#deps.options(), '/v0/management/auth-files/status', {
-          method: 'PATCH',
-          body: JSON.stringify({ name: file.name, disabled: !shouldEnable }),
-        })
-        intent.enabled[file.name] = shouldEnable
-        changed.push({ name: file.name, enabled: shouldEnable })
-      }
-      ;(intent as { updatedAt?: string }).updatedAt = new Date().toISOString()
-      writeAccountIntent(intent)
       /**
-       * 这一步改了**同渠道全部**账号的启用状态，而账号列表里带 `disabled`。
-       * 不失效的话，用户点完「选择」，界面上仍然是点之前那批启用态。
+       * 先算**完整计划**（要改哪些、改完应该是什么样），再执行。
+       *
+       * 分两步而不是边遍历边决定：执行中途失败时 `expected` 仍然完整，
+       * 回读验证才有基准可比 —— 这是拿到半成品时还能如实上报的前提。
+       *
+       * ⚠️ `planSelect` 收**原始凭据**（`disabled` 是 `unknown`），判据在它内部
+       * （`=== true`，与 `normalizeAccounts` 一致）—— 这里不要先自己判一遍，
+       * 那会让两处判据有机会漂。
        */
+      const plan = planSelect(files, target.name)
+      // `target` 来自 `files`，所以理论上不会走到；收窄类型，行为与找不到一致
+      if (plan === undefined) return { ok: false, error: 'auth-not-found' }
+
+      const failed = await this.#applyChanges(plan.changes)
+      const confirmed = await this.#confirmChanges(plugin, plan.expected)
+
+      this.#rememberIntent(confirmed.filter((entry) => entry.confirmed))
       this.invalidateChannel(plugin)
-      return { ok: true, name: target.name, changed }
+
+      /**
+       * `ok` 的判据是**目标号最终是否启用** —— 那才是「设为唯一」的用户意图。
+       *
+       * 个别其余号没禁成属于**降级但不致命**（多一个号参与调度），
+       * 报整体失败会把界面打回原样、用户以为白点了。
+       *
+       * ⚠️ 必须写成 `if (...) return { ok: false }` 而不是 `ok: someBoolean`：
+       * `OpsResult` 是**判别联合**，`ok` 得是字面量（typecheck 会挡住，实踩过）。
+       */
+      if (confirmed.find((entry) => entry.name === target.name)?.enabled !== true) {
+        return { ok: false, error: 'select-failed' }
+      }
+      return {
+        ok: true,
+        name: target.name,
+        changed: plan.changes,
+        failed,
+        /** **回读确认过的**全渠道状态，界面照它渲染（F33）。 */
+        accounts: confirmed,
+      }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
@@ -941,6 +1098,18 @@ export class Operations {
     if (this.#deps.adminKey() === '') return { ok: true, skipped: 'no-admin-key' }
 
     const results: Record<string, unknown> = {}
+    /**
+     * 补签成功的渠道要**同时记进今日签到账本**。
+     *
+     * 补签是渠道级（`body: '{}'` ＝ 签该渠道全部账号），所以记
+     * {@link CHANNEL_WIDE} —— 这正是这个保留键的用途：那一刻我们并不知道
+     * 渠道里有哪些账号，只能记「整渠道今天签过」。
+     *
+     * ⚠️ 少了这一步，补签过的渠道在界面上仍然可能显示成「没签到」——
+     * 上游那份缓存不会因为我们补签了就立刻回报。
+     */
+    const ledger = readCheckinLedger()
+    let nextLedger = ledger
     for (const plugin of pending) {
       const path = ACTION_PATHS[plugin]?.checkin
       if (path === undefined) continue
@@ -951,8 +1120,9 @@ export class Operations {
         })) as { summary?: unknown } | undefined
         results[plugin] = result?.summary ?? 'ok'
         done[plugin] = day
+        nextLedger = recordToday(nextLedger, plugin, CHANNEL_WIDE, day)
       } catch (error) {
-        // 单个渠道失败不影响其它渠道，也不记 stamp（下次启动会重试）
+        // 单个渠道失败不影响其它渠道，也不记 stamp / 账本（下次启动会重试）
         results[plugin] = 'error: ' + messageOf(error)
       }
     }
@@ -962,6 +1132,8 @@ export class Operations {
       startupCheckinDays: done,
       startupCheckinAt: new Date().toISOString(),
     })
+    // 账本单独写：只有真的补签成功的渠道才进去
+    writeCheckinLedger(nextLedger)
     // 补签改的是各渠道余额与签到态
     this.invalidateChannel('')
     return { ok: true, checkedIn: true, results }
