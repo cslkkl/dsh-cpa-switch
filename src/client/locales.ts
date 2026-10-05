@@ -92,8 +92,20 @@ export const zh = {
   strategyLabel: '当前策略',
   strategyValue: '{label}: {value}',
   strategyFillFirst: '用满再用下一个',
-  strategyRoundRobin: '轮换',
-  strategyWarn: '每个请求换号，缓存几乎不命中，会明显多花积分',
+  strategyRoundRobin: '轮询',
+  /** 加权轮询：选下一个号的**方式**不同（按权重），代价与 `round-robin` 一样。 */
+  strategyWeightedRoundRobin: '加权轮询',
+  /**
+   * 轮询的代价说明。
+   *
+   * ⚠️ **必须点明前提**：「同渠道开了多个号」才会轮询。只说「每个请求换号」
+   * 会让人以为这是渠道的固有行为 —— 而只开一个号时根本不会换，缓存反而是好的
+   * （2026-10-05 维护者指出：「让人感觉不到这个意思」）。
+   *
+   * 所以分两句：第一句说**什么情况**会轮询，第二句说**代价**。
+   * 用户能自己对上「我是不是开了多个号」。
+   */
+  strategyWarn: '同渠道启用多个账号时，每个请求都会换号。上游缓存因此几乎不命中，会明显多花额度。',
   noCredits: '余额未知',
   remainUnknown: '可用 未知',
   /** 上游返回的套餐名，经 `AccountCard` 的 `PLAN_LABEL` 映射后取这些键。 */
@@ -211,7 +223,9 @@ export const en: Record<LocaleKey, string> = {
   strategyValue: '{label}: {value}',
   strategyFillFirst: 'Fill first',
   strategyRoundRobin: 'Round robin',
-  strategyWarn: 'switches credential every request; the cache almost never hits, costing more',
+  strategyWeightedRoundRobin: 'Weighted round robin',
+  strategyWarn:
+    'With several accounts enabled in one channel, every request switches accounts. The upstream cache almost never hits, so you spend noticeably more quota.',
   noCredits: 'Balance unknown',
   remainUnknown: 'available: unknown',
   planFree: 'Free',
