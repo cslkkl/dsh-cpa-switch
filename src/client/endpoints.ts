@@ -46,6 +46,10 @@ export const paths = {
     '/api/v1/cpa/auto-checkin?plugin=' + encodeURIComponent(plugin),
   /** 起一次登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（`POST`）。 */
   auth: '/api/v1/cpa/auth',
+  /** 起登录的完整路径。 */
+  authStart: (plugin: string): string => '/api/v1/cpa/auth?plugin=' + encodeURIComponent(plugin),
+  /** 查登录进度的完整路径（`state` 是宿主发的那一串）。 */
+  authStatus: (state: string): string => '/api/v1/cpa/auth?state=' + encodeURIComponent(state),
 } as const
 
 /** 查环境准备状态。 */
@@ -122,12 +126,12 @@ export function setAutoCheckin(plugin: string, enabled: boolean): Promise<ApiRes
 
 /** 起一次渠道登录，返回 `{ok, state, url}`。 */
 export function startAuth(plugin: string): Promise<ApiResult> {
-  return api(paths.auth + '?plugin=' + encodeURIComponent(plugin))
+  return api(paths.authStart(plugin))
 }
 
 /** 查登录进度。返回 `{ok, status}`，`status === 'wait'` 表示还没完成。 */
 export function authStatus(state: string): Promise<ApiResult> {
-  return api(paths.auth + '?state=' + encodeURIComponent(state))
+  return api(paths.authStatus(state))
 }
 
 /**

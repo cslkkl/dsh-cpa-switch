@@ -7,13 +7,13 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
-import { act, authCancel, authStatus, paths, setAutoCheckin, startAuth } from './endpoints.ts'
+import { act, authCancel, paths, setAutoCheckin, startAuth } from './endpoints.ts'
 import { fmt } from './format.ts'
 import { invalidateReads } from './read-cache.ts'
 import { AccountCard } from './AccountCard.tsx'
 import type { ActionOutcome, Capabilities, NormalizedAccount } from '../contracts/domain.ts'
 import { amountWithUnit } from './meter-text.ts'
-import { useAsyncResource } from './use-async-resource.ts'
+import { useResource } from './use-resource.ts'
 import { reportOf, actionReport, type Report } from './report.tsx'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
@@ -196,7 +196,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
    * 走共享缓存 + 陈旧重验：切回一个看过的渠道立刻有内容，
    * 而不是每次都先清空再等。`force` 只在用户主动点刷新时传。
    */
-  const accountsResource = useAsyncResource<AccountsPayload>({
+  const accountsResource = useResource<AccountsPayload>({
     key: 'accounts:' + plugin,
     path: paths.accounts(plugin),
     select: (result) => {
@@ -212,6 +212,14 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   })
 
   const reload = accountsResource.reload
+
+  /**
+   * 正在等待授权的那个 `state`；不在等待时是 `undefined`。
+   *
+   * 它就是登录轮询的开关 —— 抽成一个值而不是每次现判 `login`，
+   * 因为轮询的 key、path 与间隔都由它决定（三处必须同时切换）。
+   */
+  const authState = login !== null && login.phase === 'wait' ? login.state : undefined
 
   /**
    * 覆盖层的键。渠道与 `authIndex` 拼在一起，中间用一个不会出现在
@@ -338,34 +346,36 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   }, [])
 
   /**
-   * 轮询登录状态。
+   * 登录进度。
    *
-   * ⚠️ 必须放在 `reload` 定义**之后** —— 依赖数组里引用了它。放前面会触发
-   * `Cannot access 'reload' before initialization`：const 的暂时性死区，是
-   * **运行时报错**而不是编译期，很容易漏掉。
+   * ⚠️ 走 `useResource` 的轮询，**不再自己 `setInterval`** —— 轮询的清理、
+   * 竞态与「读完再排下一次」只有一处实现（见 `use-resource.ts`）。
+   * 轮询的每一次都绕过缓存，否则读到的永远是上一轮那份、状态永远不变。
    *
-   * CPA 在用户完成授权后会自动写好认证文件，所以这里只要等到状态不再是
-   * `wait` 就重新拉账号列表。
+   * key 带 `state`：这是**一次会话**的进度，不是可复用的资源。
+   */
+  const authProbe = useResource<{ readonly status: string }>({
+    key: 'auth:' + (authState ?? ''),
+    path: paths.authStatus(authState ?? ''),
+    select: (result) => ({ status: String(result.status ?? 'unknown') }),
+    pollMs: authState === undefined ? undefined : 2500,
+  })
+
+  /**
+   * 授权完成的那一刻做两件事。
+   *
+   * ⚠️ 判定挂在**资源的值**上，不挂在定时器回调里：`wait` 之外的取值都表示这次
+   * 会话结束了（CPA 在用户完成授权后自己写好认证文件）。那时缓存里那份账号列表
+   * 一定是旧的 —— 强制重取。
    */
   useEffect(() => {
-    if (login === null || login.phase !== 'wait') return undefined
-    const stateValue = login.state
-    const timer = setInterval(() => {
-      void (async () => {
-        const result = await authStatus(stateValue)
-        if (!result.ok) return
-        if (result.status === 'wait') return
-        clearInterval(timer)
-        setLogin(null)
-        // 授权刚落地，缓存里那份一定是旧的：强制重取
-        invalidateReads('accounts:' + plugin)
-        await reload({ force: true })
-      })()
-    }, 2500)
-    return () => {
-      clearInterval(timer)
-    }
-  }, [login, plugin, reload])
+    if (authState === undefined) return
+    const status = authProbe.data?.status
+    if (status === undefined || status === 'wait') return
+    setLogin(null)
+    invalidateReads('accounts:' + plugin)
+    void reload({ force: true })
+  }, [authState, authProbe.data, plugin, reload])
 
   /**
    * 上报一条操作结果。

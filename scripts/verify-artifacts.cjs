@@ -248,6 +248,12 @@ const HOST_MODULES = {
     useCallback: (f) => f,
     useRef: () => ({ current: null }),
     useMemo: (f) => f(),
+    /**
+     * ⚠️ 必须在这里：`use-resource.ts` 靠 `useSyncExternalStore` 订阅读缓存，
+     * 而产物里的 hook 是从 `require('react')` 上取的属性 —— shim 少一个不会
+     * 当场抛，但「产物与宿主形状一致」这道门禁就名存实亡了（宿主 React 18/19 都有）。
+     */
+    useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
     Fragment: null,
     Component: FakeComponent,
   },

@@ -1,5 +1,5 @@
 /**
- * 一个带缓存与竞态保护的异步资源 hook。
+ * 一个带缓存、竞态保护与轮询的异步资源 hook。
  *
  * 它解决的是面板「点一下等很久、而且等的时候整屏空白」这两个问题：
  *
@@ -12,18 +12,22 @@
  *    少了它，连点两次刷新时先发的后到，会把**旧**数据盖在**新**数据上 ——
  *    表现为「数字自己跳回去了」，而且没有任何报错。
  *
- * 数据来源走 `api.ts` 的共享缓存，所以同一份账号列表被两个挂载点消费时
- * 也只打一次请求。
+ * 数据来源走 `read-cache.ts` 的共享缓存，所以同一份账号列表被两个挂载点消费时
+ * 也只打一次请求；缓存它是一个**可订阅的 store**，这里用 `useSyncExternalStore`
+ * 读它 —— 于是**别人**（预取、另一个挂载点）写进去的值也会立刻让本组件重渲染。
  *
- * @module dsh-cpa-switch/client/use-async-resource
+ * ⚠️ 轮询（`pollMs`）**必须绕过缓存**：不绕的话每次轮询读到的都是同一份缓存，
+ * 进度永远不动 —— 那正是原先 Panel 的进度轮询用裸 `fetch` 而不是走缓存的原因。
+ *
+ * @module dsh-cpa-switch/client/use-resource
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { cachedGet, readCache } from './read-cache.ts'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { cachedGet, readCache, type CachedValue } from './read-cache.ts'
 import type { ApiResult } from './transport.ts'
 
 /** 一个异步资源的对外形状。 */
-export interface AsyncResource<T> {
+export interface Resource<T> {
   /** 最近一次**成功**读到的值。还没成功过是 `undefined`。 */
   readonly data: T | undefined
   /** 最近一次失败的原因。成功读到数据后自动清掉。 */
@@ -41,23 +45,33 @@ export interface AsyncResource<T> {
 }
 
 /** hook 的入参。 */
-export interface UseAsyncResourceOptions<T> {
+export interface UseResourceOptions<T> {
   /** 缓存键；**必须包含全部影响结果的输入**。变了就重新读。 */
   readonly key: string
   /** 请求路径（已带查询串）。 */
   readonly path: string
   /** 从宿主响应里取出要渲染的部分；抛错或返回 `undefined` 视为失败。 */
   readonly select: (result: ApiResult) => T | undefined
+  /**
+   * 轮询间隔（毫秒）。不传就只读一次。
+   *
+   * ⚠️ 轮询的每一次都**绕过缓存**（见模块头）。间隙按「上一次读完」再排下一次，
+   * 不叠加：慢响应不会把定时器堆起来。
+   *
+   * 显式带上 `| undefined`：调用方常写成「某个条件满足才轮询」的三元表达式，
+   * 而 `exactOptionalPropertyTypes` 下 `number | undefined` 不等于可选属性。
+   */
+  readonly pollMs?: number | undefined
 }
 
 /**
- * 读一个资源，跨重渲染保持上一次的成功值。
+ * 读一个资源，跨重渲染保持上一次的成功值，可选按间隔轮询。
  *
  * 组件卸载后不再写状态 —— 否则一次迟到的响应会打在已经消失的面板上，
  * 在 React 18 之后那是一次静默的状态更新泄漏。
  */
-export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncResource<T> {
-  const { key, path, select } = options
+export function useResource<T>(options: UseResourceOptions<T>): Resource<T> {
+  const { key, path, pollMs } = options
 
   /**
    * 已取到的值，**连同它属于哪个 key**。
@@ -67,7 +81,8 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
    * 只存值的话，`data ?? fromCache` 会把**上一个渠道的账号**画在当前页签下
    * （workbuddy 的账号出现在 trae 页签上）。
    *
-   * 这就是取消 `key` 的代价：跨渠道的状态必须**自己认领归属**。
+   * 它就是取消 `key` 的代价：跨渠道的状态必须**自己认领归属**。
+   * 这里同时兜住「缓存过期被丢掉」的情况（超出 stale 窗口后仍显示最后读到的值）。
    */
   const [held, setHeld] = useState<{ key: string; value: T } | undefined>(undefined)
   /**
@@ -78,6 +93,23 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
     undefined,
   )
   const [pending, setPending] = useState<boolean>(true)
+
+  /**
+   * 订阅共享缓存。
+   *
+   * 为什么不是「渲染阶段直接 `peek` 一眼」：那是同一个想法的手动版 ——
+   * 只在**本次**渲染时看一眼，别人之后写进去的值要等一次无关的重渲染才生效
+   * （预取刚好在渲染之后落地时，那一帧就是空的）。`useSyncExternalStore`
+   * 让缓存成为真正的 store：谁写都触发重订阅者重渲染。
+   *
+   * `peek` 返回的是**同一个对象引用**（直到被下一次 put 换掉），
+   * 所以 React 的 `Object.is` 比较不会误判成「一直在变」。
+   */
+  const cached = useSyncExternalStore(
+    readCache.subscribe,
+    () => readCache.peek<ApiResult>(key),
+    () => undefined,
+  )
 
   /**
    * 在途请求的序号。每次 `reload` 自增；只有等于当前值的那个响应能写状态。
@@ -91,8 +123,8 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
    * 否则它会进 `reload` 的依赖数组、导致 `reload` 每次渲染都变、
    * 连带把挂载用的 effect 重新拉一遍 —— 那就等于无限重取。
    */
-  const selectRef = useRef(select)
-  selectRef.current = select
+  const selectRef = useRef(options.select)
+  selectRef.current = options.select
 
   useEffect(() => {
     mounted.current = true
@@ -102,12 +134,12 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
   }, [])
 
   const reload = useCallback(
-    async (options: { readonly force?: boolean } = {}): Promise<void> => {
+    async (options2: { readonly force?: boolean } = {}): Promise<void> => {
       const mine = (seq.current += 1)
       setPending(true)
 
       const result = await cachedGet(key, path, {
-        force: options.force === true,
+        force: options2.force === true,
       })
 
       // 迟到的旧响应：不许覆盖更新的数据
@@ -152,25 +184,41 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
   }, [reload])
 
   /**
-   * **同步**读缓存 —— 这就是「切渠道不闪」的全部秘密。
+   * 轮询：**读完再排下一次**，不叠加。
    *
-   * 为什么必须在渲染阶段做：`useState` 的初值只在**首次挂载**时求值，之后
-   * 忽略。而「把缓存写进 state」这件事发生在 effect 里 —— 也就是挂载**之后**。
-   * 于是重挂载 / 换 key 的那一帧，`data` 必然是 `undefined`，`loading` 必然为真，
-   * 用户必然看到一帧「读取中…」。缓存明明有值，却晚了一帧才生效（2026-10-04 实机）。
-   *
-   * 所以：只要缓存里有，就**直接用它渲染**，不等 effect。副作用（重验）仍然
-   * 由上面的 effect 负责 —— 渲染阶段不发起请求。
+   * ⚠️ 每次轮询都 `force` —— 轮询要的是**现在**的值，而缓存里那份正是它自己
+   * 上一轮写进去的（TTL 之内必然命中）。不绕过去的话进度永远停在第一帧。
    */
-  const cached = readCache.peek<ApiResult>(key)
-  const fromCache = cached === undefined ? undefined : toValue<T>(cached.value, selectRef.current)
+  useEffect(() => {
+    if (pollMs === undefined || pollMs <= 0) return undefined
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const tick = async (): Promise<void> => {
+      await reload({ force: true })
+      if (cancelled) return
+      timer = setTimeout(() => void tick(), pollMs)
+    }
+
+    timer = setTimeout(() => void tick(), pollMs)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [pollMs, reload])
 
   /**
-   * 能渲染的值，两个来源都**按 key 认领**：
-   * - `held` 只在还是同一个 key 时才算数（切 key 后它属于上一个渠道）；
-   * - 缓存天然带 key（key 就是查询的一部分），所以直接可用。
+   * 能渲染的值，两个来源都**按 key 认领**。
+   *
+   * 规则本身是纯函数（`shownValue`），判据测的就是它 —— 别在测试里手抄一份，
+   * 抄的那份漂了不会有任何信号。
    */
-  const shown = (held !== undefined && held.key === key ? held.value : undefined) ?? fromCache
+  const shown = shownValue({
+    held,
+    cached,
+    key,
+    select: (result) => toValue<T>(result, selectRef.current),
+  })
 
   return {
     data: shown,
@@ -182,6 +230,31 @@ export function useAsyncResource<T>(options: UseAsyncResourceOptions<T>): AsyncR
     revalidating: shown !== undefined && pending,
     reload,
   }
+}
+
+/**
+ * 「渲染哪个值」的判据：**两个来源都按 key 认领**。
+ *
+ * - `held`（上一次成功读到的值）只在还是同一个 key 时才算数 ——
+ *   组件不随 key 重挂载，切渠道后它还揣着上一个渠道的数据；
+ * - 缓存天然带 key（key 就是查询的一部分），但**只认成功的那一份**；
+ * - `held` 认领成功时优先于缓存 —— 它是最新的成功值。
+ *
+ * 抽出来是因为它是「切渠道串数据」与「切渠道闪一帧」两条要求的全部判定 ——
+ * 埋在 hook 里就只能靠手抄一份来测（那时被测的其实是抄的那份）。
+ */
+export function shownValue<T>(args: {
+  readonly held: { readonly key: string; readonly value: T } | undefined
+  readonly cached: CachedValue<ApiResult> | undefined
+  readonly key: string
+  /** 从**成功**响应里取要渲染的部分；失败的那份由这里挡掉。 */
+  readonly select: (result: ApiResult) => T | undefined
+}): T | undefined {
+  const hit = args.cached
+  const fromCache = hit === undefined || !hit.value.ok ? undefined : args.select(hit.value)
+  const fromHeld =
+    args.held !== undefined && args.held.key === args.key ? args.held.value : undefined
+  return fromHeld ?? fromCache
 }
 
 /** 从宿主响应里取要渲染的部分；失败返回 `undefined`（不抛给渲染阶段）。 */
