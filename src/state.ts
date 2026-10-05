@@ -9,6 +9,19 @@
  *
  * 全部读写**吞掉错误**：这些文件只影响「下次启动的快慢」或「重启后恢不恢复」，
  * 不该因为磁盘问题打断用户当前操作。
+ *
+ * ## 写入只有一种形状：读改写
+ *
+ * 一个文件里有**多个各自独立**的字段时（签到记录的两个字段、账号意图的 `enabled` 与
+ * `updatedAt`），写入一律走 `updateXxx(改法)`：**读当下的内容 → 交给调用方改 → 立刻写回**，
+ * 整段同步、中间没有 `await`。没有「整份覆盖」的写函数，因为那种函数**必然**指望调用方自觉：
+ * 只要有人把读提前到某次 `await` 之前（`startupCheckin` 就这么干过），那个快照醒来时就会
+ * 盖掉别人刚写的东西 —— 用户看到「我明明签过，怎么又显示没签」，磁盘上却一切正常。
+ *
+ * 传**函数**而不是算好的值，就是这个不变量的全部机制：值只能来自更早的某次读。
+ *
+ * 边界：进程内不会交错（读改写同步完成）；跨进程没有锁 —— 这些文件只由本插件写。
+ * 只有**一个字段**的文件（exe 记忆）不需要合并，仍是普通写入。
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -86,25 +99,30 @@ function checkinStampPath(): string {
   return join(storagesDir(), 'cpa-panel-checkin.json')
 }
 
-/** 读补签记录；损坏就当空对象。 */
-export function readStamp(): Record<string, unknown> {
-  return readJson<Record<string, unknown>>(checkinStampPath()) ?? {}
+/** 签到记录文件的形状。两个字段装在一起，但**各自独立**（见 {@link checkinStampPath}）。 */
+export interface CheckinStamp {
+  /** 渠道级补签日期：渠道 id → `YYYY-MM-DD`。 */
+  startupCheckinDays: Record<string, string>
+  /** 上次补签的时间，仅作展示。 */
+  startupCheckinAt?: string
+  /** 账号级的今日签到账本。 */
+  checkinLedger: CheckinLedger
+  /** 认不出的字段**原样带走** —— 老版本写的、或将来加的，不许在改写时抹掉。 */
+  [other: string]: unknown
 }
 
-/** 写补签记录。 */
-export function writeStamp(value: Record<string, unknown>): void {
-  writeJson(checkinStampPath(), value)
+/** 解析「渠道 id → 日期」，坏格子直接丢。 */
+function daysFrom(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null) return {}
+  const out: Record<string, string> = {}
+  for (const [plugin, day] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof day === 'string') out[plugin] = day
+  }
+  return out
 }
 
-/**
- * 读今日签到账本（账号级）。
- *
- * ⚠️ **结构不对时返回空账本，不抛**：账本是**增益**信息（只用来补上游没说的
- * 那一格），坏掉时退回「不知道」是安全降级 —— 不能因为一个辅助记录损坏
- * 就让面板读不出账号。
- */
-export function readCheckinLedger(): CheckinLedger {
-  const raw = readStamp().checkinLedger
+/** 解析今日签到账本（账号级）。结构不对的格子直接丢。 */
+function ledgerFrom(raw: unknown): CheckinLedger {
   if (typeof raw !== 'object' || raw === null) return {}
   const out: Record<string, Record<string, string>> = {}
   for (const [plugin, byAccount] of Object.entries(raw as Record<string, unknown>)) {
@@ -118,9 +136,46 @@ export function readCheckinLedger(): CheckinLedger {
   return out
 }
 
-/** 写今日签到账本；与 stamp 的其它字段**合并不覆盖**。 */
-export function writeCheckinLedger(ledger: CheckinLedger): void {
-  writeStamp({ ...readStamp(), checkinLedger: ledger })
+/**
+ * 读签到记录（含今日账本）；损坏就当空。
+ *
+ * 解析统一在这里做：两个字段「结构不对怎么办」只有一处答案，调用方不必各自 `as` 一遍。
+ */
+export function readStamp(): CheckinStamp {
+  const raw = readJson<Record<string, unknown>>(checkinStampPath()) ?? {}
+  const { startupCheckinDays, startupCheckinAt, checkinLedger, ...rest } = raw
+  return {
+    ...rest,
+    startupCheckinDays: daysFrom(startupCheckinDays),
+    checkinLedger: ledgerFrom(checkinLedger),
+    ...(typeof startupCheckinAt === 'string' ? { startupCheckinAt } : {}),
+  }
+}
+
+/**
+ * **改**签到记录：读当下的内容 → 交给 `mutate` → 立刻写回（整段同步，没有 `await`）。
+ *
+ * ⚠️ 传的必须是**函数**。写成 `updateStamp(readStamp())` 那种「先算好值」的形状，
+ * 就把旧快照的坑又挖回来了 —— 那个值可能来自 `await` 之前。
+ */
+export function updateStamp(mutate: (current: CheckinStamp) => CheckinStamp): void {
+  writeJson(checkinStampPath(), mutate(readStamp()))
+}
+
+/**
+ * 读今日签到账本（账号级）。
+ *
+ * ⚠️ **结构不对时返回空账本，不抛**：账本是**增益**信息（只用来补上游没说的
+ * 那一格），坏掉时退回「不知道」是安全降级 —— 不能因为一个辅助记录损坏
+ * 就让面板读不出账号。
+ */
+export function readCheckinLedger(): CheckinLedger {
+  return readStamp().checkinLedger
+}
+
+/** 改今日签到账本：只动账本那一格，stamp 的其它字段原样带走。 */
+export function updateCheckinLedger(mutate: (ledger: CheckinLedger) => CheckinLedger): void {
+  updateStamp((stamp) => ({ ...stamp, checkinLedger: mutate(stamp.checkinLedger) }))
 }
 
 /* ── 账号意图 ─────────────────────────────────────────────────────────── */
@@ -195,7 +250,18 @@ export function readAccountIntent(): AccountIntent {
   }
 }
 
-/** 写用户意图。`source` 固定为 `panel`，只有面板的点击能产生。 */
-export function writeAccountIntent(value: AccountIntent): void {
-  writeJson(accountIntentPath(), { ...value, source: 'panel' })
+/**
+ * **改**用户意图：读当下的内容 → 交给 `mutate` → 写回（整段同步）。
+ *
+ * 写入口负责两件事，都不指望调用方自觉：
+ *
+ * - `source` 固定为 `panel` —— 只有面板的点击能产生；
+ * - `ignored` **在这里剥掉** —— 它是「读」这一步的内部信号，不属于磁盘 schema。
+ *   `src/ops/enable.ts` 的 `rememberIntent` 一度就是把读出来的对象原样交回去的，
+ *   于是 `ignored: 'untrusted-source'` 跟着进了文件（见 `tests/state-lost-update.test.ts`）。
+ */
+export function updateAccountIntent(mutate: (current: AccountIntent) => AccountIntent): void {
+  const { ignored: _dropped, ...rest } = mutate(readAccountIntent())
+  void _dropped
+  writeJson(accountIntentPath(), { ...rest, source: 'panel' })
 }

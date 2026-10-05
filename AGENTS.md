@@ -33,6 +33,7 @@
 | `scripts/check-layering.cjs`           | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                                                                                                                                                                            |
 | 搬文件 / 改名 / 删模块                 | **同批改掉文档里的旧路径** —— 代码里的旧路径当场编译报错，文档里的**零信号**；`pnpm check:doc-paths` 扫 `src` / `tests` / `scripts` 三类裸路径，白名单只收历史提法且上限 10 条（[决策记录](.agents/notes/2026-10-05-doc-path-gate.md)、[手册](scripts/README.md)）                                                                                             |
 | `src/ids.ts` / `src/paths.ts`          | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                                                                                                                                                                        |
+| `src/state.ts` 状态写入                | **只有读改写单入口**（`updateXxx(改法)`，传函数不传值）：整段同步、没有 `await`。⚠️ 加「整份覆盖」的写函数、或把读提前到 `await` 之前，都会**无声**吞掉中间别人的写入（[决策记录](.agents/notes/2026-10-06-state-single-entry.md)、判据 `tests/state-lost-update.test.ts`）                                                                                    |
 | `src/checkin-ledger.ts`                | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；改动同步 [决策记录](.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                                                                                                                                                                 |
 | `src/client/locales.ts`                | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里；**没有引用的键要删掉**（判据 `tests/locales.test.ts`）                                                                                                                                                                                                        |
 | `src/client/transport.ts`              | 一次请求 + 异常**一律收敛成 `{ ok: false, error }`、不抛** —— 调用方只判 `ok`                                                                                                                                                                                                                                                                                  |
@@ -182,7 +183,7 @@ python check-line-endings.py <本仓根> --target lf
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
 - [ ] **研究方向见 [docs/PLAN.md](docs/PLAN.md)** —— 额度显示位置、每代理独立用号、
       调度维护界面等**尚未立项**的想法记在那里；本清单只放「确定要做、照做即可」的动作。
-      **已立项但要先补判据的**（`state.ts` 单入口读改写、模型路由时钟注入）也在那份的
+      **已立项但要先补判据的**（模型路由时钟注入）也在那份的
       §2.9 —— 没有判据之前不许动结构。
 
 ## 活跃坑
