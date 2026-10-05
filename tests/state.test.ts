@@ -19,6 +19,9 @@ const { readAccountIntent, writeAccountIntent, readExeMemory, writeExeMemory, lo
   await import('../src/state.ts')
 
 beforeEach(() => {
+  // 家目录还有一层覆盖：`DSH_HOME` 优先于 `homedir()`。
+  // 维护者本机若设了它，这些用例会跑去写真实状态目录 —— 所以显式清掉。
+  delete process.env.DSH_HOME
   home = mkdtempSync(join(tmpdir(), 'cpa-state-'))
   mkdirSync(join(home, '.dsh', 'storages'), { recursive: true })
 })

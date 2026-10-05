@@ -29,7 +29,6 @@ import type { SourceKey } from './paths.ts'
 
 export {
   SOURCES,
-  runtimeDir,
   managedCpaDir,
   managedExePath,
   managedConfigPath,
