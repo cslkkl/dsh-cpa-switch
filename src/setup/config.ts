@@ -10,31 +10,8 @@ import { renderAliasYaml, type AliasTable } from '../model-alias.ts'
 import { managedConfigPath, managedCpaDir } from './paths.ts'
 
 /**
- * 需要显式启用的渠道插件。
- *
- * ⚠️ **`plugins.enabled: true` 不等于"渠道能用"。**
- *
- * 上游对每个渠道是**逐个**判定启用的，而且默认值是 `false`：
- *
- * ```go
- * // Enabled toggles this plugin instance. Nil is normalized to false during YAML parsing.
- * Enabled *bool `yaml:"enabled,omitempty"`
- * ...
- * defaultEnabled := false
- * c.Enabled = &defaultEnabled
- * ```
- *
- * 少了这一段，`plugins/` 下的 dll 会**全部处于未激活状态**，于是
- * `/v0/management/plugins/<id>/accounts` 一律 404 —— 面板表现是
- * 「读取失败：HTTP 404」，而 CPA 本身跑得好好的、`auth-files` 也读得到，
- * **极容易误判成插件坏了**。
- *
- * 这份清单与渠道插件包（`mmqz/cpa-multi-plugins`）实际提供的 dll 对应。
- * 多写一个不存在的 id 无害；少写一个的后果则是那个渠道静默不可用。
+ * 生成最小可用 `config.yaml` 的入参。
  */
-const CHANNEL_PLUGINS = ['workbuddy', 'trae', 'qoder', 'zcode', 'mimo'] as const
-
-/** 生成最小可用 `config.yaml` 的入参。 */
 export interface RenderConfigInput {
   readonly port: number
   readonly secretKey: string
@@ -44,6 +21,30 @@ export interface RenderConfigInput {
    * 为空则不写 `model-alias` 段 —— 目录里没有同名模型时写了是多余的配置。
    */
   readonly aliases?: AliasTable
+  /**
+   * 要**逐个**启用的渠道插件 id —— 由调用方给**磁盘上实际存在的 dll**。
+   *
+   * ⚠️ **`plugins.enabled: true` 不等于「渠道能用」。** 上游对每个渠道逐个判定启用，
+   * 默认值是 `false`：
+   *
+   * ```go
+   * // Enabled toggles this plugin instance. Nil is normalized to false during YAML parsing.
+   * Enabled *bool `yaml:"enabled,omitempty"`
+   * ...
+   * defaultEnabled := false
+   * c.Enabled = &defaultEnabled
+   * ```
+   *
+   * 少了这一段，`plugins/` 下的 dll 会**全部处于未激活状态**，于是
+   * `/v0/management/plugins/<id>/accounts` 一律 404 —— 面板表现是
+   * 「读取失败：HTTP 404」，而 CPA 本身跑得好好的、`auth-files` 也读得到，
+   * **极容易误判成插件坏了**。
+   *
+   * 为什么由调用方给、而不是写一份常量清单：那份手写清单曾经与渠道注册表漂开
+   * （少一个渠道），而后果正是上面这种静默不可用。多写一个不存在的 id 无害，
+   * 所以「磁盘上有什么就启用什么」既准确又不需要维护。
+   */
+  readonly pluginIds: readonly string[]
 }
 
 /**
@@ -59,11 +60,12 @@ export interface RenderConfigInput {
  * - `oauth.model-alias` 把同名模型拆成「渠道 / 模型」唯一值 —— 没有它，
  *   CPA 会在所有供给该模型的渠道之间轮询，跨渠道消耗别的号（见 `../model-alias.ts`）；
  * - `plugins.enabled: true` + `dir: "plugins"` 让插件机制生效；
- * - `plugins.configs.<渠道>.enabled: true` **逐个**启用渠道，见
- *   {@link CHANNEL_PLUGINS} —— 漏了这段渠道就全不工作。
+ * - `plugins.configs.<渠道>.enabled: true` **逐个**启用，见 {@link RenderConfigInput.pluginIds}。
  */
 export function renderConfig(input: RenderConfigInput): string {
-  const channelLines = CHANNEL_PLUGINS.flatMap((id) => [`    ${id}:`, '      enabled: true'])
+  const channelLines = [...input.pluginIds]
+    .sort()
+    .flatMap((id) => [`    ${id}:`, '      enabled: true'])
   const aliasBlock = input.aliases === undefined ? [] : renderAliasYaml(input.aliases).split('\n')
   return [
     '# 由 dsh-cpa-switch 自动生成 —— 手改会在下次「重新准备环境」时被覆盖。',

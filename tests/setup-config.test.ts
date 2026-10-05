@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { buildAliasTable } from '../src/model-alias.ts'
 import { looksLikeBcrypt, renderConfig } from '../src/setup/config.ts'
 
+/** 生成配置时的启用清单；真机上它来自磁盘上实际存在的 dll。 */
+const PLUGIN_IDS = ['workbuddy', 'trae', 'qoder', 'zcode']
+
 /**
  * 托管 `config.yaml` 是**安全边界**的一部分，不是普通配置拼接。
  *
@@ -12,7 +15,8 @@ import { looksLikeBcrypt, renderConfig } from '../src/setup/config.ts'
  * 不带任何鉴权返回 200。这类「静默失去防护」只能靠断言钉住。
  */
 describe('renderConfig', () => {
-  const yaml = renderConfig({ port: 8317, secretKey: 'plain-secret' })
+  const pluginIds = PLUGIN_IDS
+  const yaml = renderConfig({ port: 8317, secretKey: 'plain-secret', pluginIds })
 
   it('显式绑定 127.0.0.1（上游默认是空 host = 所有网卡）', () => {
     expect(yaml).toContain('host: "127.0.0.1"')
@@ -27,17 +31,24 @@ describe('renderConfig', () => {
   })
 
   it('port 跟随入参，不写死 8317', () => {
-    expect(renderConfig({ port: 18317, secretKey: 'x' })).toContain('port: 18317')
+    expect(renderConfig({ port: 18317, secretKey: 'x', pluginIds })).toContain('port: 18317')
   })
 
   it('管理密钥进配置，且不加引号外的东西', () => {
     expect(yaml).toContain('secret-key: "plain-secret"')
   })
 
-  it('逐个启用渠道插件（漏一个该渠道静默 404）', () => {
-    for (const id of ['workbuddy', 'trae', 'qoder', 'zcode']) {
+  it('逐个启用传进来的渠道插件（漏一个该渠道静默 404）', () => {
+    for (const id of pluginIds) {
       expect(yaml).toContain(`    ${id}:`)
     }
+  })
+
+  it('启用清单**跟着入参走**，不是写死的常量', () => {
+    // 这条是「清单改由磁盘决定」的判据：给什么就启用什么，多一个就多一行。
+    const withExtra = renderConfig({ port: 8317, secretKey: 'x', pluginIds: ['kimi'] })
+    expect(withExtra).toContain('    kimi:')
+    expect(withExtra).not.toContain('    workbuddy:')
   })
 })
 
@@ -47,7 +58,12 @@ describe('renderConfig', () => {
  */
 describe('renderConfig 的 model-alias 段', () => {
   const aliases = buildAliasTable({ 'glm-5.3': ['workbuddy', 'trae', 'zcode'] })
-  const yaml = renderConfig({ port: 8317, secretKey: 'plain-secret', aliases })
+  const yaml = renderConfig({
+    port: 8317,
+    secretKey: 'plain-secret',
+    aliases,
+    pluginIds: PLUGIN_IDS,
+  })
 
   it('同名模型按渠道各配一个别名', () => {
     expect(yaml).toContain('alias: "wb/glm-5.3"')
@@ -63,7 +79,7 @@ describe('renderConfig 的 model-alias 段', () => {
   })
 
   it('没给别名表就不写这一段（无同名模型时是多余配置）', () => {
-    const bare = renderConfig({ port: 8317, secretKey: 'x' })
+    const bare = renderConfig({ port: 8317, secretKey: 'x', pluginIds: PLUGIN_IDS })
     expect(bare).not.toContain('model-alias')
   })
 
@@ -71,6 +87,7 @@ describe('renderConfig 的 model-alias 段', () => {
     const empty = renderConfig({
       port: 8317,
       secretKey: 'x',
+      pluginIds: PLUGIN_IDS,
       aliases: buildAliasTable({ 'hy4-preview': ['workbuddy'] }),
     })
     expect(empty).not.toContain('model-alias')

@@ -157,10 +157,24 @@ export function findFile(root: string, name: string): string {
   return ''
 }
 
+/**
+ * 目录里有哪些渠道插件：id = 去掉 `.dll` 的文件名，**排序**保证输出稳定
+ * （`readdirSync` 的顺序依文件系统而定）。
+ *
+ * 生成 `config.yaml` 的启用清单用它。那份清单曾经是**手写**的，漏一个渠道的后果是
+ * 该渠道在 CPA 侧未激活 —— 账号接口一律 404，而 CPA 自己看着一切正常（不报错）。
+ */
+export function listPluginIds(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter((file) => file.toLowerCase().endsWith('.dll'))
+    .map((file) => file.replace(/\.dll$/iu, ''))
+    .sort()
+}
+
 /** 目录里有多少个 `.dll`。 */
 export function countDlls(dir: string): number {
-  if (!existsSync(dir)) return 0
-  return readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.dll')).length
+  return listPluginIds(dir).length
 }
 
 /** 删目录（用于重装）。 */
