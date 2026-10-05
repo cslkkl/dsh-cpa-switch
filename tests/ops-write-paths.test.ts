@@ -410,6 +410,17 @@ describe('签到记账本', () => {
  * 业务层真的把回读值放进了返回，而不是把请求值原样回给界面。
  */
 describe('启用态：回读说了算', () => {
+  /**
+   * 收窄成成功形状再读附加字段。
+   *
+   * `OpsResult` 是判别联合（`OpsFailure` 上当然没有 `disabled`），
+   * 而 `expect(...).toBe(true)` 不会替 TypeScript 收窄 —— 顺手也给失败时一句可读的话。
+   */
+  function mustOk(result: OpsResult): Record<string, unknown> & { ok: true } {
+    if (!result.ok) throw new Error(`写操作没成功：${JSON.stringify(result)}`)
+    return result
+  }
+
   it('说改成启用、回读仍说禁用 → 返回的是回读值', async () => {
     const cpa = makeCpa()
     // 回读永远说「还禁用着」（写没生效，或写之后被别的东西改回去了）
@@ -417,9 +428,8 @@ describe('启用态：回读说了算', () => {
     cpa.reply(AUTH_STATUS, {})
     const ops = createOperations({ gateway: cpa.gateway })
 
-    const result = await ops.enable.setEnabled('workbuddy', '0', true)
+    const result = mustOk(await ops.enable.setEnabled('workbuddy', '0', true))
 
-    expect(result.ok).toBe(true)
     expect(result.disabled).toBe(true)
   })
 
@@ -429,7 +439,7 @@ describe('启用态：回读说了算', () => {
     cpa.reply(AUTH_STATUS, {})
     const ops = createOperations({ gateway: cpa.gateway })
 
-    const result = await ops.enable.setEnabled('workbuddy', '0', true)
+    const result = mustOk(await ops.enable.setEnabled('workbuddy', '0', true))
 
     expect(result.disabled).toBe(false)
   })
@@ -447,9 +457,8 @@ describe('启用态：回读说了算', () => {
     cpa.reply(AUTH_STATUS, {})
     const ops = createOperations({ gateway: cpa.gateway })
 
-    const result = await ops.enable.setEnabled('workbuddy', '0', true)
+    const result = mustOk(await ops.enable.setEnabled('workbuddy', '0', true))
 
-    expect(result.ok).toBe(true)
     expect(result.disabled).toBe(false)
   })
 
@@ -478,9 +487,8 @@ describe('启用态：回读说了算', () => {
     cpa.fail('/v0/management/auth-files/status', new Error('patch-refused'))
     const ops = createOperations({ gateway: cpa.gateway })
 
-    const result = await ops.enable.select('workbuddy', '0')
+    const result = mustOk(await ops.enable.select('workbuddy', '0'))
 
-    expect(result.ok).toBe(true)
     expect(result.failed).toEqual([{ name: 'b.json', error: 'patch-refused' }])
     // 返回的是**回读确认过的**全渠道状态，界面照它渲染
     expect(result.accounts).toEqual([
@@ -532,9 +540,8 @@ describe('启用态：回读说了算', () => {
     cpa.reply('/v0/management/auth-files/status', {})
     const ops = createOperations({ gateway: cpa.gateway })
 
-    const result = await ops.enable.select('workbuddy', '0')
+    const result = mustOk(await ops.enable.select('workbuddy', '0'))
 
-    expect(result.ok).toBe(true)
     expect(result.accounts).toEqual([
       { name: 'a.json', enabled: true, confirmed: true },
       { name: 'b.json', enabled: false, confirmed: false },

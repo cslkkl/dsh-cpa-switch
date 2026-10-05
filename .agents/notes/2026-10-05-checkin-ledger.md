@@ -39,7 +39,7 @@
 - **记录时机**：单号/渠道级签到**成功**后，以及**开机补签成功**后；
 - **记录粒度**：`渠道 → authIndex → 日期串`。值存**日期**而不是布尔 ——
   查的时候比一下 `localDay()` 就自动作废，不需要「谁负责重置」这种清理逻辑；
-- **应用时机**：`operations.#loadAccounts` 组装账号时，把账本叠到上游报的
+- **应用时机**：账号域的 `loadAccounts` 组装账号时，把账本叠到上游报的
   签到状态上；
 - **只补不覆盖**：
 
@@ -90,5 +90,5 @@ CPA 的签到是**按渠道签全部账号含已禁用的**，所以那个号其
 ## 参考
 
 - 实现：`src/checkin-ledger.ts`、`src/state.ts` 的 `readCheckinLedger` / `writeCheckinLedger`
-- 接线：`src/operations.ts` 的 `#loadAccounts`（应用）、`action`（记账）、`runStartupCheckin`（补签记账）
+- 接线：账号域的 `loadAccounts`（应用）、动作域的 `run`（记账）、`startupCheckin`（补签记账）
 - 判据：`tests/checkin-ledger.test.ts`

@@ -7,7 +7,7 @@
 
 - **`contracts/`** —— 两半共享的**纯类型**：渠道能力、额度、签到、账号、批量动作结果。
   - 只有类型、零运行时依赖；宿主与浏览器都 `import type`（[决策记录](../.agents/notes/2026-10-05-contract-type-sharing.md)）
-  - 被谁依赖：`channels/normalize.ts`（生产方）、`operations.ts`、`src/client/**`
+  - 被谁依赖：`channels/normalize.ts`（生产方）、`ops/**`、`src/client/**`
   - 模块手册 → [contracts/README.md](contracts/README.md)；越界由 `pnpm check:layering` 拦
 
 ## 装配层
@@ -28,7 +28,7 @@
   - 探活与拉起都经 [`runtime.ts`](runtime.ts)，这里不直接碰 `CpaProcess`
 - **`route-table.ts`** —— 路由表（声明式数据，16 条）。
   - 导出：`buildRoutes` / 类型 `RouteDeps`
-  - ⚠️ handler 只做三件事：解码请求 → 调用例 → `json()`；业务规则在 [operations.ts](operations.ts)
+  - ⚠️ handler 只做三件事：解码请求 → 调用例 → `json()`；业务规则在 [ops/](ops/README.md)
   - ⚠️ **同一 path 只能注册一次**、方法只有 `GET`/`HEAD`/`POST`；判据在 `tests/route-table.test.ts`
     （含 README 那张表与代码的一致性）
   - `/status` 用 `runtime.status()`（只读）、`/start` 用 `runtime.ensure()`——
@@ -72,6 +72,12 @@
   - ⚠️ 存**日期**不存布尔：跨天自动失效，不需要清理逻辑
   - 实测与替代方案见[决策记录](../.agents/notes/2026-10-05-checkin-ledger.md)，判据在
     `tests/checkin-ledger.test.ts`
+- **`action-outcome.ts`** —— 写操作返回的**归一**（纯判据，零 IO、只依赖契约）。
+  - 导出：`normalizeActionOutcome`
+  - ⚠️ **实测过的才映射**：`summary` 只在部分渠道出现（workbuddy / qoder 实测没有），
+    缺失时从 `results` 累加；`skipped` 优先于 `success`
+  - ⚠️ 上游形状只在这一处翻译；界面不许自己猜字段（F34）
+  - 改后必测：`tests/action-outcome.test.ts`
 - **`cpa.ts`** —— CPA 管理接口 HTTP 客户端（**只负责发包与错误形状**）。
   - 导出：`cpaFetch` / `json` / `CpaHttpError` / 类型 `CpaOptions` / `CpaRequestInit`
   - ⚠️ **调用点一律经 [gateway.ts](gateway.ts)**，不要自己拼 `cpaFetch(options(), …)` ——
@@ -118,14 +124,19 @@
   - ⚠️ 两者共用 `CpaProcess` 的探活记忆 —— **别再自己 `probePort`**，
     否则两条路径会给出相反的答案（状态条说「运行中」、列表报 `cpa-unavailable`）
   - 改后必测：`tests/runtime.test.ts`（含「`status` 一次都不许调 `ensure`」）
-- **`operations.ts`** —— 业务操作集合（本目录最大的模块，待按业务域拆）。
-  - 导出：`Operations`（类）/ `normalizeActionOutcome`
-  - ⚠️ **一切对 CPA 的调用都经 `gateway`**，本文件不拼 `CpaOptions`、不碰缓存键
-  - `#ready()` / `#running()` 只是通道层前置结论的翻译（补一个 `ok: false`）
-  - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `invalidateChannel(plugin)`，
+- **`ops/`** —— **业务层**：五个业务域一域一个文件 + 组合根。
+  - 导出：`createOperations` / 类型 `Operations` / `OpsDeps` / `OpsResult` / `OpsFailure`
+  - 域：`accounts`（读账号 / 余额 / 模型目录）、`actions`（签到 / 任务 / 补签）、
+    `enable`（启用态 / 设为唯一 / 优先级 / 意图）、`oauth`（登录三条）、
+    `scheduling`（路由策略 / 调度模式 / 自动签到开关）
+  - ⚠️ 域的划分依据是**语义**：`actions` 作用于全部号含已禁用的（F35），
+    `enable` 只动调度面 —— 这两件混在一起就会被「顺手跳过禁用号」改坏语义
+  - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `gateway.invalidateChannel(plugin)`，
     否则用户看到旧值 —— 清哪些 key 由 [gateway.ts](gateway.ts) 决定
-  - 被谁依赖：`route-table.ts` 的 `buildRoutes`
-  - 改后必测：对应路由的返回值形状；读路径别再顺带拉没人消费的数据
+  - 被谁依赖：`route-table.ts` 的 `buildRoutes`、`boot.ts` 的启动流程
+  - 模块手册 → [ops/README.md](ops/README.md)；越界由 `pnpm check:layering` 的
+    `ops-no-outer` 拦（业务域不许引传输层与装配层）
+  - 改后必测：`tests/ops-write-paths.test.ts`（写必失效 / 读不失效 / 记账本 / 回读说了算）
 
 ## 渠道与网络
 
@@ -174,6 +185,7 @@
 
 ## 子目录
 
+- `ops/` —— 业务层五个域 → [ops/README.md](ops/README.md)
 - `setup/` —— 环境准备（下载 / 校验 / 解压 / 写配置）→ [setup/README.md](setup/README.md)
 - `client/` —— 浏览器半边 → [client/README.md](client/README.md)
 
@@ -215,7 +227,8 @@
 
 - 改路由表 → 同步本文件的路由表
 - 改对外契约 → 同步 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 与 `package.json` 版本
-- 改 `operations.ts` → 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段
+- 改 `ops/**` → 写操作要调 `gateway.invalidateChannel()`（判据 `tests/ops-write-paths.test.ts`）；
+  域之间不许互相 import；读路径别加没人消费的字段
 - 改 `gateway.ts` → 缓存键与失效前缀必须同源（判据在 `tests/gateway.test.ts`）；
   新增读 key 要同步 `invalidateChannel`
 - 改 `runtime.ts` → `status` 不许变成会拉起进程的实现（判据在 `tests/runtime.test.ts`）
