@@ -32,7 +32,12 @@ export const zh = {
   tasksAll: '全部任务',
   tasks: '任务',
   disabled: '已禁用',
-  enabled: '已启用',
+  /**
+   * ⚠️ 曾经有个 `enabled: '已启用'` 键，**已删除**（2026-10-05）：
+   * 它唯一的用途是账号卡右上角开关旁边那行「已启用」文字，而那行文字
+   * 已被删掉（开关本身就是最直接的信号，写出来是重复）。
+   * 别因为「键少了对称」就把它加回来 —— 那会让那行文字复活。
+   */
   enable: '启用',
   disable: '禁用',
   enableThis: '启用这个账号',
@@ -69,10 +74,12 @@ export const zh = {
   exhausted: '已耗尽',
   remain: '可用',
   used: '已用',
+  /** trae 的 `credits_pool_unlimited` —— 无限量时剩余数没有意义，标签也跟着换。 */
+  unlimited: '剩余',
   totalRemain: '剩余',
   totalUsed: '已用',
+  /** 额度池。单位并进这一格显示（`13,683 积分`），所以不再有独立的「单位」格。 */
   totalPool: '额度池',
-  unit: '单位',
   autoCheckin: '自动签到',
   autoCheckinHint: '开启后由 CPA 每天 09:00 / 21:00 自动为所有账号签到',
   loading: '读取中…',
@@ -108,6 +115,12 @@ export const zh = {
   strategyWarn: '同渠道启用多个账号时，每个请求都会换号。上游缓存因此几乎不命中，会明显多花额度。',
   noCredits: '余额未知',
   remainUnknown: '可用 未知',
+  /**
+   * ⚠️ 曾经有个 `noTotal: '无总额度，仅显示剩余'` 键，**已删除**（2026-10-05）：
+   * 它填在进度条槽位里解释「为什么没有条」，但那个槽位的语义被钉死为
+   * **只放进度条**（2026-10-05 维护者定案：无分母时**完全空白、只保留高度**）。
+   * 写字会让同一槽位一会儿是条、一会儿是句子，切换 Tab 时视线踩空。
+   */
   /** 上游返回的套餐名，经 `AccountCard` 的 `PLAN_LABEL` 映射后取这些键。 */
   planFree: '免费',
   planBasic: '基础版',
@@ -160,7 +173,6 @@ export const en: Record<LocaleKey, string> = {
   tasksAll: 'Run tasks',
   tasks: 'Tasks',
   disabled: 'Disabled',
-  enabled: 'Enabled',
   enable: 'Enable',
   disable: 'Disable',
   enableThis: 'Enable this account',
@@ -199,10 +211,10 @@ export const en: Record<LocaleKey, string> = {
   exhausted: 'Exhausted',
   remain: 'Available',
   used: 'Used',
+  unlimited: 'Available',
   totalRemain: 'Remaining',
   totalUsed: 'Used',
   totalPool: 'Pool',
-  unit: 'Unit',
   autoCheckin: 'Auto check-in',
   autoCheckinHint: 'CPA checks in every account daily at 09:00 and 21:00',
   loading: 'Loading…',

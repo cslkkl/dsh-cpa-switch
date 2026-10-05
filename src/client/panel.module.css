@@ -113,8 +113,12 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The unit rides under the number it qualifies, so it is tertiary and small
-   rather than competing with the figure. */
+/* The unit **inside** the pool tile, riding on the same line as the figure.
+ *
+ * ⚠️ It is a nested span inside `.summaryValue`, not a sibling. The value span
+ * carries 600 weight for the number; this one drops to 400 and the tertiary
+ * colour so the unit reads as a qualifier rather than part of the figure —
+ * `8,000,000 token` would otherwise be a wall of bold text (2026-10-05). */
 .summaryUnit {
   font-size: 13px;
   font-weight: 400;
@@ -145,28 +149,21 @@
   gap: 8px;
 }
 
-/* The account card's enable switch gets its **own bottom row**, below
-   `.actions`. `margin-top: auto` pins it to the card's bottom, so its position
-   depends only on the card's height — not on how many action buttons this
-   channel happens to have.
+/* The account card's enable switch rides the **head row**, opposite the
+   nickname (see `.cardHead` / `.headSwitch`).
 
-   Sharing `.actions` with the buttons let `flex-wrap` decide which row the
-   switch landed in, and channels differ in button count (ZCode has neither
-   check-in nor tasks), so its switch sat visibly lower than the others
-   (2026-10-04). */
-.enableRow {
-  margin-top: auto;
-  padding-top: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
+   History: it used to be its own bottom row with `margin-top: auto` to pin it
+   to the card's bottom, because sharing `.actions` let `flex-wrap` decide which
+   row it landed in — and channels differ in button count (ZCode has neither
+   check-in nor tasks), so the switch sat visibly lower than the others
+   (2026-10-04). That fixed the vertical drift but cost a whole row and left the
+   switch five rows away from anything related to it. The head row solves both:
+   one row, anchored at both ends (2026-10-05).
 
-.enableText {
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-}
+   ⚠️ `.enableText` used to live here (the 「已启用 / 已禁用」 label beside the
+   switch). It is **deleted** — that text said the same thing the switch already
+   shows, and the disabled state's single text home is the tag row
+   (2026-10-05, maintainer's decision). Do not reintroduce it. */
 
 .switchText {
   font-size: 12px;
@@ -175,18 +172,17 @@
 
 /* ---- Account grid ------------------------------------------------------ */
 
-/* Every card in a row is the same height.
+/* Cards wrap into as many 260px-minimum columns as fit; `gap` matches the
+ * panel's own 12px rhythm.
  *
- * `min-height` is the mechanism that actually works, and `grid-auto-rows: 1fr`
- * is kept for the case where a row has a taller card than this floor. Reason it
- * used to fail: `margin-top: auto` on `.actions` only absorbs slack when the
- * container has a **definite** height — under `grid-auto-rows: auto` the height
- * comes from the content, so there was no slack to absorb and a channel with
- * fewer actions (ZCode has neither check-in nor tasks) rendered visibly shorter
- * (2026-10-04, two rounds: the first attempt only added the grid property).
- *
- * 148px is the tallest card the current content can produce: head + numbers +
- * meter + facts + actions, with the 12px padding on both sides. */
+ * Row height: every card carries a **definite `height`** (see `.card`), so the
+ * `1fr` here is belt-and-braces for the add-card, which has no content of its
+ * own when a channel is empty. Two earlier attempts failed because they tried
+ * to reach equal heights *without* a definite height:
+ *   1. `min-height` alone — a floor, and every channel's content already
+ *      exceeded it, so it never bound;
+ *   2. `margin-top: auto` — only absorbs slack under a definite height.
+ * See the slot table above `.card` for the current mechanism. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -231,13 +227,92 @@
 
 /* ---- Account card ------------------------------------------------------ */
 
+/* The account card is a **fixed-slot grid**.
+ *
+ * Every slot below has a definite height and is rendered **unconditionally** by
+ * `AccountCard` — including the ones a channel has no content for (the tag row
+ * and the facts line). That is what makes four channels with different
+ * capabilities come out the same height: the total stops depending on content.
+ *
+ * Why the previous two attempts failed (2026-10-04, both real-machine):
+ *   1. `min-height` alone. It is a *floor*, and every channel was already above
+ *      it — content heights ran ~171-203px against a 148px floor, so the floor
+ *      never bound and cards stayed content-sized.
+ *   2. `margin-top: auto` on `.actions`. It only absorbs slack when the
+ *      container has a **definite** height; under content sizing there is no
+ *      slack to absorb.
+ * The real driver of the visible jitter was `.cardHead`'s `flex-wrap`: a long
+ * nickname (ZCode's `zcode-zai-9327dad8-…`) pushed the tags onto a second row,
+ * +21px. So the nickname got its own row and could not push anything.
+ *
+ * Slack is distributed by `justify-content: space-between` on the card, so the
+ * rows spread evenly instead of leaving one gap at the bottom.
+ */
+
+/* ---- Horizontal grid ---------------------------------------------------
+ *
+ * The card is a **two-column** grid horizontally too, not just a stack of
+ * left-anchored rows. Before this the only row that related to another was the
+ * enable switch (pushed right); everything else started at the left edge, and
+ * each figure sat wherever the previous one happened to end — so a long number
+ * on the left shoved the right-hand figure around (2026-10-05, maintainer's
+ * report: 「会把右边的东西挤到右边」).
+ *
+ * The six slots and their horizontal placement:
+ *
+ *   slot        height   placement
+ *   ----------  -------  ------------------------------------------
+ *   head        21px     nickname left … switch right (both ends)
+ *   tagRow      19px     left (0-4 tags; count varies by channel)
+ *   numbers     36px     **two equal halves** — fixed midline
+ *   meterSlot   18px     full width (bar), or a note
+ *   facts       36px     left (2-line clamp)
+ *   actions     28px     left (0-2 buttons; count varies by channel)
+ *   ----------  -------
+ *   total      158px + five 8px gaps + 24px padding = 222px
+ *
+ * Only **equal peers** get equal halves — the two figures. Rows whose item count
+ * varies per channel (tags, buttons) stay left-anchored on purpose: forcing them
+ * into columns would leave holes where ZCode has no tags and no buttons.
+ */
+
+/* ---- Account card ------------------------------------------------------ */
+
+/* A disabled account is **downgraded, not erased**.
+ *
+ * ⚠️ Deliberately **not** `filter: grayscale(...)`:
+ *   1. it would wash out the **balance figures** too — a disabled account's
+ *      remaining credits are still worth reading;
+ *   2. `filter` creates a stacking context, which eats the selected ring
+ *      (`.selected` is an `inset` box-shadow).
+ * Background, border and the selected ring are left untouched; only these step
+ * down (2026-10-05, maintainer's decision):
+ *
+ *   - nickname + figures → `label-secondary`
+ *   - progress bar      → 50% opacity
+ *   - the switch        → the primitive's own disabled look
+ *   - the button row    → the primitive's own disabled look
+ */
+.isDisabled .nickname,
+.isDisabled .value {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.isDisabled .meter {
+  opacity: 0.5;
+}
+
 .card {
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   gap: 8px;
   padding: 12px;
-  /* Floor so a card with less content still matches its row. See `.grid`. */
-  min-height: 148px;
+  /* Definite height, not a floor: see the slot table above.
+     222px = the six slots (21 + 19 + 36 + 18 + 36 + 28) + five 8px gaps
+     + 12px padding on both sides. The enable switch now shares the head row, so
+     it no longer costs a slot of its own. */
+  height: 222px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
 }
@@ -249,36 +324,89 @@
   border-color: transparent;
 }
 
+/* Head row: nickname left, enable switch right — **one row**, anchored at both
+   ends. Previously the nickname had a row to itself and the switch sat at the
+   very bottom of the card, five rows apart, with nothing relating them.
+ *
+ * ⚠️ `min-width: 0` on the nickname is what stops a long name from shoving the
+ * switch. Flex items refuse to shrink below their content by default, so
+ * without it the nickname would push the switch off the card instead of
+ * truncating (`zcode-zai-9327dad8-d372-4b83-9034-658…` is the real case). */
 .cardHead {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
 }
 
-/* `min-width: 0` + ellipsis: a long nickname truncates instead of pushing the
-   tags in its row off the card. Without it, flex items refuse to shrink below
-   their content and the tags wrap onto a second line. */
+/* Tag row: fixed 19px (the Tag's own line-height 17px + 1px padding top and
+   bottom), reserved even when empty. `nowrap` + `overflow: hidden` means an
+   unusual combination of tags is clipped rather than growing the card. */
+.tagRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  height: 19px;
+}
+
+/* Takes the free space, shrinks first, and truncates. `flex: 1 1 auto` plus
+   `min-width: 0` is the pair that makes ellipsis work inside a flex row: the
+   first claims the slack, the second permits shrinking below content width. */
 .nickname {
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 600;
   font-size: 14px;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.numbers {
+/* `flex: none` — the switch keeps its intrinsic size and is never squeezed by
+   a long nickname. */
+.headSwitch {
+  flex: none;
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The two figures split the row **in half**, so the midline between them is
+   fixed no matter how long either number is. `1fr 1fr` (not `auto auto`) is the
+   whole point: with `auto` each cell is content-sized and the second one starts
+   wherever the first ends. */
+.numbers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  height: 36px;
 }
 
 .number {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+/* The progress-bar **slot**: a definite height that is always occupied, whether
+   a bar is drawn or not. This is what keeps a channel with no ratio at the same
+   height as the others.
+
+   ⚠️ The grey track deliberately lives on `.meter`, **not** here. When the slot
+   itself carried the background, a channel with no ratio rendered an **empty grey
+   bar** — which reads as "progress is 0" or "it is broken" rather than "there is
+   no bar here". With no ratio the slot must be blank or a note (2026-10-05,
+   maintainer's report). */
+.meterSlot {
+  height: 18px;
+  display: flex;
+  align-items: center;
 }
 
 .meter {
+  width: 100%;
   height: 4px;
   border-radius: 2px;
   background: var(--dsw-alias-border-l2);
@@ -290,22 +418,41 @@
   background: var(--dsw-alias-state-success-primary);
 }
 
+/* ⚠️ `.meterNote` used to live here — a sentence explaining why there was no
+   bar (「无总额度，仅显示剩余」). It is **deleted**: the slot's meaning is locked
+   to "a progress bar", and putting a sentence in it made the same position read
+   as a bar on one channel and prose on another. With no ratio the slot is now
+   completely blank, height preserved (2026-10-05, maintainer's decision).
+   Do not reintroduce text into this slot. */
+
 /* Card sub-text: the tertiary 12px tier, with tabular figures so a column of
-   numbers lines up between cards. */
+   numbers lines up between cards.
+ *
+ * Fixed two-line slot (2 × 12px × 1.5 = 36px). An unrecognised upstream `plan`
+ * is passed through verbatim (see `plan-text.ts`) and can be arbitrarily long,
+ * so this **clamps to two lines** instead of growing the card and breaking the
+ * row's equal heights. The full value is still in the `title` attribute. */
 .facts {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  height: 36px;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
   font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
+/* Action row: fixed height so a channel with no action buttons (ZCode) keeps
+   the same slot as one with two. */
 .actions {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
-  margin-top: auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  height: 28px;
+  overflow: hidden;
 }
 
 /* ---- Shared small parts ------------------------------------------------ */
@@ -333,10 +480,6 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-state-error-primary);
-}
-
-.muted {
-  color: var(--dsw-alias-label-tertiary);
 }
 
 /* Loading and empty share one block: both are "nothing to show yet", and

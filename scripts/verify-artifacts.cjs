@@ -126,8 +126,19 @@ check(
  * 而 `jsx(Label, { children: jsx(Switch) })` 这个形状在产物里是可直接查的。
  * `Switch` 渲染 `<button onClick>`，label 的点击会再转发一次 → `onChange` 触发两次
  * → 刚改的状态被立刻改回去（2026-10-04 实机：账号启用开关与自动签到开关都中过一次）。
+ *
+ * ⚠️ **必须在剥离内联样式之后查**。产物里有一整段 CSS 字符串内嵌在 JS 中
+ * （`const css = ".Y0b6Da_wrap{...}"`），里面有 `--dsw-alias-label-primary` 这类
+ * token，紧接着又出现 `..headSwitch` 这样的类名 —— 于是
+ * `label[^>]*\{[^}]*Switch` 会**跨着 CSS 文本误配**，把正确的代码判成红
+ * （2026-10-05 实踩：headSwitch 改名后本机门禁直接红，而 JSX 里根本没有 label）。
+ *
+ * 所以先删掉 `const css = "..."` 整条语句，再在剩下的**代码**里查。
+ * 这样既保住 F31 那条真判据，又不被样式表文本干扰。
  */
-check('Switch 未被包在 label 里（会双触发）', !/label[^>]*\{[^}]*Switch/.test(clientSrc))
+const clientCode = clientSrc.replace(/const css = "(?:[^"\\]|\\.)*";/g, '')
+
+check('Switch 未被包在 label 里（会双触发）', !/label[^>]*\{[^}]*Switch/.test(clientCode))
 check('开关行用 div 包裹', /div[^>]*\{[^}]*switchRow|_switchRow/.test(clientSrc))
 
 /**
