@@ -3,7 +3,15 @@ import { basename, resolve as resolvePath, dirname } from 'node:path'
 import { transform } from 'lightningcss'
 import type { Plugin, UserConfig } from 'tsdown'
 
-const PLUGIN_ID = 'dsh-cpa-switch'
+/**
+ * 包名 —— 从 `package.json` 读，不在这里再抄一份。
+ *
+ * 它是浏览器产物 `__ModuleLoader__.load({ id })` 的 id，也是 slot key 的来源；
+ * 抄一份就多一处会漂的事实，而漂了的后果是区块静默不渲染。
+ */
+const PLUGIN_ID: string = JSON.parse(
+  await readFile(new URL('./package.json', import.meta.url), 'utf8'),
+).name
 
 /**
  * Modules the host loader provides, kept out of the browser bundle.
