@@ -27,7 +27,7 @@ import type { CredentialsService, LoggerLike } from './credentials.ts'
 import { CpaProcess, probePort } from './process.ts'
 import { Operations } from './operations.ts'
 import type { RouteSpec } from './routes.ts'
-import { PLUGIN_ADAPTERS, PLUGIN_ORDER } from './adapters.ts'
+import { CHANNEL_IDS, CHANNELS } from './channels/registry.ts'
 import { managedExePath, inspect as inspectSetup, prepare as prepareSetup } from './setup/index.ts'
 import { readAccountIntent, writeExeMemory } from './state.ts'
 import { registerRoutes } from './routes.ts'
@@ -444,12 +444,12 @@ function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async () =>
         json({
           ok: true,
-          order: PLUGIN_ORDER,
-          plugins: PLUGIN_ORDER.map((id) => ({
-            id,
-            label: PLUGIN_ADAPTERS[id].label,
-            unit: PLUGIN_ADAPTERS[id].unit,
-            capabilities: PLUGIN_ADAPTERS[id].capabilities,
+          order: CHANNEL_IDS,
+          plugins: CHANNELS.map((channel) => ({
+            id: channel.id,
+            label: channel.label,
+            unit: channel.unit,
+            capabilities: channel.capabilities,
           })),
         }),
     },

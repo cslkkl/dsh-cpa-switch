@@ -23,23 +23,18 @@
  */
 
 import type { CpaOptions, CpaRequestInit } from './cpa.ts'
-import { buildAliasTable, channelPrefix as aliasOf, type AliasTable } from './model-alias.ts'
+import { ROUTE_PREFIXES, channelLabel, channelOrder } from './channels/registry.ts'
+import { buildAliasTable, type AliasTable } from './model-alias.ts'
 import { capsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
 import { CPA_API_KEY_REF, type LoggerLike } from './credentials.ts'
 
-/** 渠道展示名（模型展示名的前缀，一眼看出请求会走谁）。 */
-const ROUTE_CHANNEL_LABEL: Record<string, string> = {
-  workbuddy: 'WorkBuddy',
-  trae: 'Trae',
-  qoder: 'Qoder',
-  zcode: 'ZCode',
-  kimi: 'Kimi',
-  mimo: 'MiMo',
-}
-
-/** 渠道展示顺序（越靠前越优先）。 */
-const ROUTE_CHANNEL_ORDER = ['workbuddy', 'trae', 'qoder', 'zcode', 'kimi', 'mimo'] as const
+/**
+ * 渠道展示名与顺序**一律从渠道注册表派生**，这里不再抄第二份清单。
+ *
+ * 原先这里手写了六个渠道的展示名与顺序，而面板只认四个、生成配置的启用清单又少一个 ——
+ * 同一份知识三处登记且互相矛盾，漂了不报错（见 [channels/README.md](channels/README.md)）。
+ */
 
 /**
  * 推给 `llm-pi-ai` 的单个模型行。
@@ -200,10 +195,10 @@ function routeOwnerOf(
   const slash = id.indexOf('/')
   if (slash > 0) {
     const prefix = id.slice(0, slash)
-    const hit = ROUTE_CHANNEL_ORDER.find((c) => c.toLowerCase() === prefix.toLowerCase())
+    const hit = ROUTE_PREFIXES.find((c) => c.toLowerCase() === prefix.toLowerCase())
     if (hit !== undefined) return { plugin: hit, bare: id.slice(slash + 1) }
   }
-  for (const plugin of ROUTE_CHANNEL_ORDER) {
+  for (const plugin of ROUTE_PREFIXES) {
     if ((byChannel[plugin] ?? []).includes(id)) return { plugin, bare: id }
   }
   return { plugin: undefined, bare: id }
@@ -234,9 +229,12 @@ async function buildCpaRouteProfile(
     // 别名本身可能被 CPA 换回来（目录里就是 `wb/glm-5.3`），先还原成「模型 + 渠道」。
     const aliased = aliases.resolve(id)
     if (aliased !== undefined) {
-      const label =
-        ROUTE_CHANNEL_LABEL[aliased.channel] ?? aliasOf(aliased.channel) ?? aliased.channel
-      rows.push({ id, bare: aliased.model, label, channel: aliased.channel })
+      rows.push({
+        id,
+        bare: aliased.model,
+        label: channelLabel(aliased.channel),
+        channel: aliased.channel,
+      })
       continue
     }
     const { plugin, bare } = routeOwnerOf(id, byChannel)
@@ -248,25 +246,21 @@ async function buildCpaRouteProfile(
         rows.push({
           id: channelAlias,
           bare,
-          label: ROUTE_CHANNEL_LABEL[channel] ?? aliasOf(channel) ?? channel,
+          label: channelLabel(channel),
           channel,
         })
       }
       continue
     }
-    const label = plugin === undefined ? 'CPA' : (ROUTE_CHANNEL_LABEL[plugin] ?? plugin)
+    const label = plugin === undefined ? 'CPA' : channelLabel(plugin)
     rows.push({ id, bare, label, channel: plugin ?? '' })
   }
   if (rows.length === 0) {
     throw new Error('no routable model after channel split')
   }
   rows.sort((a, b) => {
-    const orderOf = (row: { label: string; bare: string }): number => {
-      const index = ROUTE_CHANNEL_ORDER.indexOf(
-        row.label.toLowerCase() as (typeof ROUTE_CHANNEL_ORDER)[number],
-      )
-      return index < 0 ? ROUTE_CHANNEL_ORDER.length : index
-    }
+    // 托管渠道按注册表顺序在前，非托管的按登记顺序跟在后面，认不出的排最后。
+    const orderOf = (row: { channel: string }): number => channelOrder(row.channel)
     const ia = orderOf(a)
     const ib = orderOf(b)
     if (ia !== ib) return ia - ib

@@ -92,7 +92,7 @@ export interface CreditEntry {
    *
    * 为什么挂在余额上：trae 把 `checked_in` 放在 `/credits` 的 `results[]` 里，
    * 而 `/accounts` 里只有 `checkin.checked_in` 一个布尔；两个接口都调，
-   * 但真正**可靠**的签到信号在 `/credits` 侧（见 `adapters.ts` 的 `parseCheckin`）。
+   * 但真正**可靠**的签到信号在 `/credits` 侧（见 `channels/trae.ts` 的 `parseCheckin`）。
    */
   readonly checkedIn?: boolean | undefined
   /** 签到奖励数额。trae 实测 100。⚠️ 上游注释明确它是**奖励**、不是钱包余额。 */

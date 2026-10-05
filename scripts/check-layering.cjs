@@ -29,8 +29,8 @@ const JUDGEMENT_FILES = new Set([
   'src/model-caps.ts',
 ])
 
-/** 判据允许的依赖：契约层。 */
-const JUDGEMENT_ALLOWED = /^\.\/contracts\//
+/** 判据允许的依赖：契约层与渠道层（两者都是纯的）。 */
+const JUDGEMENT_ALLOWED = /^\.\/(contracts|channels)\//
 
 /**
  * 规则表。每条规则：谁被检查、哪种 specifier 算越界。
@@ -57,7 +57,14 @@ const RULES = [
     title: '纯判据不得依赖 IO / 网络 / 状态',
     files: (rel) => JUDGEMENT_FILES.has(rel),
     violation: (spec) =>
-      JUDGEMENT_ALLOWED.test(spec) ? null : `判据依赖了 ${spec}（只允许契约层）`,
+      JUDGEMENT_ALLOWED.test(spec) ? null : `判据依赖了 ${spec}（只允许契约层与渠道层）`,
+  },
+  {
+    id: 'channels-pure',
+    title: '渠道层只许依赖契约与自身（纯数据 + 纯解析）',
+    files: (rel) => rel.startsWith('src/channels/'),
+    violation: (spec) =>
+      spec.startsWith('./') || spec.startsWith('../contracts/') ? null : `渠道层依赖了 ${spec}`,
   },
 ]
 
@@ -103,14 +110,20 @@ function stripComments(text) {
     .replace(/(^|[^:])\/\/[^\n]*/gu, (m, head) => head + ' '.repeat(m.length - head.length))
 }
 
-/** 取一个文件里的全部模块 specifier（含行号）。 */
+/**
+ * 取一个文件里的全部模块 specifier（含行号）。
+ *
+ * ⚠️ **两条模式都必须锚在行首**（允许缩进）。不锚的话会咬到字符串与对象键里的词：
+ * `import: '/v0/management/plugins/qoder/import'` 里的那个 `import` 后面紧跟一个引号，
+ * 于是「副作用导入」那条会把后面一整段源码当成 specifier（实踩，报了一堆假违规）。
+ */
 function specifiersOf(text) {
   const found = []
   const patterns = [
-    // `import ... from 'x'` / `export ... from 'x'`，允许跨行，但不许跨过一个字符串
-    /\b(?:import|export)\b[^'"]{0,400}?\bfrom\s*['"]([^'"]+)['"]/gu,
+    // `import ... from 'x'` / `export ... from 'x'`：允许跨行，但不许跨过一个字符串
+    /(?:^|\n)[ \t]*(?:import|export)\b[^'"]{0,400}?\bfrom\s*['"]([^'"]+)['"]/gu,
     // 副作用导入：`import 'x'`
-    /\bimport\s*['"]([^'"]+)['"]/gu,
+    /(?:^|\n)[ \t]*import\s*['"]([^'"]+)['"]/gu,
   ]
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {

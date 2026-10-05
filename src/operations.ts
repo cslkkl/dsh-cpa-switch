@@ -12,13 +12,14 @@
 import {
   ACTION_PATHS,
   AUTO_CHECKIN_PATHS,
-  PLUGIN_ADAPTERS,
-  PLUGIN_CONFIG_PATH,
-  PLUGIN_ORDER,
+  CHANNEL_IDS,
+  CHANNELS,
   SCHEDULER_MODE,
-  normalizeAccounts,
-} from './adapters.ts'
-import type { ChannelId } from './adapters.ts'
+  accountsPathOf,
+  channelOf,
+  configPathOf,
+} from './channels/registry.ts'
+import { normalizeAccounts } from './channels/normalize.ts'
 import type { ActionFailure, ActionOutcome } from './contracts/domain.ts'
 import { planSelect, verifySelect } from './select-plan.ts'
 import {
@@ -279,8 +280,8 @@ export class Operations {
    *   表现为「签到了但余额没变」。
    */
   async accountsOf(plugin: string, fresh = false): Promise<OpsResult> {
-    const adapter = PLUGIN_ADAPTERS[plugin as ChannelId]
-    if (adapter === undefined) return { ok: false, error: 'unknown-plugin' }
+    const channel = channelOf(plugin)
+    if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
 
     const key = `accounts:${plugin}:${String(fresh)}`
     if (!fresh) {
@@ -297,18 +298,18 @@ export class Operations {
    * 缓存层需要一个不递归的取数函数。
    */
   async #loadAccounts(plugin: string): Promise<OpsResult> {
-    const adapter = PLUGIN_ADAPTERS[plugin as ChannelId]
-    if (adapter === undefined) return { ok: false, error: 'unknown-plugin' }
+    const channel = channelOf(plugin)
+    if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
 
     const state = await this.#running()
     if ('error' in state) return state
 
     try {
-      const accountsPath = `/v0/management/plugins/${plugin}/accounts`
+      const accountsPath = accountsPathOf(plugin)
       const [base, creditData] = await Promise.all([
         this.#deps.cpaFetch(this.#deps.options(), accountsPath),
-        adapter.capabilities.credits
-          ? this.#deps.cpaFetch(this.#deps.options(), adapter.creditsPath()).catch(() => undefined)
+        channel.capabilities.credits
+          ? this.#deps.cpaFetch(this.#deps.options(), channel.creditsPath).catch(() => undefined)
           : Promise.resolve(undefined),
       ])
       const normalized = normalizeAccounts(plugin, base, creditData)
@@ -343,9 +344,9 @@ export class Operations {
         ok: true,
         data: {
           plugin,
-          label: adapter.label,
-          unit: adapter.unit,
-          capabilities: adapter.capabilities,
+          label: channel.label,
+          unit: channel.unit,
+          capabilities: channel.capabilities,
           serverTime: baseRecord?.server_time,
           schedule: baseRecord?.schedule,
           autoCheckin: baseRecord?.checkin_auto,
@@ -380,10 +381,10 @@ export class Operations {
    *   供界面报出「签了几个 / 加了多少」；`data` 是 CPA 的原始返回。
    */
   async action(plugin: string, kind: string, authIndex: string | undefined): Promise<OpsResult> {
-    const adapter = PLUGIN_ADAPTERS[plugin as ChannelId]
-    if (adapter === undefined) return { ok: false, error: 'unknown-plugin' }
+    const channel = channelOf(plugin)
+    if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
 
-    const path = ACTION_PATHS[plugin as ChannelId]?.[kind]
+    const path = ACTION_PATHS[plugin]?.[kind]
     if (path === undefined) return { ok: false, error: 'unsupported-action' }
 
     const ready = await this.#ready()
@@ -428,7 +429,7 @@ export class Operations {
    * 并按渠道缓存，省掉重复往返。
    */
   async autoCheckin(plugin: string, method: 'GET' | 'POST', enabled?: boolean): Promise<OpsResult> {
-    const paths = AUTO_CHECKIN_PATHS[plugin as ChannelId]
+    const paths = AUTO_CHECKIN_PATHS[plugin]
     if (paths === undefined) return { ok: false, error: 'unsupported' }
 
     if (method === 'GET') {
@@ -436,7 +437,7 @@ export class Operations {
         const state = await this.#running()
         if ('error' in state) return state
         try {
-          // ⚠️ 从 `/accounts` 顶层读，不是 `/config` —— 详见 adapters.ts 的注释
+          // ⚠️ 从 `/accounts` 顶层读，不是 `/config` —— 详见 channels/spec.ts 的注释
           const accountsData = (await this.#deps.cpaFetch(this.#deps.options(), paths.readFrom)) as
             Record<string, unknown> | undefined
           return { ok: true as const, enabled: accountsData?.[paths.field] === true }
@@ -471,17 +472,14 @@ export class Operations {
 
   /** 读某个渠道的模型目录（只读，用于展示）。 */
   async modelsOf(plugin: string): Promise<OpsResult> {
+    const channel = channelOf(plugin)
+    if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
+
     const state = await this.#running()
     if ('error' in state) return state
 
-    // zcode 用 /models，其余用 /models/groups。
-    // ⚠️ 必须带 `?refresh=1`：不带时读内存快照，未预热会返回空列表。
-    const path =
-      plugin === 'zcode'
-        ? '/v0/management/plugins/zcode/models'
-        : `/v0/management/plugins/${plugin}/models/groups?refresh=1`
     try {
-      const data = (await this.#deps.cpaFetch(this.#deps.options(), path)) as
+      const data = (await this.#deps.cpaFetch(this.#deps.options(), channel.modelsPath)) as
         | {
             groups?: {
               label?: unknown
@@ -504,16 +502,17 @@ export class Operations {
     }
   }
 
-  /** 开学季券码状态（只有 workbuddy 有）。 */
+  /** 开学季券码状态（只有 workbuddy 有这个能力）。 */
   async school(): Promise<OpsResult> {
+    const schoolPath = channelOf('workbuddy')?.schoolPath
+    if (schoolPath === undefined) return { ok: false, error: 'unsupported' }
+
     const state = await this.#running()
     if ('error' in state) return state
 
     try {
-      const data = (await this.#deps.cpaFetch(
-        this.#deps.options(),
-        '/v0/management/plugins/workbuddy/school/vouchers',
-      )) as { accounts?: unknown } | undefined
+      const data = (await this.#deps.cpaFetch(this.#deps.options(), schoolPath)) as
+        { accounts?: unknown } | undefined
       return { ok: true, accounts: data?.accounts ?? [] }
     } catch (error) {
       return { ok: false, error: messageOf(error) }
@@ -596,9 +595,9 @@ export class Operations {
     try {
       const changed: string[] = []
       const skipped: string[] = []
-      for (const plugin of PLUGIN_ORDER) {
+      for (const plugin of CHANNEL_IDS) {
         const cfg = (await this.#deps
-          .cpaFetch(this.#deps.options(), PLUGIN_CONFIG_PATH(plugin))
+          .cpaFetch(this.#deps.options(), configPathOf(plugin))
           .catch(() => undefined)) as { scheduler_mode?: unknown } | undefined
         // 渠道不支持这个字段就不动它（trae 就没有）
         if (cfg === undefined || cfg.scheduler_mode === undefined) {
@@ -606,7 +605,7 @@ export class Operations {
           continue
         }
         if (cfg.scheduler_mode === SCHEDULER_MODE) continue
-        await this.#deps.cpaFetch(this.#deps.options(), PLUGIN_CONFIG_PATH(plugin), {
+        await this.#deps.cpaFetch(this.#deps.options(), configPathOf(plugin), {
           method: 'PATCH',
           body: JSON.stringify({ scheduler_mode: SCHEDULER_MODE }),
         })
@@ -948,7 +947,7 @@ export class Operations {
   async authStart(plugin: string): Promise<OpsResult> {
     const ready = await this.#ready()
     if ('error' in ready) return ready
-    if (!(PLUGIN_ORDER as readonly string[]).includes(plugin)) {
+    if (channelOf(plugin) === undefined) {
       return { ok: false, error: 'unknown-provider' }
     }
 
@@ -1045,9 +1044,9 @@ export class Operations {
     }
 
     /** 今天还没补过、且渠道支持签到的。 */
-    const pending = PLUGIN_ORDER.filter(
-      (plugin) => PLUGIN_ADAPTERS[plugin].capabilities.checkin && done[plugin] !== day,
-    )
+    const pending = CHANNELS.filter(
+      (channel) => channel.capabilities.checkin && done[channel.id] !== day,
+    ).map((channel) => channel.id)
     if (pending.length === 0) return { ok: true, skipped: 'already-done-today' }
 
     const state = await this.#running()

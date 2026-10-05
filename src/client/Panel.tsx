@@ -102,7 +102,7 @@ export function Panel(props: PanelProps): ReactNode {
   /**
    * 渠道清单。
    *
-   * 它是**静态**的（四条渠道写死在 `adapters.ts`），所以它不值得走缓存 ——
+   * 它是**静态**的（四条渠道写死在 `channels/registry.ts`），所以它不值得走缓存 ——
    * 走的是最普通的一次 `api()`。
    */
   const pluginsResource = useAsyncResource<readonly PluginMeta[]>({
@@ -142,7 +142,7 @@ export function Panel(props: PanelProps): ReactNode {
    * 切到没去过的渠道必然等一次。渠道只有四条、每条两个接口，一次性取完的成本
    * 与「刚好要用的那一条」相差无几，却换来了「每个页签都是秒开」。
    *
-   * 触发点是**渠道清单到位之后**：清单本身是静态的（写在 `adapters.ts`），
+   * 触发点是**渠道清单到位之后**：清单本身是静态的（写在 `channels/registry.ts`），
    * 它到位才知道有哪几条。
    *
    * 依赖 `pluginsResource.data` 而不是 `plugins`（后者每帧新数组）。

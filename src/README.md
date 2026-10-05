@@ -93,11 +93,9 @@
 
 ## 渠道与网络
 
-- **`adapters.ts`** —— 四渠道接口差异收敛。
-  - 导出：`PLUGIN_ADAPTERS` / `PLUGIN_ORDER` / `ACTION_PATHS` / `AUTO_CHECKIN_PATHS` /
-    `PLUGIN_CONFIG_PATH` / `SCHEDULER_MODE` / `normalizeAccounts` / 类型 `ChannelId` /
-    `PluginAdapter`（**跨两半的形状在 [contracts/](contracts/README.md)**，不在这里）
-  - 上层只看统一形状；新增渠道只改这里
+- **`channels/`** —— 渠道知识的**唯一来源**（每个渠道一个 spec + 注册表）。
+  - 上层只看统一形状；新增渠道 = 加一个 spec + 在注册表挂上，别处（面板 / 路由 / 别名 / 生成配置）全部派生
+  - 模块手册 → [channels/README.md](channels/README.md)；越界由 `pnpm check:layering` 的 `channels-pure` 拦
   - ⚠️ **`CreditEntry` 只有 `remain` 必有**，`used` / `size` / `packages` 上游不给
     就是 `undefined` —— **绝不用 0 冒充**（trae 实测不给 used/size）。
     见[架构说明](../docs/ARCHITECTURE.md) F40 与
