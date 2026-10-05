@@ -76,6 +76,24 @@ const RULES = [
         ? `业务域依赖了外层模块 ${spec}（用例不该知道谁在调它）`
         : null,
   },
+  {
+    /**
+     * 环境准备层（能力层）在依赖方向上位于装配层与业务层**之前**。
+     *
+     * 为什么单列一条：2026-10-05 把 `net.ts` 归入 `setup/`（它唯一的消费者是
+     * `setup/download.ts`）—— 这条规则是**动文件之前先立**的，用来保证搬进去的那个
+     * HTTP 工具与它的同层文件都不会顺手接到对 CPA 的通道上：它下的是公开 release，
+     * 不是 CPA 的 API，走 `gateway` 就同时需要管理密钥与运行态前置，两件事都错。
+     */
+    id: 'setup-no-outer',
+    title: '环境准备层不得依赖装配层、业务层与对 CPA 的通道（依赖方向单向）',
+    files: (rel) => rel.startsWith('src/setup/'),
+    violation: (spec) =>
+      /^\.\.\/(index|boot|route-table|routes|route-registry|gateway|runtime)\.ts$/u.test(spec) ||
+      /^\.\.\/ops\//u.test(spec)
+        ? `环境准备层依赖了外层模块 ${spec}（准备环境不该知道谁在调它，也不该走 CPA 通道）`
+        : null,
+  },
 ]
 
 /**
