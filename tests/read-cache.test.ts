@@ -9,8 +9,22 @@
  * 整屏账号网格消失 —— 那是本轮要修的毛病本身。
  */
 
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { ReadCache, prefetch, readCache, type ApiResult } from '../src/client/api.ts'
+
+/**
+ * 模块级单例（`readCache`）是**跨用例共享**的：一个用例 put 进去的 key 会漏到下一个。
+ *
+ * 原先靠「各用例用不同的 key」避开污染，但并非所有用例都做到了 ——
+ * 「state 属于别的 key 时不算数」那条依赖 `accounts:trae` **此刻不在缓存里**，
+ * 而那正是后面两条用例 put 的 key，只因为文件顺序才没出事。
+ *
+ * `invalidate('')` 是前缀失效的「全清」形态（空前缀匹配所有 key），
+ * 比再加一个 `clear()` 接口少一处需要同步维护的面。
+ */
+beforeEach(() => {
+  readCache.invalidate('')
+})
 
 /** 造一个受控时钟的缓存。 */
 function makeCache(): { cache: ReadCache; setClock: (value: number) => void } {
