@@ -7,20 +7,30 @@
 
 - **`contracts/`** —— 两半共享的**纯类型**：渠道能力、额度、签到、账号、批量动作结果。
   - 只有类型、零运行时依赖；宿主与浏览器都 `import type`（[决策记录](../.agents/notes/2026-10-05-contract-type-sharing.md)）
-  - 被谁依赖：`adapters.ts`（生产方）、`operations.ts`、`src/client/**`
+  - 被谁依赖：`channels/normalize.ts`（生产方）、`operations.ts`、`src/client/**`
   - 模块手册 → [contracts/README.md](contracts/README.md)；越界由 `pnpm check:layering` 拦
 
 ## 装配层
 
-- **`index.ts`** —— 唯一的出口，其余模块都为它服务。
-  - 导出：`ENTRY_ID` / `name` / `inject` / `Config`见再导出）/ `apply`
-  - 内容：生命周期 effect见`boot` / `autoInstallIfNeeded`）+ `buildRoutes` 路由表
-  - `apply` 只做**装配**：造 `AdminKeyStore` / `CpaProcess` / `Operations`，
-    再挂 effect 与路由。业务逻辑不写在这里。
+- **`index.ts`** —— 唯一的出口，只做**装配**（约 185 行）。
+  - 导出：`ENTRY_ID` / `name` / `inject` / `Config`（再导出）/ `apply`
+  - `apply` 的内容：造 `AdminKeyStore` / `CpaProcess` / `Operations` / `SetupSession`，
+    挂生命周期 effect（转手给 [`boot.ts`](boot.ts)）与 HTTP 路由（转手给
+    [`route-table.ts`](route-table.ts)）—— **流程与表都不在这里**
+  - 改动理由见[决策记录](../.agents/notes/2026-10-05-assembly-layer.md)
   - 被谁依赖：宿主 loader 按 `package.json` 的 `.` 导出加载
   - 改后必测：`pnpm build` 后确认 `lib/index.js` 的导出面未变
+- **`boot.ts`** —— 生命周期流程：备凭据 → 补环境 → 拉起 CPA → 恢复账号选择 → 开机补签 → 推模型路由。
+  - 导出：`runBoot` / 类型 `BootDeps`
+  - ⚠️ 每一步都要看 `isCancelled()`：宿主可能在任何一步之间重建 fiber
+  - ⚠️ 补装失败**只记日志**：网络抖动的异常放任冒出去会拖死整个 DSH 宿主（见 F17）
+- **`route-table.ts`** —— 路由表（声明式数据，16 条）。
+  - 导出：`buildRoutes` / 类型 `RouteDeps`
+  - ⚠️ handler 只做三件事：解码请求 → 调用例 → `json()`；业务规则在 [operations.ts](operations.ts)
+  - ⚠️ **同一 path 只能注册一次**、方法只有 `GET`/`HEAD`/`POST`；判据在 `tests/route-table.test.ts`
+    （含 README 那张表与代码的一致性）
 
-## 基础模块见无业务依赖，可独立测）
+## 基础模块（无业务依赖，可独立测）
 
 - **`ids.ts`** —— 宿主半边的入口标识（包名 = loader 条目 id = slot key = 设置命名空间）。
   - 导出：`PLUGIN_ID`
@@ -66,26 +76,26 @@
   - ⚠️ 全字段 `.volatile()`；值一律现读
 - **`routes.ts`** —— 路由归一化与注册。
   - 导出：`normalizeRoutes` / `registerRoutes` / 类型 `RouteSpec` / `RoutesContext`
-  - 兜住宿主路由契约见同 path 只注册一次、方法只有 GET/HEAD/POST）
+  - 兜住宿主路由契约（同 path 只注册一次、方法只有 GET/HEAD/POST）
   - 改后必测：同 path 多条目合并、非法方法被剔除、单条失败不拖垮其余
 - **`cache.ts`** —— 读缓存与端口探活记忆。
-  - 导出：`CpaCache`见类）/ `ProbeCache`见类）
-  - 折叠面板一次点击里的并发读；写操作后按前缀失效见见[架构说明](../docs/ARCHITECTURE.md)）
+  - 导出：`CpaCache`（类）/ `ProbeCache`（类）
+  - 折叠面板一次点击里的并发读；写操作后按前缀失效（见[架构说明](../docs/ARCHITECTURE.md)）
   - ⚠️ 两条缓存都**不抛错**，失效坏了只会静默变慢或显示旧值
-  - 改后必测：`tests/cache.test.ts`见并发合并、写后失效、失败不留缓存）
+  - 改后必测：`tests/cache.test.ts`（并发合并、写后失效、失败不留缓存）
 
-## 能力模块见有副作用）
+## 能力模块（有副作用）
 
 - **`credentials.ts`** —— 管理密钥与调用密钥。
-  - 导出：`AdminKeyStore`见类）/ `ensureApiKey` / `CPA_API_KEY_REF` / 类型 `CredentialsService` / `LoggerLike`
+  - 导出：`AdminKeyStore`（类）/ `ensureApiKey` / `CPA_API_KEY_REF` / 类型 `CredentialsService` / `LoggerLike`
   - `AdminKeyStore` 持有解析缓存；`ensureForAutoInstall` 是「沿用优先」的三步取值
-  - 改后必测：只有明文能用见bcrypt 哈希必须被挡掉）
+  - 改后必测：只有明文能用（bcrypt 哈希必须被挡掉）
 - **`process.ts`** —— CPA 子进程托管。
-  - 导出：`CpaProcess`见类）/ `resolveExe` / `probePort` / `waitForPort` / `defaultExeCandidates` / `DEFAULT_PORT`
+  - 导出：`CpaProcess`（类）/ `resolveExe` / `probePort` / `waitForPort` / `defaultExeCandidates` / `DEFAULT_PORT`
   - `CpaProcess` 只关自己启的进程；`resolveExe` 的优先级见架构
   - 改后必测：清空代理变量、带 `-no-browser`、只关 owned
-- **`operations.ts`** —— 业务操作集合见本目录最大的模块）。
-  - 导出：`Operations`见类）
+- **`operations.ts`** —— 业务操作集合（本目录最大的模块）。
+  - 导出：`Operations`（类）
   - 用类是为了让「CPA 在跑 + 有密钥」这两个前置集中在 `#ready()` / `#running()`
   - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `invalidateChannel(plugin)`，否则用户看到旧值
   - 被谁依赖：`index.ts` 的 `buildRoutes`

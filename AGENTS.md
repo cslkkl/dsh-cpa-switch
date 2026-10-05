@@ -18,7 +18,9 @@
 
 | 改了                            | 必须同步                                                                                                                                                                                                          |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts` 路由表           | [src/README.md](src/README.md) 的路由表 + [架构说明](docs/ARCHITECTURE.md)                                                                                                                                        |
+| `src/index.ts` 装配             | 只挂线：造对象、挂 effect、注册路由；**流程与表都不在这里**（[决策记录](.agents/notes/2026-10-05-assembly-layer.md)）                                                                                             |
+| `src/route-table.ts` 路由表     | 同 path 只能注册一次、方法只有 `GET`/`HEAD`/`POST`（违反任一条让**所有**路由失效）；表与 [src/README.md](src/README.md) 的可读索引由 `tests/route-table.test.ts` 钉成一致                                         |
+| `src/boot.ts` 启动流程          | 顺序「先补环境再启动」不许反（否则环境不全被掩盖）；每步都要看 `isCancelled()`；补装异常必须就地吞掉（F17）                                                                                                       |
 | `src/route-registry.ts`         | 模型路由唯一入口：[架构说明](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证） |
 | `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）；**改启用态要回读确认 + 逐个容错**（F43）                    |
 | `src/select-plan.ts`            | 「设为唯一」的目标状态计算与回读验证（纯函数）；改动同步 [决策记录](.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                            |
@@ -86,7 +88,7 @@ python check-line-endings.py <本仓根> --target lf
 - 测试数量与类型检查结果 → 现跑 `pnpm test` / `pnpm typecheck`，或看
   [CI 运行记录](https://github.com/cslkkl/dsh-cpa-switch/actions/workflows/ci.yml)
 - 产物清单与体积 → `Get-ChildItem lib` 现查
-- 路由表 → [src/index.ts](src/index.ts) 的 `buildRoutes()`（README 那张表是可读索引，代码是事实源）
+- 路由表 → [src/route-table.ts](src/route-table.ts) 的 `buildRoutes()`（README 那张表是可读索引，两者由 `tests/route-table.test.ts` 钉成一致）
 - 渠道能力与单位 → [src/channels/registry.ts](src/channels/registry.ts)（改这里，别处派生）
 - 状态文件与运行时目录 → [src/paths.ts](src/paths.ts)（**认 `DSH_HOME`**；别自己拼 `homedir()/.dsh`）
 - 产物该有什么 → `scripts/verify-artifacts.cjs` 的断言集合

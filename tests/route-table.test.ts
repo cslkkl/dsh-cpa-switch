@@ -101,12 +101,15 @@ describe('README 的路由索引与代码一致', () => {
     const found = new Map<string, string[]>()
     for (const line of section.split('\n')) {
       const match = /^\|\s*`(\/api\/v1\/cpa\/[^`]*)`\s*\|\s*([^|]+?)\s*\|/u.exec(line)
-      if (match === null) continue
+      // `noUncheckedIndexedAccess`：捕获组可能是 undefined，显式兜一层
+      const rawPath = match?.[1]
+      const rawMethods = match?.[2]
+      if (rawPath === undefined || rawMethods === undefined) continue
       // 表里的 `?plugin=` 只是可读示意，注册用的 path 不含查询串
-      const path = match[1].split('?')[0]
+      const path = rawPath.split('?')[0] ?? ''
       found.set(
         path,
-        match[2]
+        rawMethods
           .split('/')
           .map((method) => method.trim().toUpperCase())
           .filter((method) => method !== ''),
