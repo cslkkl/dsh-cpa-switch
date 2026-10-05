@@ -158,7 +158,8 @@ describe('规则表：判定与适用范围', () => {
     const rule = ruleOf('judgement-no-io')
     expect(rule.files('src/model-alias.ts')).toBe(true)
     expect(rule.files('src/model-caps.ts')).toBe(true)
-    expect(rule.files('src/operations.ts')).toBe(false)
+    expect(rule.files('src/action-outcome.ts')).toBe(true)
+    expect(rule.files('src/ops/actions.ts')).toBe(false)
     expect(rule.violation('./channels/registry.ts')).toBeNull()
     expect(rule.violation('./contracts/domain.ts')).toBeNull()
     expect(rule.violation('./state.ts')).not.toBeNull()
@@ -166,9 +167,26 @@ describe('规则表：判定与适用范围', () => {
 
   it('宿主半边不得引用浏览器半边', () => {
     const rule = ruleOf('host-no-client')
-    expect(rule.files('src/operations.ts')).toBe(true)
+    expect(rule.files('src/ops/accounts.ts')).toBe(true)
     expect(rule.files('src/client/api.ts')).toBe(false)
     expect(rule.violation('./client/api.ts')).not.toBeNull()
     expect(rule.violation('./channels/registry.ts')).toBeNull()
+  })
+
+  /**
+   * 业务域（用例层）在依赖方向上位于传输层与装配层**之前** ——
+   * 它不该知道谁在调它。这条规则让「顺手 import 一下路由表」在构建期就红。
+   */
+  it('业务域不得依赖传输层与装配层', () => {
+    const rule = ruleOf('ops-no-outer')
+    expect(rule.files('src/ops/accounts.ts')).toBe(true)
+    expect(rule.files('src/ops/index.ts')).toBe(true)
+    expect(rule.files('src/operations.ts')).toBe(false)
+    expect(rule.violation('../route-table.ts')).not.toBeNull()
+    expect(rule.violation('../routes.ts')).not.toBeNull()
+    expect(rule.violation('../boot.ts')).not.toBeNull()
+    expect(rule.violation('../index.ts')).not.toBeNull()
+    expect(rule.violation('../gateway.ts')).toBeNull()
+    expect(rule.violation('./result.ts')).toBeNull()
   })
 })
