@@ -45,7 +45,8 @@
     "test": "vitest run",
     "verify:artifacts": "node scripts/verify-artifacts.cjs",
     "check:layering": "node scripts/check-layering.cjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm check:layering && pnpm format:check && pnpm build && pnpm verify:artifacts && pnpm test"
+    "check:doc-paths": "node scripts/check-doc-paths.cjs",
+    "check": "pnpm typecheck && pnpm lint && pnpm check:layering && pnpm check:doc-paths && pnpm format:check && pnpm build && pnpm verify:artifacts && pnpm test"
   },
   "dsh": {
     "bundle": {
