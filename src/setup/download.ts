@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { downloadTo, getJson } from '../net.ts'
+import { downloadTo, getJson } from './net.ts'
 import { SOURCES, managedConfigPath, managedExePath, managedPluginsDir } from './paths.ts'
 import type { SourceKey } from './paths.ts'
 
