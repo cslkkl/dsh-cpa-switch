@@ -110,6 +110,10 @@ python check-line-endings.py <本仓根> --target lf
 - 构建产物：`lib/index.js`（宿主 ESM）+ `lib/client.js`（浏览器 CJS）+ `lib/index.d.ts`。
 - 已发布版本经真实用户路径验收：装完插件自动下载 CPA、生成密钥、拉起服务，四渠道页签齐全。
   具体版本号看 [npm](https://www.npmjs.com/package/dsh-cpa-switch)。
+- **模型路由的重载空窗修复经真机验收（2026-10-05）**：`pnpm build` 后重启 DSH、写一次设置
+  （切语言）—— 选择框不再退化成 `provider/model`、composer 不停用，终端出现
+  `重载空窗补回（N ms）`。复验必须**重启**（宿主半端不随页面刷新加载），
+  复现与回滚见[决策记录](.agents/notes/2026-10-05-route-reload-blank-window.md)。
 
 ## 待办
 
