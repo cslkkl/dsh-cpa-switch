@@ -40,21 +40,82 @@ export interface Capabilities {
   readonly import: boolean
 }
 
-/** 解析后的余额一条。不同渠道填的字段不同，缺的为 `undefined`。 */
+/**
+ * 解析后的余额。
+ *
+ * ## 设计：**一个必有，其余可选**
+ *
+ * 四个渠道返回的额度字段**根本不是一套**（2026-10-05 逐渠道实测，见
+ * [决策记录](../../.agents/notes/2026-10-05-credit-shape-per-channel.md)）：
+ *
+ * | 字段        | workbuddy | qoder | zcode     | trae            |
+ * | ----------- | --------- | ----- | --------- | --------------- |
+ * | `remain`    | ✓ 4939    | ✓ 442 | ✓ 8000000 | ✓ 633           |
+ * | `used`      | ✓ 49      | ✓1158 | ✓ 0       | **无**          |
+ * | `size`      | ✓ 4988    | ✓1600 | ✓ 8000000 | **无**          |
+ * | `packages`  | ✓ 33 个   | ✓ 2 个| ✓ 2 个    | 无              |
+ * | `unlimited` | —         | —     | —         | ✓               |
+ *
+ * 所以这里**只有一个字段是必有的**：{@link remain}。
+ * 其余全部可选，**上游没给就是 `undefined`** —— 不是 0。
+ *
+ * ⚠️ **绝不用 0 或别的值冒充缺失字段。** 曾经的写法给 trae 填了
+ * `used: 0` + `size: remain`，界面上就出现一个上游从没说过的「已用 0」，
+ * 以及一条恒为 0% 的假进度条。哨兵值漏到界面上就是假数据：
+ * 用户看到 0 会以为「这号没被用过」，而事实是「不知道」。
+ *
+ * 界面拿到 `undefined` 该怎么显示，由界面决定（留空 / 显示 `—` / 不画进度条），
+ * 但**不许在这里编一个数**。
+ */
 export interface CreditEntry {
+  /** 剩余。**唯一一个所有渠道都保证有的数**。 */
   readonly remain: number
-  readonly used: number
-  readonly size: number
-  readonly packCount: number
-  readonly packages: readonly unknown[]
+  /** 已用；上游不给时为 `undefined`（trae 实测不给）。 */
+  readonly used?: number | undefined
+  /** 总额（占比的分母）；上游不给时为 `undefined`（trae 实测不给）。 */
+  readonly size?: number | undefined
+  /** 额度包明细。trae 没有这个概念，为空数组。 */
+  readonly packages: readonly CreditPackage[]
+  /** 取数时间，上游原样带出。 */
   readonly fetchedAt?: unknown
-  /** trae 专有：池子无限。 */
-  readonly unlimited?: boolean
-  /** trae 专有：余量是否已知（未知时 `remain` 为 0，**不代表没额度**）。 */
-  readonly remainKnown?: boolean
+  /**
+   * 余量是否**已知**。
+   *
+   * `undefined` = 该渠道没这个概念，视为已知（workbuddy / qoder / zcode）。
+   * `false` = 上游明说「不知道」—— 此时 {@link remain} 的 0 **不代表没额度**。
+   *
+   * ⚠️ trae 有**两条独立的轴**，别合并：`credits_pool_known`（池子）与
+   * `remain_known`（fast/basic 那套）。实测两个号是
+   * 「池子 `true` + fast/basic `false`」的组合。这里记录的是**池子**那条
+   * —— 因为池子才是模型调用真正扣的钱；fast/basic 那条不可用不影响它。
+   */
+  readonly known?: boolean | undefined
+  /** `true` = 无限量。 */
+  readonly unlimited?: boolean | undefined
+  /** 上游的套餐值，原样透传（本地化由 `plan-text.ts` 负责）。 */
   readonly plan?: unknown
-  readonly checkedIn?: boolean
+  /**
+   * 签到状态**随余额一起返回**的渠道（trae）在这里带出。
+   *
+   * 为什么挂在余额上：trae 把 `checked_in` 放在 `/credits` 的 `results[]` 里，
+   * 而 `/accounts` 里只有 `checkin.checked_in` 一个布尔；两个接口都调，
+   * 但真正**可靠**的签到信号在 `/credits` 侧（见 `parseCheckin`）。
+   */
+  readonly checkedIn?: boolean | undefined
+  /** 签到奖励数额。trae 实测 100。⚠️ 上游注释明确它是**奖励**、不是钱包余额。 */
   readonly checkinCredits?: unknown
+}
+
+/** 一个额度包。字段同样按渠道能给的填，缺的为 `undefined`。 */
+export interface CreditPackage {
+  /** 包名。实测 zcode 是 `GLM-5.3 (token)`。 */
+  readonly name?: string | undefined
+  readonly remain?: number | undefined
+  readonly used?: number | undefined
+  readonly size?: number | undefined
+  /** 周期起止。实测 workbuddy 有，qoder 是空串，zcode 没有。 */
+  readonly cycleStart?: unknown
+  readonly cycleEnd?: unknown
 }
 
 /** 解析后的签到状态。`undefined` 表示该渠道/该账号取不到可靠状态。 */
@@ -105,7 +166,7 @@ interface CreditsPayload {
   accounts?: {
     auth_index?: string
     credits?: {
-      packages?: unknown[]
+      packages?: RawPackage[]
       pack_count?: number
       total_remain?: number
       total_used?: number
@@ -115,17 +176,43 @@ interface CreditsPayload {
   }[]
 }
 
-/** trae 的余额结构。 */
-interface TraeCreditsPayload {
-  results?: {
-    auth_index?: string
-    credits_pool_remain?: number
-    credits_pool_unlimited?: boolean
-    credits_pool_known?: boolean
-    plan?: unknown
-    checked_in?: boolean
-    checkin_credits?: unknown
-  }[]
+/** 上游额度包的原样形状（三个嵌套渠道共用；zcode 没有周期字段）。 */
+interface RawPackage {
+  name?: string
+  remain?: number
+  used?: number
+  size?: number
+  cycle_start?: unknown
+  cycle_end?: unknown
+}
+
+/**
+ * 把一个上游额度包转成统一形状。
+ *
+ * 只搬运**上游真的给了**的字段 —— 不给就留 `undefined`，
+ * 不在这一层编默认值（`?? 0` 会把「没有」变成「是 0」）。
+ */
+function toPackage(raw: RawPackage): CreditPackage {
+  return {
+    name: typeof raw.name === 'string' && raw.name !== '' ? raw.name : undefined,
+    remain: numberOrUndefined(raw.remain),
+    used: numberOrUndefined(raw.used),
+    size: numberOrUndefined(raw.size),
+    cycleStart: raw.cycle_start,
+    cycleEnd: raw.cycle_end,
+  }
+}
+
+/**
+ * 数值字段的搬运：**非有限数一律当作「没给」**。
+ *
+ * 上游偶尔给 `null` / 字符串 / 缺字段。`Number(null)` 是 0，
+ * 那又变回「编一个 0」—— 所以这里显式排除。
+ */
+function numberOrUndefined(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined
+  const n = Number(value)
+  return Number.isFinite(n) ? n : undefined
 }
 
 /** 解析 `{accounts:[{credits:{...}}]}` 形状的余额。 */
@@ -137,14 +224,31 @@ function parseNestedCredits(payload: unknown): Map<unknown, CreditEntry> {
     const credits = item.credits
     map.set(item.auth_index, {
       remain: Number(credits.total_remain ?? 0),
-      used: Number(credits.total_used ?? 0),
-      size: Number(credits.total_size ?? 0),
-      packCount: Number(credits.pack_count ?? (credits.packages ?? []).length),
-      packages: credits.packages ?? [],
+      used: numberOrUndefined(credits.total_used),
+      size: numberOrUndefined(credits.total_size),
+      packages: (credits.packages ?? []).map(toPackage),
       fetchedAt: credits.fetched_at,
     })
   }
   return map
+}
+
+/** trae 的余额结构。 */
+interface TraeCreditsPayload {
+  results?: {
+    auth_index?: string
+    credits_pool_remain?: number
+    credits_pool_unlimited?: boolean
+    credits_pool_known?: boolean
+    /** fast/basic 那套的已知标志 —— 与 `credits_pool_known` 是**两条轴**。 */
+    remain_known?: boolean
+    /** 实测 `null`（`/accounts`）或 `0`（`/credits`）—— 池子可用时它是空的。 */
+    total_remain?: number | null
+    usage_model?: string
+    plan?: unknown
+    checked_in?: boolean
+    checkin_credits?: unknown
+  }[]
 }
 
 /**
@@ -201,9 +305,20 @@ export const PLUGIN_ADAPTERS: Record<ChannelId, PluginAdapter> = {
     /**
      * 解析余额。
      *
-     * 注意：trae 用 `credits_pool_remain` 而不是 `total_remain`，
-     * 且 `credits_pool_known=false` 时 `total_remain` 是 0
-     * （**不代表没额度**，是「未知」）。
+     * ⚠️ trae 的形状与其余三个渠道**根本不同**（实测 2026-10-05）：
+     *
+     * | 字段                    | 实测值        | 含义                              |
+     * | ----------------------- | ------------- | --------------------------------- |
+     * | `credits_pool_known`    | `true`        | 积分池的余量**已知**              |
+     * | `credits_pool_remain`   | `633` / `3133`| 真实可花余额（模型调用扣这个）    |
+     * | `remain_known`          | `false`       | **另一条轴**：fast/basic 不可用   |
+     * | `total_remain`          | `null` / `0`  | 那套不可用，所以是空              |
+     * | `usage_model`           | `"unknown"`   | 同上                              |
+     *
+     * **它没有 `total_used`、也没有 `total_size`** —— 所以
+     * `used` 与 `size` 一律置 `undefined`（见 {@link CreditEntry} 的说明）。
+     * 曾经把 `size` 填成 `remain`、`used` 填成 `0`，等于**凭空造了一个分母**，
+     * 于是进度条恒显示 0%。
      */
     parseCredits: (payload) => {
       const map = new Map<unknown, CreditEntry>()
@@ -211,14 +326,14 @@ export const PLUGIN_ADAPTERS: Record<ChannelId, PluginAdapter> = {
       for (const item of list) {
         map.set(item.auth_index, {
           remain: Number(item.credits_pool_remain ?? 0),
-          used: 0,
-          size: Number(item.credits_pool_remain ?? 0),
-          packCount: 0,
+          // ⚠️ 上游**不给**这两个数 —— 留 undefined，界面据此留空/不画条。
+          // 曾填 0 与 remain，等于凭空造数据（见 CreditEntry 的说明）。
           packages: [],
           unlimited: item.credits_pool_unlimited === true,
-          remainKnown: item.credits_pool_known === true,
+          // 池子那条轴才是模型调用真正扣的钱；fast/basic 那条不可用不影响它
+          known: item.credits_pool_known === true,
           plan: item.plan,
-          // trae 把签到状态放在这里 —— 这是**可靠**的签到信号
+          // 签到信号与奖励也在这条记录里（见 CreditEntry 的说明）
           checkedIn: item.checked_in === true,
           checkinCredits: item.checkin_credits,
         })
