@@ -127,12 +127,19 @@ function specifiersOf(text) {
   ]
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
-      const spec = match[1]
-      const line = text.slice(0, match.index).split('\n').length
-      found.push({ spec, line })
+      /**
+       * 行号取**关键字**的位置，不是 match.index。
+       *
+       * 模式以 `(?:^|\n)` 开头，所以 `match.index` 可能落在上一行的换行符上 ——
+       * 直接用它会少算一行（写判据时实踩：注释里的例子把行号带偏一格）。
+       */
+      const start = match.index + match[0].search(/\S/u)
+      found.push({ spec: match[1], line: text.slice(0, start).split('\n').length, at: start })
     }
   }
-  return found
+  // 两条模式各扫一遍，按出现位置排序后才是稳定的顺序（否则先列完所有 from，再列副作用导入）
+  found.sort((a, b) => a.at - b.at)
+  return found.map(({ spec, line }) => ({ spec, line }))
 }
 
 /** 行级：契约层里有没有值层面的导入 / 导出。 */
