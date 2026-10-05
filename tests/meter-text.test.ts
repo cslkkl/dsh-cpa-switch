@@ -1,13 +1,17 @@
 /**
  * `meterDecision` —— 余额区该画什么。
  *
- * 守三件事，每一件都对应一个**实测过的渠道差异**（2026-10-05 直连 CPA 核实）：
+ * 守四件事，每一件都对应一个**实测过的渠道差异**（2026-10-05 直连 CPA 核实）：
  *
  * 1. **没有分母就不画进度条** —— trae 只给 `credits_pool_remain`，
  *    没有 `total_size`。历史上这里拿 `remain` 当分母，画出恒为 0% 的假条。
  * 2. **`used` 缺失时界面留空** —— trae 没有 `total_used`。
  *    曾经填 0，卡片上就出现一个上游从没说过的「已用 0」。
  * 3. **无限量没有占比可言** —— trae 的 `credits_pool_unlimited`。
+ *
+ * 4. **条宽是「剩余占比」（`remain / size`），不是「已用占比」** ——
+ *    条恒为成功色（绿），绿色直观读作「还有 / 可用」；按已用画就成了
+ *    「用得越多绿得越多」，与想表达的意思**正好相反**（2026-10-05 真机验收发现）。
  *
  * ⚠️ 反面对照（防止矫枉过正）：workbuddy / qoder / zcode 三个渠道的
  * `used` 与 `size` 都是**真的**，必须照常画条、照常显示已用。
@@ -21,10 +25,11 @@ import { describe, expect, it } from 'vitest'
 import { amountWithUnit, meterDecision, sumCredits } from '../src/client/meter-text.ts'
 
 describe('meterDecision', () => {
-  it('有分母也有已用 → 画条，按占比给宽度，已用可显示', () => {
+  it('⚠️ 有分母也有已用 → 画条，宽度取**剩余**占比（不是已用占比）', () => {
+    // 同一组数：按已用画是 70，按剩余画是 30 —— 钉住方向，防止被改回去
     expect(meterDecision({ remain: 30, used: 70, size: 100 })).toEqual({
       show: true,
-      percent: 70,
+      percent: 30,
       hasUsed: true,
       unlimited: false,
     })
@@ -75,22 +80,27 @@ describe('meterDecision', () => {
     expect(d.unlimited).toBe(true)
   })
 
-  it('used 缺失但 size 在 → 仍然画（分母是真的）', () => {
+  it('used 缺失但 size 在 → 仍然画（分母是真的），一点没用就满格', () => {
     const d = meterDecision({ remain: 100, size: 100 })
     expect(d.show).toBe(true)
-    expect(d.percent).toBe(0)
+    expect(d.percent).toBe(100)
     expect(d.hasUsed).toBe(false)
   })
 
-  it('used 超过 size 时夹到 100（进度条不溢出容器）', () => {
-    expect(meterDecision({ remain: 0, used: 150, size: 100 }).percent).toBe(100)
-    expect(meterDecision({ remain: 100, used: -10, size: 100 }).percent).toBe(0)
+  it('remain 超过 size（赠送额度）夹到 100；用光时条空', () => {
+    expect(meterDecision({ remain: 150, used: 0, size: 100 }).percent).toBe(100)
+    expect(meterDecision({ remain: 0, used: 150, size: 100 }).percent).toBe(0)
   })
 
-  it('非有限数不产生 NaN 宽度', () => {
+  it('非有限数不产生 NaN 宽度：used 坏了不影响条，remain 坏了就不画', () => {
     const d = meterDecision({ remain: 0, used: Number.NaN, size: 100 })
     expect(Number.isFinite(d.percent)).toBe(true)
     expect(d.hasUsed).toBe(false)
+    // 分子不可信 → 算不出占比 → 不画。画 0% 等于替上游说「剩余 0」
+    const bad = meterDecision({ remain: Number.NaN, used: 5, size: 100 })
+    expect(bad.show).toBe(false)
+    // 「已用」那格与条无关，照常有数
+    expect(bad.hasUsed).toBe(true)
   })
 })
 

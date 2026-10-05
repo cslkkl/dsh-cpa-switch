@@ -24,7 +24,7 @@
 | `model-alias.test.ts`       | 别名表：只收录多渠道供给的同名模型、每渠道一个互不相同的别名、不重名不配别名                                                                                                                                     |
 | `model-caps.test.ts`        | 能力校准表：已校准渠道取表值、未校准回宿主兜底                                                                                                                                                                   |
 | `setup-config.test.ts`      | `renderConfig` 的 `server.host` 写入、`model-alias` 段形状、`looksLikeBcrypt`                                                                                                                                    |
-| `meter-text.test.ts`        | 余额区判据：**没有分母就不画条**（trae）、`used` 缺失时 `hasUsed` 为 false、无限量不画条；**不矫枉过正**（三渠道照常画）、宽度夹到 0–100                                                                         |
+| `meter-text.test.ts`        | 余额区判据：**没有分母就不画条**（trae）、`used` 缺失时 `hasUsed` 为 false、无限量不画条；**条宽取「剩余占比」（绿=还有）**、**不矫枉过正**（三渠道照常画）、宽度夹到 0–100                                      |
 | `routing-text.test.ts`      | 路由策略本地化：**三个合法值都不许露出英文**、认不出的原样透传、两个 round-robin 变体都警告、警告文案点明前提                                                                                                    |
 | `card-slots.test.ts`        | **账号卡六槽位契约**：每个槽位只含一种东西（head 无启用文字 / tagRow 无套餐名 / numbers 永远两格 / meterSlot 无文字）、禁用卡不 grayscale、汇总三格、卡片高度算式                                                |
 | `checkin-ledger.test.ts`    | **今日签到账本**：按天失效、渠道级保留键、**只补不覆盖**（上游说 `false` 不许翻成 `true`）、不知道时不猜「未签到」                                                                                               |

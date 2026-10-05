@@ -77,6 +77,10 @@
   - 规则一：**没有分母（`size`）就不画进度条** —— trae 上游只给 `credits_pool_remain`
   - 规则二：**`used` 缺失时「已用」格留空**（`hasUsed: false`），**不填 0**
   - 规则三：`unlimited` 时没有占比可言，也不画
+  - 规则四：条的宽度是**剩余占比**（`remain / size`），**不是已用占比** ——
+    条是绿的，绿色读作「还有」；按已用画就成了「用得越多绿得越多」
+    （2026-10-05 真机验收发现，见[决策记录](../../.agents/notes/2026-10-05-meter-bar-shows-remaining.md)）。
+    **满格 = 一点没用，空 = 用光**；颜色不动。`hasUsed` 仍单独管「已用」那格
   - ⚠️ 判据按「**有没有这个数**」判，**不按 `known` 判**：trae 实测是
     `credits_pool_known: true` 且完全没有 `size`，拿 `known` 判会错判成「数据不可信」
   - ⚠️ 反面对照：workbuddy / qoder / zcode 的 `used` 与 `size` 都是真的，
