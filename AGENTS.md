@@ -103,13 +103,21 @@ python check-line-endings.py <本仓根> --target lf
 
 ## 待办
 
-- [x] ~~**真机验证本轮重构**~~ —— 已通过：面板照常显示、各渠道页签齐全、账号接口返回 200。
+> **本区与 [docs/PLAN.md](docs/PLAN.md) 的分工**：这里放**跨模块、照做即可**的短条目
+> （agent 每次会话都读得到）；成轮的、需要背景的工作与**未立项的研究方向**在 PLAN.md。
+> **同一件事只在一边展开**，另一边给指针。
+>
+> **两份都要活跃**：做完的**立即删**（历史去 `git log` / 决策记录，不留 `[x]` 充数）；
+> 变模糊的要么补清背景、要么降级到 PLAN.md 的研究方向；新想法**先入 PLAN.md §2.6**，
+> 别直接塞这里 —— 待办混入未立项的想法就不再是「照做即可」的清单了。
+
 - [ ] **发布 0.3.0（卡权限：需 npm 所有者 `cslkkl` 操作）**
 
-      `package.json` 已是 0.3.0，npm latest 仍是 0.2.0 —— 版本已 bump 但从未发布
-      （2026-10-04 核对）。当前登录用户不是 npm 所有者（`npm whoami` 401、GitHub
-      仓库 `admin: false`），无法发布。
+      ⚠️ **`package.json` 已是 0.3.0，npm latest 仍是 0.2.0** —— 版本已 bump 但从未发布。
+      这个窗口期是有风险的：照文档装的人拿到的仍是旧代码。核对时间 2026-10-04，
+      现查以 [npm](https://www.npmjs.com/package/dsh-cpa-switch) 为准。
 
+      发布者不是本机登录用户（`npm whoami` 401、GitHub 仓库 `admin: false`），故阻塞。
       步骤：所有者本机 `pnpm check` 全绿 → `npm publish`（首次手工；
       Trusted Publishing 配好后改为 tag 触发）。发布后核对 npm 页面的 files 清单。
 
@@ -147,28 +155,15 @@ python check-line-endings.py <本仓根> --target lf
       **验证**：推一个 patch tag（如 `v0.2.1`），确认 Actions 自动发布成功。
       验证通过后，从 npm 移除手工 token、从 GitHub Secrets 删掉相关的项。
 
-- [x] ~~**设置上游仓库 topics**~~ —— 维护者已设（清单见仓库 About 面板，不在此复制）。
-
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
-- [ ] `providerId` 粒度裁决（按渠道 vs 每单元）。
-- [x] ~~**渠道额度/积分展示按渠道能力区分**~~ —— 已修，**判据在数据层**：
-      `CreditEntry` 只有 `remain` 必有，`used` / `size` / `packages` 上游不给
-      就是 `undefined`（**不是 0**）。界面判据在 `src/client/meter-text.ts`
-      （纯函数、Node 侧测得到），用例 `tests/meter-text.test.ts`。
-      实测 2026-10-05：[决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md)。
-      ⚠️ **`credits_pool_known` 与 `remain_known` 是两条轴**，别合并
-      —— trae 实测是「池子 true + fast/basic false」，曾经只映射一个，
-      把「池子已知」读成了「余量未知」。
-      ⚠️ 进度条判据按「**有没有分母**」判，不按 `known` 判。
-- [x] ~~**账号卡片高度不统一**~~ —— 已改为**固定槽位网格**：每个槽位都有确定高度且
-      **无条件渲染**（空着也占位），卡片总高与内容无关，四渠道严格等高。
-      根因不是标签数量，是 `.cardHead` 的 `flex-wrap`：长昵称
-      （ZCode 的 `zcode-zai-9327dad8-…`）把标签挤到第二行 → +21px，所以昵称**独占一行**。
-      另注：`.card` 改用 `height` 而非 `min-height` —— 旧的 148px 是个**地板**，
-      而四渠道内容本来就有 171–203px，地板从未生效。这类纯视觉属性断言不了，只能真机看。
+- [ ] **`providerId` 粒度裁决** —— 现在是按**渠道**（四个），要考虑是否该细化到
+      **每单元**（号 / 模型组）。先想清「一个 providerId 到底代表什么」再动：
+      它牵扯模型目录的分组方式，改错会让选择器里出现重复条目。
 - [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
+- [ ] **研究方向见 [docs/PLAN.md](docs/PLAN.md)** —— 额度显示位置、每代理独立用号、
+      调度维护界面等**尚未立项**的想法记在那里；本清单只放「确定要做、照做即可」的动作。
 
 ## 活跃坑
 
