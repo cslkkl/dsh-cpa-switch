@@ -189,4 +189,28 @@ describe('规则表：判定与适用范围', () => {
     expect(rule.violation('../gateway.ts')).toBeNull()
     expect(rule.violation('./result.ts')).toBeNull()
   })
+
+  /**
+   * 环境准备层（能力层）同理：它在装配层与业务层**之前**。
+   *
+   * 这条规则是 `net.ts` 搬进 `setup/` **之前**立的 —— 先声明目标目录的规矩，
+   * 再动文件；搬的过程中若把它接到 `gateway` / `runtime` 上，构建期就红。
+   */
+  it('环境准备层不得依赖装配层、业务层与 CPA 通道', () => {
+    const rule = ruleOf('setup-no-outer')
+    expect(rule.files('src/setup/net.ts')).toBe(true)
+    expect(rule.files('src/setup/index.ts')).toBe(true)
+    expect(rule.files('src/setup/download.ts')).toBe(true)
+    expect(rule.files('src/gateway.ts')).toBe(false)
+    expect(rule.files('src/route-registry.ts')).toBe(false)
+    expect(rule.violation('./net.ts')).toBeNull()
+    expect(rule.violation('../paths.ts')).toBeNull()
+    expect(rule.violation('../model-alias.ts')).toBeNull()
+    expect(rule.violation('../gateway.ts')).not.toBeNull()
+    expect(rule.violation('../runtime.ts')).not.toBeNull()
+    expect(rule.violation('../collect.ts')).toBeNull()
+    expect(rule.violation('../boot.ts')).not.toBeNull()
+    expect(rule.violation('../routes.ts')).not.toBeNull()
+    expect(rule.violation('../ops/accounts.ts')).not.toBeNull()
+  })
 })

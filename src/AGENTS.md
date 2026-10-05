@@ -11,6 +11,11 @@ src/ 特有约束：
 - **业务规则进 `ops/`，一域一文件**：域按**语义**分（不是按数据表），域之间不许互相 import
   —— 共享的下沉到 `ops/result.ts`；业务域不许引 `index` / `boot` / `route-table` / `routes`，
   由 `check:layering` 的 `ops-no-outer` 拦。手册见 [ops/README.md](ops/README.md)。
+- **`setup/` 是能力层，不许反向依赖装配层、业务层与对 CPA 的通道**：`index` / `boot` /
+  `route-table` / `routes` / `route-registry` / `gateway` / `runtime` / `ops/**` 都不许进
+  —— 准备环境不该知道谁在调它，也不该走 CPA 通道（它下的是公开 release，不是 CPA 的 API）。
+  由 `check:layering` 的 `setup-no-outer` 拦；网络工具 `net.ts` 已按「跟使用者在一起」
+  归入本层（2026-10-05，见[决策记录](../.agents/notes/2026-10-05-p7-physical-relocation.md)）。
 - **每个改变 CPA 状态的写操作成功后要失效缓存**（`gateway.invalidateChannel`）：
   漏了不报错，只是用户点完看到的还是旧值。判据在 `tests/ops-write-paths.test.ts`。
 - **对 CPA 只有一个通道**：读写一律 `gateway.fetch(path, init)`，
