@@ -45,16 +45,19 @@ export interface ConfigRefs {
   startTimeoutSeconds: { get: () => number }
 }
 
-/** 当前生效的纯值配置。 */
-export interface PluginConfig {
-  readonly adminKey: string
-  readonly adminKeyRef: string
-  readonly port: number
-  readonly exePath: string
-  readonly manageLifecycle: boolean
-  readonly autoCheckinOnStart: boolean
-  readonly openControlPanel: boolean
-  readonly startTimeoutSeconds: number
+/** 从 `ConfigRefs` 的一个字段取出它的值类型。 */
+type RefValue<T> = T extends { get: () => infer V } ? V : never
+
+/**
+ * 当前生效的纯值配置 —— **由 {@link ConfigRefs} 派生**，不手写。
+ *
+ * 为什么不手写：这个接口、`ConfigRefs` 与 `makeReadConfig` 原本是同一份事实的三处抄写，
+ * 而漏一个字段的后果是**静默**的 —— 那个字段在设置卡片里消失，没有任何报错。
+ *
+ * 派生之后漏字段变成编译错误：`makeReadConfig` 少写一个键就过不了 `tsc`。
+ */
+export type PluginConfig = {
+  readonly [K in keyof ConfigRefs]: RefValue<ConfigRefs[K]>
 }
 
 /**
