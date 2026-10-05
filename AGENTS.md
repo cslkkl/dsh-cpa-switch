@@ -16,28 +16,30 @@
 
 ## 变更影响路由
 
-| 改了                            | 必须同步                                                                                                                                                                                                          |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts` 装配             | 只挂线：造对象、挂 effect、注册路由；**流程与表都不在这里**（[决策记录](.agents/notes/2026-10-05-assembly-layer.md)）                                                                                             |
-| `src/route-table.ts` 路由表     | 同 path 只能注册一次、方法只有 `GET`/`HEAD`/`POST`（违反任一条让**所有**路由失效）；表与 [src/README.md](src/README.md) 的可读索引由 `tests/route-table.test.ts` 钉成一致                                         |
-| `src/boot.ts` 启动流程          | 顺序「先补环境再启动」不许反（否则环境不全被掩盖）；每步都要看 `isCancelled()`；补装异常必须就地吞掉（F17）                                                                                                       |
-| `src/route-registry.ts`         | 模型路由唯一入口：[架构说明](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证） |
-| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）；**改启用态要回读确认 + 逐个容错**（F43）                    |
-| `src/select-plan.ts`            | 「设为唯一」的目标状态计算与回读验证（纯函数）；改动同步 [决策记录](.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                            |
-| `src/channels/**`               | 渠道知识**唯一来源**：新增渠道 = 加一个 spec + 在注册表挂上，面板 / 路由 / 别名 / 生成配置全部派生（[手册](src/channels/README.md)）                                                                              |
-| `src/contracts/**`              | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红（[决策记录](.agents/notes/2026-10-05-contract-type-sharing.md)）                            |
-| `scripts/check-layering.cjs`    | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                               |
-| `src/ids.ts` / `src/paths.ts`   | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                           |
-| `src/checkin-ledger.ts`         | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；改动同步 [决策记录](.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                    |
-| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                   |
-| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构说明](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                      |
-| `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](docs/ARCHITECTURE.md)）                                                                                                                  |
-| `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构说明](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                                                                               |
-| `src/client/meter-text.ts`      | 余额区判据：**没有分母就不画条、`used` 缺失就留空**；改动同步 [决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md) + `tests/meter-text.test.ts`                                                       |
-| `src/client/routing-text.ts`    | 路由策略的本地化与警示判定：**三个合法值都要有中文**；改动同步 `tests/routing-text.test.ts` + [src/operations.ts](src/operations.ts) 的策略白名单                                                                 |
-| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构说明](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查；**卡片是固定槽位网格**，改行结构先读文件头                                                                                      |
-| `tsdown.config.ts` 的 externals | [架构说明](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                                                                             |
-| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                                                                                    |
+| 改了                            | 必须同步                                                                                                                                                                                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts` 装配             | 只挂线：造对象、挂 effect、注册路由；**流程与表都不在这里**（[决策记录](.agents/notes/2026-10-05-assembly-layer.md)）                                                                                                                                                                      |
+| `src/route-table.ts` 路由表     | 同 path 只能注册一次、方法只有 `GET`/`HEAD`/`POST`（违反任一条让**所有**路由失效）；表与 [src/README.md](src/README.md) 的可读索引由 `tests/route-table.test.ts` 钉成一致                                                                                                                  |
+| `src/boot.ts` 启动流程          | 顺序「先补环境再启动」不许反（否则环境不全被掩盖）；每步都要看 `isCancelled()`；补装异常必须就地吞掉（F17）                                                                                                                                                                                |
+| `src/route-registry.ts`         | 模型路由唯一入口：[架构说明](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证）；目录与 `baseURL` 经 `gateway`、探活经 `runtime`，**别自己 `probePort`** |
+| `src/gateway.ts` 对 CPA 的通道  | 读写一律 `gateway.fetch()`、前置用 `requireRunning` / `requireReady`；**缓存键必须用 `cacheKeys` 构造器**（键即失效前缀），新增读 key 要同步 `invalidateChannel`（[决策记录](.agents/notes/2026-10-05-cpa-gateway.md)，判据 `tests/gateway.test.ts`）                                      |
+| `src/runtime.ts` 运行态门面     | `status()` **绝不起进程**、`ensure()` 才可能拉起；两者共用同一份探活记忆，**不许再开第三条探活路径**（判据 `tests/runtime.test.ts`）                                                                                                                                                       |
+| `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）；**改启用态要回读确认 + 逐个容错**（F43）                                                                                             |
+| `src/select-plan.ts`            | 「设为唯一」的目标状态计算与回读验证（纯函数）；改动同步 [决策记录](.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                                                                                                     |
+| `src/channels/**`               | 渠道知识**唯一来源**：新增渠道 = 加一个 spec + 在注册表挂上，面板 / 路由 / 别名 / 生成配置全部派生（[手册](src/channels/README.md)）                                                                                                                                                       |
+| `src/contracts/**`              | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红（[决策记录](.agents/notes/2026-10-05-contract-type-sharing.md)）                                                                                                     |
+| `scripts/check-layering.cjs`    | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                                                                                                        |
+| `src/ids.ts` / `src/paths.ts`   | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                                                                                                    |
+| `src/checkin-ledger.ts`         | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；改动同步 [决策记录](.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                                                                                             |
+| `src/client/locales.ts`         | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里                                                                                                                                                                                            |
+| `src/client/api.ts`             | 写操作后要 `invalidateReads`；缓存语义改动同步 [架构说明](docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                                                                                               |
+| `src/client/report.tsx`         | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](docs/ARCHITECTURE.md)）                                                                                                                                                                                           |
+| `src/client/plan-text.ts`       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**（[架构说明](docs/ARCHITECTURE.md)）；独立成文件是因为它不含 JSX，Node 侧测得到                                                                                                                                                        |
+| `src/client/meter-text.ts`      | 余额区判据：**没有分母就不画条、`used` 缺失就留空**；改动同步 [决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md) + `tests/meter-text.test.ts`                                                                                                                                |
+| `src/client/routing-text.ts`    | 路由策略的本地化与警示判定：**三个合法值都要有中文**；改动同步 `tests/routing-text.test.ts` + [src/operations.ts](src/operations.ts) 的策略白名单                                                                                                                                          |
+| `src/client/panel.module.css`   | 只用 `--dsw-*` token（[架构说明](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查；**卡片是固定槽位网格**，改行结构先读文件头                                                                                                                                                               |
+| `tsdown.config.ts` 的 externals | [架构说明](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                                                                                                                                                      |
+| 契约 / 对外行为                 | `package.json` 版本号 + [README.md](README.md)                                                                                                                                                                                                                                             |
 
 ## 常用命令
 
@@ -199,6 +201,8 @@ python check-line-endings.py <本仓根> --target lf
 - **两级读缓存都「坏了也不报错」** —— 合并失效只是慢、漏失效只是数字不对。
   新增改变 CPA 状态的写操作时，宿主侧调 `Operations.invalidateChannel()`、
   浏览器侧调 `invalidateReads()`；判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`。
+  宿主侧**清哪些 key 由 [gateway.ts](src/gateway.ts) 的 `cacheKeys` 决定**（键即失效前缀）——
+  新增一个读 key 却忘了登记，那条读会永远显示写之前的值。
 - **路径不许自己拼 `homedir()/.dsh`** —— 走 [src/paths.ts](src/paths.ts)。
   `DSH_HOME` 覆盖被忽略时**零报错**：状态与 40MB 运行时会落到另一个目录，
   用户看到的是「设置老是不生效」。
