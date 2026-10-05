@@ -17,10 +17,10 @@ import {
   startAuth,
 } from './api.ts'
 import { AccountCard } from './AccountCard.tsx'
-import type { Account, Capabilities } from './AccountCard.tsx'
+import type { ActionOutcome, Capabilities, NormalizedAccount } from '../contracts/domain.ts'
 import { amountWithUnit } from './meter-text.ts'
 import { useAsyncResource } from './use-async-resource.ts'
-import { reportOf, actionReport, type ActionOutcomeView, type Report } from './report.tsx'
+import { reportOf, actionReport, type Report } from './report.tsx'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
@@ -61,7 +61,7 @@ type LoginState =
 
 /** 宿主 `/accounts` 里本插件要用的部分。 */
 interface AccountsPayload {
-  readonly accounts: readonly Account[]
+  readonly accounts: readonly NormalizedAccount[]
   /** 顶层 `checkin_auto` —— 与 `/auto-checkin` 是同一个响应同一个字段。 */
   readonly autoCheckin?: boolean
   readonly capabilities: Capabilities
@@ -209,7 +209,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       const data = result.data as { accounts?: unknown; autoCheckin?: unknown } | undefined
       if (data === undefined || typeof data !== 'object') return undefined
       return {
-        accounts: Array.isArray(data.accounts) ? (data.accounts as Account[]) : [],
+        accounts: Array.isArray(data.accounts) ? (data.accounts as NormalizedAccount[]) : [],
         autoCheckin: data.autoCheckin === true,
         capabilities,
         unit: meta.unit,
@@ -234,7 +234,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
    * 两个都查是因为两条路径的标识不同，而它们改的**可能是同一个账号**。
    */
   const overrideOf = useCallback(
-    (account: Account): boolean | undefined => {
+    (account: NormalizedAccount): boolean | undefined => {
       const byIndex = disabledOverrides[overrideKey(account.authIndex ?? '')]
       if (byIndex !== undefined) return byIndex
       return disabledOverrides[overrideKey(account.authId ?? '')]
@@ -410,7 +410,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
           report(result, t(kind as 'checkin'))
           return
         }
-        const outcome = result.outcome as ActionOutcomeView | undefined
+        const outcome = result.outcome as ActionOutcome | undefined
         setToast({ ...actionReport(t, outcome, meta.unit), key: (toastSeq.current += 1) })
         await reload({ force: true })
       } finally {

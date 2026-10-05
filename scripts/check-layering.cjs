@@ -65,10 +65,18 @@ const RULES = [
  * 契约层的额外检查：**只有类型**。
  *
  * 契约一旦带上值，浏览器产物就可能内联宿主代码 —— 那正是本层要防的事。
- * 判据是行级的：`import` / `export` 语句必须以 `type` 开头。
+ *
+ * 判据是「值层面」的语句，不是「有没有 import」：`export interface` / `export type`
+ * 是类型，合法；值导入、值导出、值再导出都不合法。
+ * ⚠️ 别写成「行首不是 `import type` 就报」—— 那样每个 `export interface` 都会被误判（实踩）。
  */
 const CONTRACTS_PREFIX = 'src/contracts/'
-const VALUE_IMPORT = /^\s*(?:import|export)\s+(?!type\b)/u
+const VALUE_STATEMENTS = [
+  /^\s*import\s+(?!type\b)/u, // 值导入 / 副作用导入 / `import { … }`
+  /^\s*export\s+(?!type\b)[^\n]*\bfrom\b/u, // 值再导出：`export { x } from '…'`
+  /^\s*export\s+(?:const|function|class|let|var|async|default)\b/u, // 值导出
+  /^\s*export\s*\{/u, // 多行值再导出的首行（类型再导出写作 `export type {`）
+]
 
 /** 递归列出 `.ts` / `.tsx`。 */
 function listSources(dir) {
@@ -82,13 +90,16 @@ function listSources(dir) {
 }
 
 /**
- * 把注释替换成等长空格 —— 保留字节偏移，行号才不会漂。
+ * 把注释替换成等长空白 —— 保留字节偏移与换行，行号才不会漂。
  *
- * 不这么做的话，注释里举的 `import ... from '../x'` 例子会被当成真实依赖。
+ * 两个坑都要避开：
+ * 1. 不剥注释的话，注释里举的 `import ... from '../x'` 例子会被当成真实依赖；
+ * 2. 剥的时候**必须原样保留换行** —— 整块换成一行空格会让后面所有行号错位（实踩），
+ *    报出来的行号对不上文件，排查时先怀疑这个。
  */
 function stripComments(text) {
   return text
-    .replace(/\/\*[\s\S]*?\*\//gu, (m) => ' '.repeat(m.length))
+    .replace(/\/\*[\s\S]*?\*\//gu, (m) => m.replace(/[^\n]/gu, ' '))
     .replace(/(^|[^:])\/\/[^\n]*/gu, (m, head) => head + ' '.repeat(m.length - head.length))
 }
 
@@ -111,11 +122,13 @@ function specifiersOf(text) {
   return found
 }
 
-/** 行级：契约层里有没有非 `import type` 的导入 / 导出。 */
-function valueImportsIn(text) {
+/** 行级：契约层里有没有值层面的导入 / 导出。 */
+function valueStatementsIn(text) {
   const hits = []
   text.split('\n').forEach((line, index) => {
-    if (VALUE_IMPORT.test(line)) hits.push({ line: index + 1, text: line.trim() })
+    if (VALUE_STATEMENTS.some((pattern) => pattern.test(line))) {
+      hits.push({ line: index + 1, text: line.trim() })
+    }
   })
   return hits
 }
@@ -147,19 +160,19 @@ function main() {
     }
 
     if (rel.startsWith(CONTRACTS_PREFIX)) {
-      for (const hit of valueImportsIn(text)) {
+      for (const hit of valueStatementsIn(text)) {
         failures.push({
           rule: 'contracts-type-only',
           rel,
           line: hit.line,
-          reason: `契约层只许 import type：${hit.text}`,
+          reason: `契约层只许类型：${hit.text}`,
         })
       }
     }
   }
 
   const titles = new Map(RULES.map((rule) => [rule.id, rule.title]))
-  titles.set('contracts-type-only', '契约层只有类型（import type）')
+  titles.set('contracts-type-only', '契约层只有类型')
 
   if (failures.length === 0) {
     console.log(`分层检查通过：${String(files.length)} 个源文件，${String(titles.size)} 条规则`)
