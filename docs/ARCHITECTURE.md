@@ -35,8 +35,8 @@
 ─────────                    ─────────                       ────
 Panel / PluginPanel
   │
-  ├─ useAsyncResource ──→ client/api.ts 的读缓存
-  │                        （fresh 30s / stale 300s）
+  ├─ useResource ──→ read-cache.ts 的读缓存
+  │                  （fresh 30s / stale 300s）
   │                             │ 未命中
   │                             ▼
   └────────────────────→ GET /api/v1/cpa/*  ──→ Routes（route-table）
@@ -176,17 +176,18 @@ Panel / PluginPanel
 `auto-checkin` / `routing`），而每条在宿主侧都要先 `ensure()` 探一次活。
 **没有缓存时，用户看到的「点一下等很久」就是这个乘法。**
 
-| 级         | 位置                                                | 作用                                                    |
-| ---------- | --------------------------------------------------- | ------------------------------------------------------- |
-| 探活记忆   | `cache.ts` `ProbeCache`                             | 折叠**同一次点击**里 6 条路由的探活，只开 1 个 TCP 连接 |
-| 业务读缓存 | `cache.ts` `CpaCache` / 浏览器 `api.ts` `ReadCache` | 复用刚读到的账号、余额、策略                            |
+| 级         | 位置                                                       | 作用                                                    |
+| ---------- | ---------------------------------------------------------- | ------------------------------------------------------- |
+| 探活记忆   | `cache.ts` `ProbeCache`                                    | 折叠**同一次点击**里 6 条路由的探活，只开 1 个 TCP 连接 |
+| 业务读缓存 | `cache.ts` `CpaCache` / 浏览器 `read-cache.ts` `ReadCache` | 复用刚读到的账号、余额、策略                            |
 
 三条必须保住的性质，**都不抛错、只会静默变慢或显示旧值**：
 
 1. **同一 key 的并发合并成一次**（single-flight）。少了它，挂载时同时到的
    `/accounts` 与 `/auto-checkin` 会各打一次 CPA。
 2. **每个改变 CPA 状态的写操作成功后要失效**。`gateway.invalidateChannel()`
-   是宿主侧的出口；浏览器侧由 `api.ts` 的写函数各自调 `invalidateReads()`。
+   是宿主侧的出口；浏览器侧由 `endpoints.ts` 的**写函数自己**调 `invalidateReads()`
+   （`accounts:` / `autockin:` 两个前缀，必须与宿主 `cacheKeys` 造出的键一致）。
    漏一处 = 用户点完签到看到的还是旧余额。
 3. **失败不写缓存**。否则一次抖动会把错误缓存住整个 TTL。
 

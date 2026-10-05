@@ -15,7 +15,12 @@ client/ 特有约束：
 - **卡片外观 / 状态色 / 禁用降级的规范在本目录 [README.md](README.md)**，
   不在架构文档 —— 那是模块级约束，改动会撞 `tests/card-slots.test.ts`。
 - **别给 `Panel` 下的 `PluginPanel` 加 `key`**（会变成卸载重挂，切渠道必闪一帧）；
-  新增跨渠道的局部状态时，在 `plugin` 变化处**自己重置**。
+  新增跨渠道的局部状态时，在 `plugin` 变化处**自己重置**（现有三处 hook 都这么做）。
+- **读资源一律走 [use-resource.ts](use-resource.ts)**：缓存、竞态、轮询都在它里面。
+  自己 `fetch` + `setState` **不报错但会静默绕开共享缓存** —— 切回看过的渠道立刻闪一下、
+  预取白做、写操作后的失效也管不到它。
+- **对后端的调用一律走 [endpoints.ts](endpoints.ts)**：路径只有 `paths` 一份。
+  在别处拼字面量不报错，只是那次读永远是 404（判据 `tests/route-table.test.ts`）。
 - 改完跑 `pnpm build` 并确认 `lib/client.js` 里仍有 `exports.apply` 与 `exports.inject`。
 
 文件清单与「改哪」见 [README.md](README.md)，不写在这里。
