@@ -31,6 +31,7 @@
 | `src/channels/**`                      | 渠道知识**唯一来源**：新增渠道 = 加一个 spec + 在注册表挂上，面板 / 路由 / 别名 / 生成配置全部派生（[手册](src/channels/README.md)）                                                                                                                                                                                                                           |
 | `src/contracts/**`                     | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红（[决策记录](.agents/notes/2026-10-05-contract-type-sharing.md)）                                                                                                                                                                         |
 | `scripts/check-layering.cjs`           | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                                                                                                                                                                            |
+| 搬文件 / 改名 / 删模块                 | **同批改掉文档里的旧路径** —— 代码里的旧路径当场编译报错，文档里的**零信号**；`pnpm check:doc-paths` 扫 `src` / `tests` / `scripts` 三类裸路径，白名单只收历史提法且上限 10 条（[决策记录](.agents/notes/2026-10-05-doc-path-gate.md)、[手册](scripts/README.md)）                                                                                             |
 | `src/ids.ts` / `src/paths.ts`          | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                                                                                                                                                                        |
 | `src/checkin-ledger.ts`                | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；改动同步 [决策记录](.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                                                                                                                                                                 |
 | `src/client/locales.ts`                | 中英文两张表都要改（`Record<LocaleKey, string>` 会挡住漏项）；占位符 `{名字}`，标点写在字符串里；**没有引用的键要删掉**（判据 `tests/locales.test.ts`）                                                                                                                                                                                                        |
@@ -68,7 +69,8 @@ python check-markdown-links.py <本仓根> --fragments --refs
 python check-line-endings.py <本仓根> --target lf
 ```
 
-检查选择：文档 → 链接 + 行尾；代码 → `pnpm check`；配置 / 契约 → 相邻模块测试。
+检查选择：文档 → 链接 + 行尾校验，**另加 `pnpm check:doc-paths`**（文档里提到的
+`src` / `tests` / `scripts` 裸路径）；代码 → `pnpm check`；配置 / 契约 → 相邻模块测试。
 
 ## 文档地图
 
@@ -105,9 +107,10 @@ python check-line-endings.py <本仓根> --target lf
 ## 验证快照
 
 - CI：[.github/workflows/ci.yml](.github/workflows/ci.yml) —— 只读，跑 typecheck ×2 → lint →
-  format:check → build → **产物断言**（`scripts/verify-artifacts.cjs`）→ test。
-  跑没跑、绿不绿看上面的 Actions 记录，数字不抄。
-- 本机门禁：`pnpm check` 全绿 —— typecheck / lint / format:check / build / verify:artifacts / test。
+  **分层检查** → **文档路径检查** → format:check → build → **产物断言**
+  （`scripts/verify-artifacts.cjs`）→ test。跑没跑、绿不绿看上面的 Actions 记录，数字不抄。
+- 本机门禁：`pnpm check` 全绿 —— typecheck / lint / check:layering / check:doc-paths /
+  format:check / build / verify:artifacts / test。
 - 构建产物：`lib/index.js`（宿主 ESM）+ `lib/client.js`（浏览器 CJS）+ `lib/index.d.ts`。
 - 已发布版本经真实用户路径验收：装完插件自动下载 CPA、生成密钥、拉起服务，四渠道页签齐全。
   具体版本号看 [npm](https://www.npmjs.com/package/dsh-cpa-switch)。

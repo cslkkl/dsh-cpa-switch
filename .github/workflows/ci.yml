@@ -58,6 +58,12 @@ jobs:
       - name: Check layering
         run: pnpm check:layering
 
+      # 文档里的路径检查：搬文件 / 改名 / 删模块之后，代码里的旧路径当场编译报错，
+      # 文档里的旧路径**零信号** —— 只有人恰好翻到那一句才发现。同一个脚本在
+      # `pnpm check` 里也跑，这里单独列出来是为了让红的那一步一眼看得出是文档的问题。
+      - name: Check doc paths
+        run: pnpm check:doc-paths
+
       - name: Format check
         run: pnpm exec prettier --check "**/*.{ts,json,md,yml,yaml}"
 
