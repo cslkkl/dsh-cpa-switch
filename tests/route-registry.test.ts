@@ -95,6 +95,32 @@ describe('readStableCatalog', () => {
     const result = await settle(promise, 130_000)
     expect(result).toBeUndefined()
   })
+
+  /**
+   * 「等多久」是可断言的**行为**：量的是**读出时刻的差**，不是内部调了几次
+   * `setTimeout` —— 换实现（时钟注入等）也不该改这些数。
+   *
+   * 为什么值得钉：只断言「1 秒内收敛」挡不住「固定 250ms 间隔」这种退化 ——
+   * 那会让冷启动每轮都白读一次，正是这条退避策略要避免的。
+   */
+  it('目录每轮都在变时按 250 → 500 → 1000 → 2000 → 4000 退避，4s 封顶', async () => {
+    const at: number[] = []
+    // 逐轮「多一个模型」：第 9 轮才连续两次一致（＝稳定）
+    const counts = [1, 2, 3, 4, 5, 6, 7, 8, 8]
+    const deps = depsOf(() => 0)
+    ;(deps.gateway as unknown as { fetch: () => Promise<unknown> }).fetch = async () => {
+      at.push(Date.now())
+      const count = counts[at.length - 1] ?? 8
+      return { data: Array.from({ length: count }, (_, i) => ({ id: `m${i}` })) }
+    }
+
+    const result = (await settle(readStableCatalog(deps), 60_000)) as { data?: unknown[] }
+
+    expect(result.data).toHaveLength(8)
+    expect(at.slice(1).map((ms, i) => ms - (at[i] ?? 0))).toEqual([
+      250, 500, 1000, 2000, 4000, 4000, 4000, 4000,
+    ])
+  })
 })
 
 // ── 重载空窗 ──────────────────────────────────────────────────────────────
@@ -377,5 +403,73 @@ describe('重载空窗', () => {
     expect(slowResult).toMatchObject({ ok: true, reason: 'superseded' })
     expect(pushed).toHaveLength(2)
     expect(modelsOf(entry.options.config)).toHaveLength(pushed[1]?.ids.length ?? 0)
+  })
+
+  /**
+   * `loader` 是**异步**解析的：`inject` 返回时 loader 可能还没挂上（宿主重建那一瞬
+   * 就常是这样），所以推送路径会等它 —— 但必须有上限，否则一次依赖丢失就把推送挂死。
+   *
+   * 这一条钉「等到了就推」（真计时器，几十毫秒）；**「不无限等」等时钟可注入之后
+   * 再钉** —— 现在只能拿真时间跑满 10 秒，那种用例既慢又不稳。
+   */
+  describe('loader 还没解析出来时', () => {
+    /** 假宿主：loader 由测试决定何时交出去；日志按 printf 渲染后留下。 */
+    function lateLoaderHost(entry: unknown): {
+      host: RouteRegistryHost
+      emit: (event: string) => void
+      deliver: () => void
+      logs: string[]
+    } {
+      const handlers = new Map<string, () => void>()
+      const logs: string[] = []
+      let pending: (() => void) | undefined
+      const render = (format: string, args: unknown[]): string => {
+        let index = 0
+        return format.replace(/%[dso]/g, () => String(args[index++] ?? ''))
+      }
+      const record =
+        (level: string) =>
+        (format: string, ...args: unknown[]): void => {
+          logs.push(`${level} ${render(format, args)}`)
+        }
+      const host = {
+        inject: (_deps: string[], callback: (scope: object) => void) => {
+          pending = () => {
+            callback({ loader: { entries: () => [entry] } })
+          }
+        },
+        on: (event: string, callback: () => void) => {
+          handlers.set(event, callback)
+          return () => {}
+        },
+        logger: { info: record('info'), warn: record('warn') },
+      }
+      return {
+        host: host as unknown as RouteRegistryHost,
+        emit: (event: string) => {
+          handlers.get(event)?.()
+        },
+        deliver: () => {
+          pending?.()
+        },
+        logs,
+      }
+    }
+
+    it('启动早于 loader 挂上时，等它到来再推（不误判成失败）', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+      const late = lateLoaderHost(entry)
+      const refresh = attachRouteRegistry(late.host, depsFor(cpa))
+
+      // boot 先跑到：此刻 loader 还没挂上。
+      const boot = refresh('boot')
+      await tick(300)
+      expect(pushed).toHaveLength(0) // 还在等：没推半截，也没当成失败收场
+
+      late.deliver() // loader 挂上了
+      expect(await boot).toMatchObject({ ok: true })
+      expect(pushed).toHaveLength(1)
+    })
   })
 })
