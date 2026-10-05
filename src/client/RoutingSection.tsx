@@ -20,7 +20,7 @@ import type { ReactNode } from 'react'
 import { IconWarningOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { paths } from './endpoints.ts'
 import { strategyTextOf, strategyWarns } from './routing-text.ts'
-import { useAsyncResource } from './use-async-resource.ts'
+import { useResource } from './use-resource.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
@@ -40,7 +40,7 @@ export function RoutingSection(props: RoutingSectionProps): ReactNode {
    * 还没读到就**什么都不渲染** —— 冷启动时这个区块通常还没准备好，画一个空壳
    * 只是噪音。它走缓存，第二次进来直接就有。
    */
-  const strategy = useAsyncResource<string>({
+  const strategy = useResource<string>({
     key: 'routing',
     path: paths.routing,
     select: (result) => (result.strategy === undefined ? '' : String(result.strategy)),

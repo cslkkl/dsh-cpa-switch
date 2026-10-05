@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ReadCache, prefetch, readCache } from '../src/client/read-cache.ts'
 import type { ApiResult } from '../src/client/transport.ts'
+import { shownValue } from '../src/client/use-resource.ts'
 
 /**
  * 模块级单例（`readCache`）是**跨用例共享**的：一个用例 put 进去的 key 会漏到下一个。
@@ -127,45 +128,112 @@ describe('ReadCache', () => {
  * **不会**自动归零 —— 它还揣着上一个渠道的账号。若只比值不认 key，
  * workbuddy 的账号就会画在 trae 的页签下，**而且不报错**。
  *
- * 判据直接测取值规则本身（state 与缓存各自在什么条件下算数）——
- * 那正是「串数据」与「不闪」两条要求的全部判定。
+ * 判据直接测**真的那条规则**（`shownValue`，从 hook 模块导出）——
+ * 以前这里手抄了一份同样的算法，于是被测的其实是抄的那份：它漂了不会有信号。
  */
 describe('切渠道的取值：按 key 认领', () => {
-  /** 与 `useAsyncResource` 里 `shown` 的算法一致。 */
-  function shownFor(
-    held: { key: string; value: string } | undefined,
-    cacheKey: string,
-    current: string,
-  ): string | undefined {
-    const cached = readCache.peek<ApiResult>(cacheKey)
-    const fromCache =
-      cached === undefined ? undefined : String((cached.value as unknown as { v: string }).v)
-    return (held !== undefined && held.key === current ? held.value : undefined) ?? fromCache
+  const cached = (key: string, v: string): void => {
+    readCache.put(key, { ok: true, v } as unknown as ApiResult)
   }
+  const pick = (
+    held: { key: string; value: string } | undefined,
+    key: string,
+  ): string | undefined =>
+    shownValue<string>({
+      held,
+      cached: readCache.peek<ApiResult>(key),
+      key,
+      select: (result) => String((result as unknown as { v: string }).v),
+    })
 
   it('state 属于别的 key 时不算数（否则渠道串数据）', () => {
     // 上一个渠道的 state 还热着
     const held = { key: 'accounts:workbuddy', value: 'wb-accounts' }
     // 当前看的是 trae，而 trae 还没进过缓存
-    expect(shownFor(held, 'accounts:trae', 'accounts:trae')).toBeUndefined()
+    expect(pick(held, 'accounts:trae')).toBeUndefined()
   })
 
   it('缓存里有当前 key 的值时直接用它，不等 effect（这就是不闪）', () => {
-    readCache.put('accounts:trae', { ok: true, v: 'trae-accounts' } as unknown as ApiResult)
+    cached('accounts:trae', 'trae-accounts')
     // state 还揣着上一个渠道的值
     const held = { key: 'accounts:workbuddy', value: 'wb-accounts' }
     // 认领失败 → 退回缓存
-    expect(shownFor(held, 'accounts:trae', 'accounts:trae')).toBe('trae-accounts')
+    expect(pick(held, 'accounts:trae')).toBe('trae-accounts')
   })
 
   it('state 仍属于当前 key 时优先用它（最新值胜过缓存）', () => {
-    readCache.put('accounts:trae', { ok: true, v: 'stale-from-cache' } as unknown as ApiResult)
+    cached('accounts:trae', 'stale-from-cache')
     const held = { key: 'accounts:trae', value: 'fresh-from-state' }
-    expect(shownFor(held, 'accounts:trae', 'accounts:trae')).toBe('fresh-from-state')
+    expect(pick(held, 'accounts:trae')).toBe('fresh-from-state')
   })
 
   it('两处都没有时才是 undefined（这时才显示加载态）', () => {
-    expect(shownFor(undefined, 'accounts:zcode', 'accounts:zcode')).toBeUndefined()
+    expect(pick(undefined, 'accounts:zcode')).toBeUndefined()
+  })
+
+  it('缓存里那份不是成功响应时不算数（只认 ok 的那份）', () => {
+    readCache.put('accounts:qoder', { ok: false, error: 'boom' } as unknown as ApiResult)
+    expect(pick(undefined, 'accounts:qoder')).toBeUndefined()
+  })
+})
+
+/**
+ * 缓存是一个**可订阅的 store** —— `useResource` 用 `useSyncExternalStore` 读它，
+ * 于是「别人」（预取、另一个挂载点）写进去的值也会立刻让本组件重渲染。
+ *
+ * 这条契约坏了**不报错**：界面只是停在旧值上，直到下一次无关的重渲染 ——
+ * 而那正是「切回来还是旧的」这类抱怨的来源。
+ */
+describe('缓存是可订阅的 store', () => {
+  it('put 会通知订阅者；退订之后不再打扰', () => {
+    const cache = new ReadCache({ freshMs: 1000, staleMs: 5000 })
+    let notified = 0
+    const unsubscribe = cache.subscribe(() => {
+      notified += 1
+    })
+
+    cache.put('k', { ok: true })
+    expect(notified).toBe(1)
+
+    unsubscribe()
+    cache.put('k', { ok: true })
+    // 卸载的组件不该被无谓唤醒
+    expect(notified).toBe(1)
+  })
+
+  it('invalidate 命中时才通知（没清掉东西就不该重渲染）', () => {
+    const cache = new ReadCache({ freshMs: 1000, staleMs: 5000 })
+    let notified = 0
+    cache.subscribe(() => {
+      notified += 1
+    })
+
+    cache.invalidate('nope:')
+    expect(notified).toBe(0)
+
+    cache.put('accounts:a', { ok: true })
+    expect(notified).toBe(1)
+
+    cache.invalidate('accounts:')
+    expect(notified).toBe(2)
+  })
+
+  /**
+   * 快照必须是**能比较**的值（`useSyncExternalStore` 用 `Object.is` 比）。
+   * 每次返回一个新对象会让 React 认为「一直在变」而无限重渲染 ——
+   * 所以快照是单调递增的版本号，值本身仍按 key 现取。
+   */
+  it('getVersion 单调递增；值不在快照里，而是按 key 现取', () => {
+    const cache = new ReadCache({ freshMs: 1000, staleMs: 5000 })
+    const before = cache.getVersion()
+
+    cache.put('k', { ok: true, v: 1 })
+    const afterPut = cache.getVersion()
+    expect(afterPut).toBeGreaterThan(before)
+    expect(cache.peek<{ v: number }>('k')?.value.v).toBe(1)
+
+    cache.invalidate('k')
+    expect(cache.getVersion()).toBeGreaterThan(afterPut)
   })
 })
 

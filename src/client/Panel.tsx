@@ -7,12 +7,12 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import { fetchSetup, fetchStatus, paths, runSetup, startCpa } from './endpoints.ts'
+import { paths, runSetup, startCpa } from './endpoints.ts'
 import { prefetch } from './read-cache.ts'
 import { PluginPanel, progressLine } from './PluginPanel.tsx'
 import type { PluginMeta } from './PluginPanel.tsx'
 import { RoutingSection } from './RoutingSection.tsx'
-import { useAsyncResource } from './use-async-resource.ts'
+import { useResource } from './use-resource.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
@@ -24,23 +24,27 @@ interface StatusInfo {
 }
 
 /**
- * 环境准备状态。
+ * 宿主 `GET /setup` 的返回形状。
  *
- * - `null` —— 还没查
- * - `{ok:true,...}` —— 查过了，`missing` 列出缺什么
- * - `{phase:'working'}` —— 正在装（下载要几十秒，必须给反馈）
- * - `{phase:'error', error}` —— 装失败
+ * `missing` 缺什么、`running` 装没装完、`progress` 到了哪一步 —— 三个字段都由
+ * 宿主给，这里**只做展示**，不自己推断（缺字段就是 `undefined`，不编默认值）。
  */
-type SetupState =
-  | (Record<string, unknown> & {
-      ok?: boolean
-      phase?: string
-      error?: string
-      missing?: readonly string[]
-      running?: boolean
-      progress?: unknown
-    })
-  | null
+interface SetupInfo {
+  readonly ok?: boolean
+  readonly missing?: readonly string[]
+  readonly running?: boolean
+  readonly progress?: unknown
+}
+
+/**
+ * 一键准备的**本地乐观状态**。
+ *
+ * - `null` —— 没有在飞的动作，界面以服务端为准
+ * - `{phase:'working'}` —— 刚点下去，等宿主回应（那 96 秒里替服务端说话）
+ * - `{phase:'error', error}` —— 宿主报了失败
+ */
+type SetupAction =
+  { readonly phase: 'working' } | { readonly phase: 'error'; readonly error: string } | null
 
 /** `Panel` 的入参。 */
 export interface PanelProps {
@@ -51,62 +55,67 @@ export interface PanelProps {
 export function Panel(props: PanelProps): ReactNode {
   const { t } = props
 
-  const [status, setStatus] = useState<StatusInfo | null>(null)
   const [active, setActive] = useState('workbuddy')
-  const [setup, setSetup] = useState<SetupState>(null)
-
-  const refreshSetup = useCallback(async (): Promise<void> => {
-    const result = await fetchSetup()
-    if (result.ok) setSetup(result as SetupState)
-  }, [])
 
   /**
-   * 下载中轮询进度。
+   * 一键准备的**乐观状态**：点下去到宿主报回结果之间的那一段。
    *
-   * 为什么需要：`POST /setup` 要同步下载约 40 MB、实测 96 秒才返回，期间前端
-   * 只有一句「正在下载」，用户看不出是在动还是卡死了。宿主把每一步写进
-   * `setup.progress`，这里每秒拉一次。
-   *
-   * 只在 `setup.phase === 'working'` 时轮询 —— 装完（`ok: true`）立刻停，
-   * 避免空转；被卸载时也清掉，否则刷新页面会留下僵尸定时器。
+   * 为什么本地留一格而不是直接写进资源：`POST /setup` 要同步下载约 40 MB、
+   * 实测 96 秒才返回，期间服务端的 `running` 才是权威 —— 但用户需要**立刻**
+   * 看到「开始装了」。所以这一段由本地替服务端说话，服务端一有回应就让位。
    */
-  useEffect(() => {
-    if (setup?.phase !== 'working') return undefined
-    const timer = setInterval(() => {
-      void (async () => {
-        const result = await fetchSetup()
-        if (!result.ok) return
-        /**
-         * 宿主 `running` 还是 true 就保持 `working`（并把最新进度带上），
-         * 否则说明装完了 —— 用宿主的真实状态覆盖，别自己猜。
-         */
-        setSetup(result.running === true ? { ...result, phase: 'working' } : result)
-      })()
-    }, 1000)
-    return () => {
-      clearInterval(timer)
-    }
-  }, [setup?.phase])
+  const [setupAction, setSetupAction] = useState<SetupAction>(null)
+
+  /** 宿主 `GET /status`。`select` 原样透传，保持对象引用稳定（省一次无谓重渲染）。 */
+  const statusResource = useResource<StatusInfo>({
+    key: 'status',
+    path: paths.status,
+    select: (result) => result as StatusInfo,
+  })
+
+  /** 宿主 `GET /setup`。 */
+  const setupResource = useResource<SetupInfo>({
+    key: 'setup',
+    path: paths.setup,
+    select: (result) => result as SetupInfo,
+    /**
+     * 下载中轮询进度。
+     *
+     * 为什么需要：`POST /setup` 那 96 秒里前端只有一句「正在下载」，用户看不出
+     * 是在动还是卡死了。宿主把每一步写进 `setup.progress`，这里每秒拉一次
+     * （`useResource` 的轮询会绕开缓存，否则读到的永远是上一轮那份）。
+     *
+     * 只在**本面板刚点过**一键准备时轮询 —— 装完立刻停，避免空转。
+     */
+    pollMs: setupAction?.phase === 'working' ? 1000 : undefined,
+  })
+
+  /**
+   * 服务端说在装就显示进度，否则看本地那一段乐观状态。
+   *
+   * ⚠️ 顺序不能反：服务端的 `running` 是权威（F33），本地只在它开口之前顶一会儿。
+   */
+  const setupPhase =
+    setupResource.data?.running === true
+      ? 'working'
+      : setupAction?.phase === 'working'
+        ? 'working'
+        : setupAction !== null
+          ? 'error'
+          : undefined
+  const setupError = setupAction?.phase === 'error' ? setupAction.error : undefined
 
   /** 一键准备环境：下载 + 校验 + 解压 + 写配置。 */
   const prepare = useCallback(async (): Promise<void> => {
-    setSetup({ phase: 'working' })
+    setSetupAction({ phase: 'working' })
     const result = await runSetup()
-    if (result.ok) {
-      const statePart = (result.state ?? {}) as Record<string, unknown>
-      setSetup({ ...statePart, ok: true })
-      return
-    }
-    setSetup({ phase: 'error', error: String(result.error ?? 'failed') })
-  }, [])
+    setSetupAction(result.ok ? null : { phase: 'error', error: String(result.error ?? 'failed') })
+    // 服务端已经落地了新状态，重读一次拿真值（不拿 POST 的返回猜）
+    await setupResource.reload({ force: true })
+  }, [setupResource])
 
-  /**
-   * 渠道清单。
-   *
-   * 它是**静态**的（四条渠道写死在 `channels/registry.ts`），所以它不值得走缓存 ——
-   * 走的是最普通的一次 `api()`。
-   */
-  const pluginsResource = useAsyncResource<readonly PluginMeta[]>({
+  /** 渠道清单。它是**静态**的（四条渠道写死在 `channels/registry.ts`）。 */
+  const pluginsResource = useResource<readonly PluginMeta[]>({
     key: 'plugins',
     path: paths.plugins,
     select: (result) => {
@@ -116,25 +125,6 @@ export function Panel(props: PanelProps): ReactNode {
   })
 
   const plugins = pluginsResource.data ?? []
-
-  /**
-   * 挂载时的三条读取**并行**。
-   *
-   * 原来是 `await` 串起来的：`status`+`plugins` 之后又 `await refreshSetup()`，
-   * 而账号面板要等 `plugins` 才知道自己是谁。于是「进配置页」的最坏路径是
-   * 四段串行等待。三者互不依赖，并行发出去就是**一段**等待。
-   */
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const statusResponse = await fetchStatus()
-      if (!cancelled) setStatus(statusResponse as StatusInfo)
-    })()
-    void refreshSetup()
-    return () => {
-      cancelled = true
-    }
-  }, [refreshSetup])
 
   /**
    * **四个渠道同时加载。**
@@ -169,16 +159,22 @@ export function Panel(props: PanelProps): ReactNode {
     if (!list.some((p) => p.id === active)) setActive(list[0]?.id ?? 'workbuddy')
   }, [pluginsResource.data, active])
 
+  /** 手动拉起 CPA；成功与否都**回读**状态，不拿 POST 的 `ok` 当运行态。 */
   const start = async (): Promise<void> => {
-    const result = await startCpa()
-    setStatus((prev) => ({ ...(prev ?? {}), running: result.ok }))
+    await startCpa()
+    await statusResource.reload({ force: true })
   }
 
+  const status = statusResource.data
   const activeMeta = plugins.find((p) => p.id === active)
   const port = String(status?.port)
   /** 环境准备进度那一行（拿不到就为空串，退回只显示通用文案）。 */
-  const setupProgress = progressLine(setup?.progress, t)
-  const missing = Array.isArray(setup?.missing) ? (setup?.missing ?? []) : []
+  const setupProgress = progressLine(setupResource.data?.progress, t)
+  const missing = Array.isArray(setupResource.data?.missing)
+    ? (setupResource.data?.missing ?? [])
+    : []
+  /** 还没查到时 `undefined`：那块引导区不渲染，不打扰已经装好的用户。 */
+  const setupReady = setupResource.data !== undefined
 
   /**
    * 页签的 `options` 固定住引用。
@@ -194,7 +190,7 @@ export function Panel(props: PanelProps): ReactNode {
 
   return (
     <div className={css.wrap}>
-      {status !== null && (
+      {status !== undefined && (
         <div className={css.status}>
           {/* 官方状态点：done=绿、error=红，语义比自绘圆点更准 */}
           <StateDot state={status.running === true ? 'done' : 'error'} />
@@ -234,7 +230,7 @@ export function Panel(props: PanelProps): ReactNode {
        * 只在**托管目录缺东西**时出现 —— 用户已经自己装好 CPA 的话这块完全不渲染，
        * 不打扰。
        */}
-      {setup !== null && setup.ok !== true && (
+      {setupReady && setupResource.data?.ok !== true && (
         <div className={css.setup}>
           <div className={css.setupTitle}>{t('setupTitle')}</div>
           <div className={css.hint}>{t('setupIntro')}</div>
@@ -260,24 +256,28 @@ export function Panel(props: PanelProps): ReactNode {
             </div>
           )}
 
-          {setup.phase === 'working' && (
+          {setupPhase === 'working' && (
             <div className={css.hint}>
               {t('setupWorking')}
               {/* 有具体进度就附在后面 */}
               {setupProgress !== '' && <div className={css.hint}>{setupProgress}</div>}
             </div>
           )}
-          {setup.phase === 'error' && (
+          {setupPhase === 'error' && (
             <div className={css.hint + ' ' + css.error}>
-              {t('setupFailedWith', { reason: String(setup.error ?? '') })}
+              {t('setupFailedWith', { reason: setupError ?? '' })}
             </div>
           )}
-          {setup.phase !== 'working' && setup.phase !== 'error' && (
+          {setupPhase !== 'working' && setupPhase !== 'error' && (
             <div className={css.setupActions}>
               <Button variant="primary" size="sm" onClick={() => void prepare()}>
                 {t('setupRun')}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => void refreshSetup()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void setupResource.reload({ force: true })}
+              >
                 {t('setupRefresh')}
               </Button>
             </div>
