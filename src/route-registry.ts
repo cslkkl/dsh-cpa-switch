@@ -3,7 +3,7 @@
  *
  * ## 为什么要有这个入口
  *
- * 路由要同时满足两件事，缺一不可：
+ * 路由要同时满足三件事，缺一不可：
  *
  * 1. **骨架常在** —— 声明在 `cordis.patch.yml`（随包发布）。任何设置写入
  *    （切语言、改主题、存模型页配置）都会让 profile 整体重载
@@ -11,13 +11,20 @@
  *    静态骨架不受影响。
  * 2. **清单新鲜** —— 模型清单随账号增减变化，只能运行时推。宿主在重载末尾
  *    emit `app-boot/config-reload`（`app-boot/src/index.ts:300`），订阅它重推。
+ * 3. **空窗不可见** —— 重载到重推之间那一瞬，基线上的 `cpa` 只有骨架、**没有 models**。
+ *    选择器此刻把选中项退化成已保存的 `provider/model`（`cpa/dfmodel`）并**停用**
+ *    composer（宿主 `dsh-client-ui-model-selection` 的契约），用户看到的是
+ *    「闪一下 + 用不了」。所以订阅到重载后**先原样推回上一份成功的清单**（零 CPA 读），
+ *    再去读目录核对。
  *
- * 这两件事原先散在生命周期回调里（boot / 环境准备完成 / OAuth 加号），
- * 挂在**时机**而不是「配置可能变」这个语义上 —— 于是新增的重载路径必然漏掉，
- * 2026-10-04 的「切语言后模型全消失」就是这么来的。
+ * 这是一条根因链上的三段（`reconcileProfilePatches` → 下游 fiber 重建 → volatile 值消失），
+ * 至今踩到过 4 次：路由永久消失 → 订阅从未注册 → 重推太慢 → **空窗本身可见**。
+ * 前三次修的都是「值最终会不会回来」，第 4 次修的是「回来之前那段不许被看见」
+ * （见 [决策记录](../.agents/notes/2026-10-05-route-reload-blank-window.md)）。
  *
  * 所以这里收成一个入口：**查目录 → 算别名 → 补骨架 → 推清单**。
  * 调用方只管在「可能变了」的时候调它，不用关心哪一步由谁负责。
+ * **拿不到完整清单时只回推上一份成功的清单；没有历史就保持空，绝不发明清单。**
  *
  * @module dsh-cpa-switch/route-registry
  */
@@ -103,11 +110,18 @@ interface EventEmitterLike {
   on(event: string, callback: () => void): () => void
 }
 
-/** 一次同步的结果（进日志，便于定位触发链）。 */
+/**
+ * 一次同步的结果（进日志，便于定位触发链）。
+ *
+ * `ok` = **条目上现在有没有一份可用清单**；`stale` = 这份是上一份成功的清单，
+ * 不是这一轮读出来的。两者独立：读目录失败但有历史 → `ok: true, stale: true`。
+ */
 export interface SyncResult {
   readonly ok: boolean
   readonly models?: number
   readonly reason?: string
+  /** 推的是上一份成功的清单（读目录失败或读不全），不是这一轮算出来的。 */
+  readonly stale?: boolean
 }
 
 /** 目录读取与凭据解析所需的依赖。 */
@@ -128,9 +142,29 @@ interface AuthFileRef {
   readonly provider?: unknown
 }
 
-/** 每个渠道各提供哪些模型。 */
-async function channelModelsOf(deps: RouteRegistryDeps): Promise<Record<string, string[]>> {
-  const map: Record<string, string[]> = {}
+/** 每个渠道各提供哪些模型 + 这一轮读**是否完整**。 */
+interface ChannelModels {
+  readonly byChannel: Record<string, string[]>
+  /**
+   * 任一条读失败即 `false`。
+   *
+   * **半截读数不许当事实用**：这份读同时喂「别名段」与「路由清单」两处 ——
+   * 别名段是整段替换（`patchModelAlias`），少一个渠道就等于把 CPA 里已有的别名**删掉**；
+   * 清单少一个渠道则同名模型退化成裸名，用户选中的那条当场从目录里消失。
+   */
+  readonly complete: boolean
+}
+
+/**
+ * 读「每个渠道各提供哪些模型」。
+ *
+ * ⚠️ **失败只标 `complete: false`，不塞空数组**。曾经写成
+ * `catch { map[provider] = [] }` —— 于是「这个渠道读失败了」与「这个渠道没有模型」
+ * 长得一模一样，零信号，而下游会拿它算出残缺的别名表与残缺的清单
+ * （2026-10-05 定位「选择框闪成 cpa/xxx」时发现）。
+ */
+async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels> {
+  const byChannel: Record<string, string[]> = {}
   let files: AuthFileRef[]
   try {
     const list = (await deps.gateway.fetch('/v0/management/auth-files')) as {
@@ -138,8 +172,9 @@ async function channelModelsOf(deps: RouteRegistryDeps): Promise<Record<string, 
     }
     files = Array.isArray(list?.files) ? (list.files as AuthFileRef[]) : []
   } catch {
-    return map
+    return { byChannel, complete: false }
   }
+  let complete = true
   await Promise.all(
     files.map(async (file) => {
       const provider = String(file?.provider ?? '')
@@ -152,13 +187,13 @@ async function channelModelsOf(deps: RouteRegistryDeps): Promise<Record<string, 
         const ids = ((data.models ?? []) as unknown[])
           .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
           .filter((id): id is string => typeof id === 'string' && id !== '')
-        map[provider] = [...new Set([...(map[provider] ?? []), ...ids])]
+        byChannel[provider] = [...new Set([...(byChannel[provider] ?? []), ...ids])]
       } catch {
-        map[provider] = map[provider] ?? []
+        complete = false
       }
     }),
   )
-  return map
+  return { byChannel, complete }
 }
 
 /** 渠道 → 模型，反过来再翻成 模型 → 渠道。别名表要的是后者。 */
@@ -177,19 +212,20 @@ function invertByChannel(
 }
 
 /**
- * 实时算别名表：查 CPA 目录 → 找出同名模型 → 按渠道拆别名。
+ * 实时算别名表：从**已经读全的**渠道目录找出同名模型，按渠道拆别名。
  *
- * 供写配置的 `model-alias` 段与注册路由共用（同一份事实）。
+ * 前提是调用方拿到的 `channels.complete === true` —— 这张表会被整段替换进 CPA 配置，
+ * 半截等于**删别名**。别名段与路由清单**共用同一次渠道读**：各读一次必然互相打架
+ * （一处看到 5 个渠道、另一处 4 个，写出自相矛盾的配置）。
  */
-export async function readAliasTable(deps: RouteRegistryDeps): Promise<AliasTable> {
-  const byChannel = await channelModelsOf(deps)
-  return buildAliasTable(invertByChannel(byChannel))
+function aliasTableOf(channels: ChannelModels): AliasTable {
+  return buildAliasTable(invertByChannel(channels.byChannel))
 }
 
 /** 判断模型 id 归属哪个渠道：显式前缀优先，否则按凭据目录反查。 */
 function routeOwnerOf(
   id: string,
-  byChannel: Readonly<Record<string, string[]>>,
+  byChannel: Readonly<Record<string, readonly string[]>>,
 ): { plugin: string | undefined; bare: string } {
   const slash = id.indexOf('/')
   if (slash > 0) {
@@ -209,19 +245,23 @@ function routeOwnerOf(
  * **同名模型按渠道拆行**：一个模型名被多个渠道供给时，每个渠道各注册一行，
  * id 用该渠道专属的别名（`wb/glm-5.3`）、展示名照旧「WorkBuddy · glm-5.3」。
  * 不拆的话 CPA 会在所有渠道之间轮询，面板选了哪个渠道都不名副实。
+ *
+ * 渠道目录与别名表**由调用方传入**（同一次读、同一份表）：这里不再自己读，
+ * 免得别名段与清单各读一次、各算一份而互相矛盾。
  */
-async function buildCpaRouteProfile(
+function buildCpaRouteProfile(
   catalog: { data?: unknown[] },
+  channels: Readonly<Record<string, readonly string[]>>,
+  aliases: AliasTable,
   deps: RouteRegistryDeps,
-): Promise<RouteProfile> {
+): RouteProfile {
   const ids = (catalog.data ?? [])
     .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
     .filter((id): id is string => typeof id === 'string' && id !== '')
   if (ids.length === 0) {
     throw new Error('catalog is empty — caller must treat empty as "no route" before building')
   }
-  const byChannel = await channelModelsOf(deps)
-  const aliases = buildAliasTable(invertByChannel(byChannel))
+  const byChannel = channels
 
   const rows: { id: string; bare: string; label: string; channel: string }[] = []
   for (const id of ids) {
@@ -329,81 +369,179 @@ export function attachRouteRegistry(
     loaderRef = (scope as { loader?: LoaderLike }).loader
   })
 
-  const refresh = async (trigger = 'manual'): Promise<SyncResult> => {
-    /** inject 是异步解析的，boot 可能先跑到这里 —— 最多等 10 秒。 */
-    const injectDeadline = Date.now() + 10000
-    while (loaderRef === undefined && Date.now() < injectDeadline) {
+  /**
+   * 最近一次**成功推上去**的清单 + 推清单的序号。
+   *
+   * 为什么要留这份：重载会把 volatile 清单从条目里抹掉，而「重新算一份」要读 CPA
+   * （最坏几十秒）。留着它就能**零读**先把空窗补回，再慢慢核对。
+   *
+   * 序号防倒灌：慢路径可能比快路径后落，旧清单不许覆盖新清单。
+   */
+  let lastGood: RouteProfile | undefined
+  let lastGoodSeq = 0
+  let pushedSeq = 0
+  let computeSeq = 0
+
+  /** inject 是异步解析的，boot 可能先跑到这里 —— 最多等 10 秒。 */
+  const findEntry = async (): Promise<LoaderEntryLike | undefined> => {
+    const deadline = Date.now() + 10000
+    while (loaderRef === undefined && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 250))
     }
-    if (loaderRef === undefined) return { ok: false, reason: 'loader-unavailable' }
-
-    /**
-     * 先把别名段补进托管配置。骨架虽已在 bundle patch 里，但同名模型清单
-     * 只有实算得出，而 CPA 重启后目录会变 —— 这一步让**下次**重载仍有别名。
-     */
-    try {
-      const table = await readAliasTable(deps)
-      if (Object.keys(table.overlaps).length > 0 && patchModelAlias(table)) {
-        deps.logger?.info?.(
-          'cpa-panel: model aliases written (%s models)',
-          Object.keys(table.overlaps).length,
-        )
-      }
-    } catch (error) {
-      deps.logger?.warn?.('cpa-panel: model alias write failed: %o', error)
-    }
-
-    const entry = [...loaderRef.entries()].find(
+    return [...(loaderRef?.entries() ?? [])].find(
       (candidate) => candidate.options.name === '@deepseek-ai/dsh-llm-pi-ai',
     )
+  }
+
+  /**
+   * 把一份清单写回 `llm-pi-ai` 条目 —— **零 CPA 读**，快路径与慢路径共用。
+   *
+   * 「便宜」是前提：`providers` 在 `llm-pi-ai` 的 config schema 里是 `.volatile()`
+   * （`z.dict(profile).default({}).volatile()`），只改 config 且除 volatile 外全等的更新
+   * 走宿主热更新分支（`cordis-plugin-loader` 的 `volatileOnly`）——**不 dispose、不重建**，
+   * 代价只是一次 update 往返。所以「先把旧清单推回去」不该有任何犹豫。
+   */
+  const pushProfile = async (
+    profile: RouteProfile,
+    seq: number,
+    trigger: string,
+  ): Promise<SyncResult> => {
+    if (seq < pushedSeq) {
+      deps.logger?.info?.(
+        'cpa-panel: 旧清单不覆盖新清单（%s: seq %d < %d）',
+        trigger,
+        seq,
+        pushedSeq,
+      )
+      return { ok: true, models: profile.models.length, reason: 'superseded' }
+    }
+    const entry = await findEntry()
+    if (loaderRef === undefined) return { ok: false, reason: 'loader-unavailable' }
     if (entry === undefined || entry.fiber === undefined) {
       return { ok: false, reason: 'llm-pi-ai-not-loaded' }
     }
-
-    /** CPA 不在跑或目录为空 → 撤下 models（骨架仍在，路由不消失）。 */
-    let profile: RouteProfile | undefined
-    try {
-      /**
-       * ⚠️ 用 {@link CpaRuntime.status}（只读探活），**不是** `ensure()`：
-       * 这里只是在决定「要不要撤下清单」，不该因为一次设置写入就把 CPA 拉起来。
-       * 也别绕开它自己 `probePort` —— 那会另开一条探活路径，
-       * 与面板的 `/status` 给出**相反**的答案（曾踩）。
-       */
-      if ((await deps.runtime.status()).running) {
-        const catalog = await readStableCatalog(deps)
-        if (catalog !== undefined) profile = await buildCpaRouteProfile(catalog, deps)
-      }
-    } catch (error) {
-      deps.logger?.warn?.('cpa-panel: build model routes failed (%s): %o', trigger, error)
-      return { ok: false, reason: 'catalog-unavailable' }
-    }
-
     const current = (entry.options.config ?? {}) as Record<string, unknown>
     const providers = { ...((current.providers as Record<string, unknown>) ?? {}) }
-    if (profile === undefined) {
-      if (providers.cpa === undefined) return { ok: true, models: 0, reason: 'idle' }
-    } else {
-      providers.cpa = profile
-    }
+    providers.cpa = profile
     try {
       await entry.update({ config: { ...current, providers } })
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: push model routes failed (%s): %o', trigger, error)
       return { ok: false, reason: 'push-failed' }
     }
-    deps.logger?.info?.(
-      'cpa-panel: model routes %s (%s): %d models',
+    lastGood = profile
+    lastGoodSeq = seq
+    pushedSeq = seq
+    deps.logger?.info?.('cpa-panel: model routes %s: %d models', trigger, profile.models.length)
+    return { ok: true, models: profile.models.length }
+  }
+
+  /**
+   * 拿不到完整清单时的收场：**绝不推降级清单**。
+   *
+   * - 有历史 → 原样回推（顺手自愈：别的路径把它冲掉了也补回来）；
+   * - 没有历史 → **保持空**，绝不发明（`idle` 不算失败：CPA 没跑本来就该是空的）。
+   *
+   * 为什么不是「先把手里的读数推上去」：半截读数里同名模型会退化成裸名，
+   * 目录里那一项当场变样、用户选中的标识失效，而报错只有一句 4xx。
+   */
+  const degrade = async (trigger: string, reason: string): Promise<SyncResult> => {
+    const cached = lastGood
+    if (cached === undefined) {
+      if (reason === 'idle') {
+        deps.logger?.info?.('cpa-panel: model routes %s: CPA 未运行，无历史清单 → 保持空', trigger)
+        return { ok: true, models: 0, reason }
+      }
+      deps.logger?.warn?.(
+        'cpa-panel: model routes %s: 未取到完整清单（%s），无历史清单 → 保持空',
+        trigger,
+        reason,
+      )
+      return { ok: false, models: 0, reason }
+    }
+    deps.logger?.warn?.(
+      'cpa-panel: model routes %s: 未取到完整清单（%s），回推上一份（%d models）',
       trigger,
-      profile === undefined ? 'idle' : 'pushed',
-      profile?.models.length ?? 0,
+      reason,
+      cached.models.length,
     )
-    return { ok: true, models: profile?.models.length ?? 0 }
+    const pushed = await pushProfile(cached, lastGoodSeq, `${trigger}:stale`)
+    return {
+      ok: pushed.ok,
+      models: cached.models.length,
+      reason: pushed.ok ? reason : (pushed.reason ?? reason),
+      stale: true,
+    }
+  }
+
+  /**
+   * 读目录并算一份清单。拿不到就带回**原因**（不抛）：
+   * `idle` = CPA 没跑（本来就该是空的），`catalog-unavailable` = 读了但没读稳。
+   */
+  const readProfile = async (
+    trigger: string,
+    channels: Readonly<Record<string, readonly string[]>>,
+    aliases: AliasTable,
+  ): Promise<{ profile: RouteProfile } | { reason: string }> => {
+    try {
+      /**
+       * ⚠️ 用 {@link CpaRuntime.status}（只读探活），**不是** `ensure()`：
+       * 这里只是在决定「这份清单还准不准」，不该因为一次设置写入就把 CPA 拉起来。
+       * 也别绕开它自己 `probePort` —— 那会另开一条探活路径，
+       * 与面板的 `/status` 给出**相反**的答案（曾踩）。
+       */
+      if (!(await deps.runtime.status()).running) return { reason: 'idle' }
+      const catalog = await readStableCatalog(deps)
+      if (catalog === undefined) return { reason: 'catalog-unavailable' }
+      return { profile: buildCpaRouteProfile(catalog, channels, aliases, deps) }
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: build model routes failed (%s): %o', trigger, error)
+      return { reason: 'catalog-unavailable' }
+    }
+  }
+
+  const refresh = async (trigger = 'manual'): Promise<SyncResult> => {
+    /** 序号在**读之前**取：慢读算出来的清单不许盖掉后来的新清单。 */
+    const seq = ++computeSeq
+
+    /**
+     * 渠道目录**只读一次**，别名段与清单共用。读不全就什么都不推 ——
+     * 半截别名会删掉 CPA 里已有的别名，半截清单会让选中项从目录里消失。
+     */
+    const channels = await readChannelModels(deps).catch((error: unknown) => {
+      deps.logger?.warn?.('cpa-panel: channel read failed (%s): %o', trigger, error)
+      return undefined
+    })
+    if (channels === undefined) return degrade(trigger, 'channel-read-failed')
+    if (!channels.complete) return degrade(trigger, 'channel-read-incomplete')
+    const aliases = aliasTableOf(channels)
+
+    /**
+     * 先把别名段补进托管配置。骨架虽已在 bundle patch 里，但同名模型清单
+     * 只有实算得出，而 CPA 重启后目录会变 —— 这一步让**下次**重载仍有别名。
+     */
+    try {
+      if (Object.keys(aliases.overlaps).length > 0 && patchModelAlias(aliases)) {
+        deps.logger?.info?.(
+          'cpa-panel: model aliases written (%s models)',
+          Object.keys(aliases.overlaps).length,
+        )
+      }
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: model alias write failed: %o', error)
+    }
+
+    const outcome = await readProfile(trigger, channels.byChannel, aliases)
+    if (!('profile' in outcome)) return degrade(trigger, outcome.reason)
+    return pushProfile(outcome.profile, seq, trigger)
   }
 
   /**
    * 订阅宿主重载。`app-boot/config-reload` 在 profile 重建末尾 emit
    * （`app-boot/src/index.ts:300`），此刻 `llm-pi-ai` 的 fiber 刚换新，
    * 我们推的 volatile 值已随旧 fiber 一起消失 —— 这是唯一能把它补回去的时机。
+   *
+   * **两条路一起走**：先零读推回上一份（补空窗），再去读目录核对（保新鲜）。
    *
    * ⚠️ **订阅失败必须响**。曾经这里写成「`host.on` 不存在就静默降级」，
    * 结果订阅没注册也毫无痕迹，排查时完全看不出发生过什么
@@ -420,7 +558,27 @@ export function attachRouteRegistry(
     )
   }
   emitter.on('app-boot/config-reload', () => {
+    const startedAt = Date.now()
     deps.logger?.info?.('cpa-panel: host config-reload received, repushing models')
+    /**
+     * 快路径：重建刚把清单抹掉（基线里 `cpa` 只有骨架、没有 models），
+     * **不等任何 CPA 读**先把上一份原样推回。空窗的长短就是用户看到的
+     * 「闪成 cpa/xxx + composer 停用」的时长。
+     */
+    const cached = lastGood
+    if (cached !== undefined) {
+      void pushProfile(cached, lastGoodSeq, 'config-reload:fast')
+        .then((result) => {
+          deps.logger?.info?.(
+            'cpa-panel: 重载空窗补回（%d ms）：%s',
+            Date.now() - startedAt,
+            result.ok ? `${String(result.models ?? 0)} models` : (result.reason ?? 'failed'),
+          )
+        })
+        .catch((error: unknown) => {
+          deps.logger?.warn?.('cpa-panel: 重载快路径失败: %o', error)
+        })
+    }
     void refresh('config-reload')
       .then((result) => {
         deps.logger?.info?.('cpa-panel: config-reload repush done: %o', result)
