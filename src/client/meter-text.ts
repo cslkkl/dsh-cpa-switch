@@ -20,6 +20,15 @@
  * 也没有分母可算百分比。硬套的结果就是显示上游从没说过的 `已用 0`
  * 和一条恒为 0% 的假进度条。
  *
+ * ## 进度条画的是**剩余占比**（2026-10-05 维护者定案）
+ *
+ * 条恒为成功色（绿，见 `.meterFill`），而绿色直观读作「还有 / 可用」。
+ * 所以宽度必须是 `remain / size` —— **满格 = 一点没用，空 = 用光**。
+ *
+ * 历史实现按 `used / size` 画（历史设计，非重构引入）：用得越多绿得越多，
+ * 与想表达的意思正好相反 —— 2026-10-05 真机验收时发现。
+ * ⚠️ 「已用」那个数照旧单独显示（`hasUsed`），**不参与条的宽度**。
+ *
  * @module dsh-cpa-switch/client/meter-text
  */
 
@@ -37,9 +46,24 @@ export interface MeterInput {
 export interface MeterDecision {
   /** 画不画进度条。 */
   readonly show: boolean
-  /** 画的时候填多宽（0–100 的整数）。不画时为 0。 */
+  /**
+   * 画的时候填多宽（0–100 的整数）。不画时为 0。
+   *
+   * ⚠️ 这是**剩余占比**（`remain / size`），**不是已用占比**（2026-10-05 维护者定案）。
+   * 条的颜色是成功色（绿），而绿色直观读作「还有 / 可用」——
+   * 按已用画就成了「用得越多绿得越多」，与想表达的意思**正好相反**。
+   * 改成剩余占比后语义自洽：**满格 = 一点没用，空 = 用光**。
+   */
   readonly percent: number
-  /** 「已用」这格有没有真数可显示。`false` 时格子填 `—`，**不填 0**。 */
+  /**
+   * 「已用」这格有没有真数可显示。`false` 时格子填 `—`，**不填 0**。
+   *
+   * ⚠️ **只管那一格**，与条的宽度**无关** —— 两者是**独立的轴**：
+   * 上游可能给了分母却没给 `used`，所以 `hasUsed: false` + `percent: 100`
+   * （满格）是合法组合；反过来 `percent: 0`（用光）也不表示「没有已用数」。
+   * 改前不是这样：分子取 `used`、缺了就按 0 算，于是「没有已用数」隐含
+   * 「条是空的」—— 换分子时这条**隐含耦合**必须一起断掉，别再接回去。
+   */
   readonly hasUsed: boolean
   /** `true` = 上游说这是无限量（trae 的 `credits_pool_unlimited`）。 */
   readonly unlimited: boolean
@@ -140,6 +164,8 @@ export function sumCredits(accounts: readonly TotalInput[]): CreditsTotal {
  *
  * 1. **进度条**要**分母**（`size`）才有意义 —— 没有就不画。
  *    trae 没有 `size`，所以不画。这不是「上游坏了」，是它确实只给剩余。
+ *    条宽是**剩余占比**（`remain / size`）—— 绿条读作「还有」，
+ *    见 {@link MeterDecision.percent}。
  * 2. **「已用」格**要 `used` 才填 —— 没有就留空。
  *    trae 没有 `used`，那格空着；填 0 在我们看来是假数据。
  * 3. **无限量**是 trae 的 `credits_pool_unlimited`，为真时剩余数没有意义。
@@ -171,9 +197,21 @@ export function meterDecision(credits: MeterInput | null): MeterDecision {
     return { show: false, percent: 0, hasUsed, unlimited }
   }
 
-  const used = hasUsed ? (credits.used as number) : 0
-  const raw = (used / size) * 100
-  // 夹到 0–100：上游偶尔给出 used > size，进度条会溢出容器
+  /**
+   * 分子是**剩余**，不是已用 —— 绿条读作「还有 / 可用」，
+   * 按已用画就成了「用得越多绿得越多」（见 {@link MeterDecision.percent}）。
+   *
+   * ⚠️ 与 `hasUsed` 用**同一把尺子**（`typeof === 'number' && Number.isFinite`）：
+   * `remain` 不是有限数时就算不出占比，此时**不画条** ——
+   * 画一条 0% 等于替上游说「剩余 0」，那是在编数据。
+   */
+  const remain = credits.remain
+  if (typeof remain !== 'number' || !Number.isFinite(remain)) {
+    return { show: false, percent: 0, hasUsed, unlimited }
+  }
+
+  const raw = (remain / size) * 100
+  // 夹到 0–100：`remain > size`（赠送额度）会溢出容器，`remain < 0` 会画出负宽度
   const percent = Math.min(100, Math.max(0, Math.round(raw)))
   return { show: true, percent, hasUsed, unlimited }
 }
