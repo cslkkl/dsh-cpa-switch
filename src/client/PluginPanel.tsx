@@ -623,7 +623,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               plugin={plugin}
               /*
                * 单位在这里翻好再传 —— 卡片不做 `'credits' | 'tokens'` 到文案的映射：
-               * 单位是**渠道级**属性（写在 `adapters.ts`），这里已经是渠道面板，
+               * 单位是**渠道级**属性（写在 `channels/` 的 spec 里），这里已经是渠道面板，
                * 翻一次给所有卡片用，新增渠道时不用回来改卡片。
                */
               unit={unitText}

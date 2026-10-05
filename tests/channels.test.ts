@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeAccounts } from '../src/adapters.ts'
+import { normalizeAccounts } from '../src/channels/normalize.ts'
 import { en, zh } from '../src/client/locales.ts'
 import { planText } from '../src/client/plan-text.ts'
 
@@ -195,16 +195,16 @@ describe('账号显示名', () => {
 
 describe('渠道能力表', () => {
   it('zcode 单位是 tokens，其余是 credits', async () => {
-    const { PLUGIN_ADAPTERS } = await import('../src/adapters.ts')
-    expect(PLUGIN_ADAPTERS.zcode.unit).toBe('tokens')
-    expect(PLUGIN_ADAPTERS.workbuddy.unit).toBe('credits')
+    const { channelOf } = await import('../src/channels/registry.ts')
+    expect(channelOf('zcode')?.unit).toBe('tokens')
+    expect(channelOf('workbuddy')?.unit).toBe('credits')
   })
 
   it('不支持的能力如实为 false（按能力降级渲染）', async () => {
-    const { PLUGIN_ADAPTERS } = await import('../src/adapters.ts')
-    expect(PLUGIN_ADAPTERS.zcode.capabilities.checkin).toBe(false)
-    expect(PLUGIN_ADAPTERS.trae.capabilities.tasks).toBe(false)
-    expect(PLUGIN_ADAPTERS.workbuddy.capabilities.tasks).toBe(true)
+    const { channelOf } = await import('../src/channels/registry.ts')
+    expect(channelOf('zcode')?.capabilities.checkin).toBe(false)
+    expect(channelOf('trae')?.capabilities.tasks).toBe(false)
+    expect(channelOf('workbuddy')?.capabilities.tasks).toBe(true)
   })
 })
 

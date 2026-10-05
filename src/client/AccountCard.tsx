@@ -22,7 +22,7 @@ export interface AccountCardProps {
    * 渠道额度单位的**文案**（`积分` / `token`），不是 `'credits' | 'tokens'`。
    *
    * 由 `PluginPanel` 从 `meta.unit` 翻好传进来 —— 卡片**自己不做映射**：
-   * 单位是渠道级属性（写在 `adapters.ts`），卡片只是展示点之一。
+   * 单位是渠道级属性（写在 `channels/` 的 spec 里），卡片只是展示点之一。
    */
   readonly unit: string
   readonly capabilities: Capabilities
@@ -318,7 +318,7 @@ export function AccountCard(props: AccountCardProps): ReactNode {
        * 卡片只给原料。
        *
        * ⚠️ `—` 是**「上游没给这个数」，不是 0**。解析层绝不编 0
-       * （见 `adapters.ts` 的 `CreditEntry` 与架构说明 F40）。
+       * （见 `contracts/domain.ts` 的 `CreditEntry` 与架构说明 F40）。
        */}
       <div className={css.numbers}>
         <div className={css.number}>

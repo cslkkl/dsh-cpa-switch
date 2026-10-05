@@ -30,15 +30,7 @@
  * @module dsh-cpa-switch/model-alias
  */
 
-/** 渠道前缀：别名里的渠道段。用短码，别用长名（模型 id 越短越好读）。 */
-const CHANNEL_PREFIX: Readonly<Record<string, string>> = {
-  workbuddy: 'wb',
-  trae: 'trae',
-  qoder: 'qoder',
-  zcode: 'zcode',
-  kimi: 'kimi',
-  mimo: 'mimo',
-}
+import { aliasPrefixOf } from './channels/registry.ts'
 
 /** 别名表：`模型名 -> 渠道 -> 别名`。只收录**同名**模型。 */
 export interface AliasTable {
@@ -50,13 +42,15 @@ export interface AliasTable {
   readonly resolve: (id: string) => { model: string; channel: string } | undefined
 }
 
-/** 渠道 key → 别名前缀；认不出的渠道返回原样（宁可难看也不要错配）。 */
+/**
+ * 渠道 key → 别名前缀。
+ *
+ * 前缀的**唯一登记处是渠道注册表**（`aliasPrefix` 字段）——
+ * 这里只是转出，不维护第二份清单。认不出的渠道原样小写透传
+ * （宁可难看也不要错配，也就能覆盖 kimi / mimo 这类非托管渠道）。
+ */
 export function channelPrefix(channel: string): string {
-  const key = String(channel ?? '')
-    .trim()
-    .toLowerCase()
-  if (key === '') return ''
-  return CHANNEL_PREFIX[key] ?? key
+  return aliasPrefixOf(channel)
 }
 
 /** 单个渠道专属别名。斜杠前缀，斜杠后是原模型名。 */

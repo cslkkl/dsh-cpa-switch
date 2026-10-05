@@ -22,7 +22,7 @@
 | `src/route-registry.ts`         | 模型路由唯一入口：[架构说明](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证） |
 | `src/operations.ts`             | 写操作要调 `invalidateChannel()`；读路径别加没人消费的字段（[架构说明](docs/ARCHITECTURE.md)）；**动作 ≠ 调度**：全部签到签全部账号含已禁用的（F35）；**改启用态要回读确认 + 逐个容错**（F43）                    |
 | `src/select-plan.ts`            | 「设为唯一」的目标状态计算与回读验证（纯函数）；改动同步 [决策记录](.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                            |
-| `src/adapters.ts`               | [架构说明](docs/ARCHITECTURE.md)、渠道能力表                                                                                                                                                                      |
+| `src/channels/**`               | 渠道知识**唯一来源**：新增渠道 = 加一个 spec + 在注册表挂上，面板 / 路由 / 别名 / 生成配置全部派生（[手册](src/channels/README.md)）                                                                              |
 | `src/contracts/**`              | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红（[决策记录](.agents/notes/2026-10-05-contract-type-sharing.md)）                            |
 | `scripts/check-layering.cjs`    | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                               |
 | `src/ids.ts` / `src/paths.ts`   | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                           |
@@ -87,7 +87,7 @@ python check-line-endings.py <本仓根> --target lf
   [CI 运行记录](https://github.com/cslkkl/dsh-cpa-switch/actions/workflows/ci.yml)
 - 产物清单与体积 → `Get-ChildItem lib` 现查
 - 路由表 → [src/index.ts](src/index.ts) 的 `buildRoutes()`（README 那张表是可读索引，代码是事实源）
-- 渠道能力与单位 → [src/adapters.ts](src/adapters.ts) 的 `PLUGIN_ADAPTERS`
+- 渠道能力与单位 → [src/channels/registry.ts](src/channels/registry.ts)（改这里，别处派生）
 - 状态文件与运行时目录 → [src/paths.ts](src/paths.ts)（**认 `DSH_HOME`**；别自己拼 `homedir()/.dsh`）
 - 产物该有什么 → `scripts/verify-artifacts.cjs` 的断言集合
 - 宿主槽名与 `kind`、客户端服务名 → 实装宿主包：
