@@ -5,14 +5,19 @@
 src/ 特有约束：
 
 - **依赖方向单向**：`index.ts` 可以依赖任何模块；基础模块（`state` / `cpa` / `config` / `routes`）
-  **不得**反向依赖 `operations` 或 `index`。
+  **不得**反向依赖 `ops/` 或 `index`。
 - **跨两半的形状归 `contracts/`**：类型只写一处，两半都 `import type`；
   判据（纯函数）只依赖契约，不许碰 IO。三条由 `pnpm check:layering` 拦。
+- **业务规则进 `ops/`，一域一文件**：域按**语义**分（不是按数据表），域之间不许互相 import
+  —— 共享的下沉到 `ops/result.ts`；业务域不许引 `index` / `boot` / `route-table` / `routes`，
+  由 `check:layering` 的 `ops-no-outer` 拦。手册见 [ops/README.md](ops/README.md)。
+- **每个改变 CPA 状态的写操作成功后要失效缓存**（`gateway.invalidateChannel`）：
+  漏了不报错，只是用户点完看到的还是旧值。判据在 `tests/ops-write-paths.test.ts`。
 - **对 CPA 只有一个通道**：读写一律 `gateway.fetch(path, init)`，
-  不要自己拼 `cpaFetch(options(), …)`；就绪前置用 `gateway.requireRunning/requireReady`。
+  不要自己拼 `cpaFetch(options(), …)`；就绪前置用 `requireRunning` / `requireReady`。
 - **「CPA 在不在跑」只有两个名字**：只是想知道用 `runtime.status()`（**绝不起进程**），
   要确保可用用 `runtime.ensure()`。别再自己 `probePort` —— 那会另开一条探活路径。
-- **`index.ts` 只做装配**：业务逻辑写进 `operations.ts`，不要堆在路由 handler 里。
+- **`index.ts` 只做装配**：业务逻辑写进 `ops/`，不要堆在路由 handler 里。
 - **新增路由必须进 `route-table.ts` 的表**（`RouteSpec` 形状见 `routes.ts`），
   不要在 `index.ts` 里直接调宿主 `register`；同批回填 [README.md](README.md) 的路由表。
 - **对外可观测的行为改动要同步契约**：路由形状变了 → 改根 [README.md](../README.md)；

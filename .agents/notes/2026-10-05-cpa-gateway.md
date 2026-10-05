@@ -55,11 +55,12 @@
 
 ## 影响
 
-- 新增对 CPA 的请求 = 在 `operations.ts` 里写 `gateway.fetch(path, init)`；
+- 新增对 CPA 的请求 = 在 `ops/**` 里写 `gateway.fetch(path, init)`；
   **不要再出现 `cpaFetch(options(), …)` 这种拼装**。
 - 新增读缓存 = 在 `cacheKeys` 加构造器 + 在 `invalidateChannel` 里加一行
   （`tests/gateway.test.ts` 有一条判据遍历 `cacheKeys` 的产出，漏了会红）。
 - 想知道 CPA 在不在跑：要「只是看」用 `runtime.status()`，要「确保可用」用
   `runtime.ensure()` —— 选错不报错，只是行为不是你要的。
-- `operations.ts` 的 `#ready()` / `#running()` 退化成一句翻译，业务判据一条没动；
-  P5b 拆业务域时不必再碰前置。
+- `#ready()` / `#running()` 退化成一句翻译，业务判据一条没动（P5b 拆域时它们变成了
+  [`ops/result.ts`](../../src/ops/result.ts) 的 `requireReady` / `requireRunning`，
+  业务判据仍然一条没动）。

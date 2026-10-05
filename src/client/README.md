@@ -68,7 +68,7 @@
 - **`routing-text.ts`** —— 路由策略值的本地化与警示判定。**不含 JSX、不引 UI 包**。
   - 导出：`strategyTextOf`（策略值 → 文案）/ `strategyWarns`（要不要显示警告）
   - ⚠️ **三个合法值都要有中文**：`round-robin` / `weighted-round-robin` / `fill-first`
-    （白名单在 [operations.ts](../operations.ts) 的 `routingSet`）。曾经只翻 `fill-first`，
+    （白名单在 [ops/scheduling.ts](../ops/scheduling.ts) 的 `setRouting`）。曾经只翻 `fill-first`，
     中文界面下直接露出 `round-robin` 英文（2026-10-05 用户实机指出）
   - 认不出的值**原样透传**（与 `plan-text.ts` 同一条原则）
   - 改动同步 `tests/routing-text.test.ts`

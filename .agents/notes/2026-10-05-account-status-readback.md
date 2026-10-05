@@ -102,8 +102,9 @@ PATCH 大多确实成功，所以大多正常。失败是间歇的（上游对�
 
 ## 参考
 
-- 实现：`src/select-plan.ts`、`src/operations.ts` 的 `#credentialsOf` /
-  `#readBackCredentials` / `#rememberIntent` / `accountEnabled` / `accountSelect`
+- 实现：`src/select-plan.ts`、启用域的 `credentialsOf` / `readCredentials` /
+  `rememberIntent` / `setEnabled` / `select`（域拆分后从 `src/operations.ts`
+  搬到了 [`src/ops/enable.ts`](../../src/ops/enable.ts)）
 - 客户端：`src/client/AccountCard.tsx` 的 `selectAccount`、
   `src/client/PluginPanel.tsx` 的覆盖层
 - 相关：F33（写成功后的界面值取后端回读）

@@ -9,7 +9,7 @@
 - **`domain.ts`** —— 领域形状：渠道能力、额度、签到、账号、批量动作结果。
   - 导出：`Capabilities` / `CreditPackage` / `CreditEntry` / `CheckinEntry` /
     `NormalizedAccount` / `ActionFailure` / `ActionOutcome`
-  - 生产方：`src/channels/normalize.ts`（`normalizeAccounts`）、`src/operations.ts`（`normalizeActionOutcome`）
+  - 生产方：`src/channels/normalize.ts`（`normalizeAccounts`）、`src/action-outcome.ts`（`normalizeActionOutcome`）
   - 消费方：`src/client/AccountCard.tsx`、`src/client/PluginPanel.tsx`、`src/client/action-text.ts`
   - 改后必测：`pnpm check`（两半各一次 typecheck）+ `tests/channels.test.ts`
     - `tests/action-outcome.test.ts`
