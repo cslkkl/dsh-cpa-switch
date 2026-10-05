@@ -181,6 +181,10 @@ python check-line-endings.py <本仓根> --target lf
       它牵扯模型目录的分组方式，改错会让选择器里出现重复条目。
 - [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
+- [ ] **`model-caps.ts` 硬编码不可持续** —— 上游不透出 `context_length`，只能靠人工表，
+      每次新模型都要补。曾讨论过的方向：① 上游透出字段后自动读（已确认宿主会认，
+      只等 CPA 给出）；② 探测端点拿真值（成本高、需签名）；③ 不维护表、全部走兜底。
+      未想好，暂按现状。出处分档与取舍见[决策记录](.agents/notes/2026-10-06-model-caps-source-tiers.md)。
 - [ ] **研究方向见 [docs/PLAN.md](docs/PLAN.md)** —— 额度显示位置、每代理独立用号、
       调度维护界面等**尚未立项**的想法记在那里；本清单只放「确定要做、照做即可」的动作。
       **结构类改动**（会改行为或签名的）立项在那份的 §2.9：**先补判据再动结构**。
