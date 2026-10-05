@@ -19,6 +19,7 @@ import {
   normalizeAccounts,
 } from './adapters.ts'
 import type { ChannelId } from './adapters.ts'
+import type { ActionFailure, ActionOutcome } from './contracts/domain.ts'
 import { planSelect, verifySelect } from './select-plan.ts'
 import {
   readAccountIntent,
@@ -59,50 +60,6 @@ export type OpsSuccess = { readonly ok: true } & Record<string, unknown>
 
 /** 操作结果。 */
 export type OpsResult = OpsSuccess | OpsFailure
-
-/** 一次批量动作里**失败的那一个**账号。 */
-export interface ActionFailure {
-  /**
-   * 账号的显示名。
-   *
-   * ⚠️ 上游给的名字字段**可能为空**（ZCode 实测 `nickname: ""`），所以这里
-   * 依次退 `name`（凭据文件名）→ `auth_index`。**绝不留空** —— 界面要靠它
-   * 指名道姓地说「哪个号没签成」，空名字等于没报。
-   */
-  readonly nickname: string
-  /** 失败原因：上游的 `reason`，退回 `message`；都没有就空串（界面不猜）。 */
-  readonly reason: string
-}
-
-/**
- * 一次批量动作（全部签到 / 全部任务）的结果，已归一。
- *
- * **为什么需要归一层**：CPA 各渠道的返回形状不同，而**有渠道根本不返回
- * `summary`**（workbuddy / qoder 实测只有 `results[]`，2026-10-04）。让浏览器
- * 去猜「哪些字段可选」等于把上游契约复制到每一处调用点。
- *
- * 所以：能取到 `summary` 就用它，取不到就从 `results[]` 逐个累加 ——
- * 两条路给出同一个形状，调用方只认这一种。
- */
-export interface ActionOutcome {
-  /** 本次涉及的账号数。 */
-  readonly total: number
-  /** 真正完成了动作的（签到成功 / 任务跑完）。 */
-  readonly succeeded: number
-  /** 已经做过、这次被跳过的（`reason: "already"`）。 */
-  readonly already: number
-  /** 失败的个数。 */
-  readonly failed: number
-  /**
-   * 本次动作带来的**额度净增量**（`results[].total_credits` 累加）。
-   *
-   * ⚠️ 取的是「本次拿到多少」，**不是**余额前后差值 —— 余额同时会被任务、
-   * 赠送包等别的动作改动，差值法会把那些算进来。
-   */
-  readonly credits: number
-  /** 逐个失败项（含账号名与原因），供界面指名道姓地报出来。 */
-  readonly failures: readonly ActionFailure[]
-}
 
 /** 从任意值里取一个有限数字；取不到给 0。 */
 function num(value: unknown): number {

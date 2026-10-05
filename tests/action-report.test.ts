@@ -10,8 +10,9 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { actionText, type ActionOutcomeView } from '../src/client/action-text.ts'
+import { actionText } from '../src/client/action-text.ts'
 import { en, zh } from '../src/client/locales.ts'
+import type { ActionOutcome } from '../src/contracts/domain.ts'
 
 /** 宿主 `Translate`：key + 具名占位符。这里用真表渲染，测的是最终显示的字。 */
 const makeT =
@@ -25,7 +26,7 @@ const makeT =
 const tzh = makeT(zh as unknown as Record<string, string>)
 const ten = makeT(en as unknown as Record<string, string>)
 
-const outcome = (over: Partial<ActionOutcomeView> = {}): ActionOutcomeView => ({
+const outcome = (over: Partial<ActionOutcome> = {}): ActionOutcome => ({
   total: 3,
   succeeded: 3,
   already: 0,

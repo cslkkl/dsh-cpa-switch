@@ -10,53 +10,13 @@ import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { act, fmt, selectCpaAccount, setAccountEnabled } from './api.ts'
 import { amountWithUnit, meterDecision } from './meter-text.ts'
 import { planText } from './report.tsx'
+import type { Capabilities, NormalizedAccount } from '../contracts/domain.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
-/** `capabilities` 由宿主上报，决定渲染哪些按钮。 */
-export interface Capabilities {
-  readonly credits: boolean
-  readonly checkin: boolean
-  readonly tasks: boolean
-  readonly autoCheckin: boolean
-  readonly school: boolean
-  readonly import: boolean
-}
-
-/** 解析后的签到状态。 */
-export interface CheckinInfo {
-  readonly checkedToday: boolean
-  readonly streakDays?: number | undefined
-}
-
-/** 解析后的余额。`null` 表示该渠道取不到余额。 */
-export interface CreditsInfo {
-  readonly remain: number
-  /** 上游不给时为 `undefined`（trae 实测不给）—— 界面留空，**不填 0**。 */
-  readonly used?: number | undefined
-  /** 总额（占比分母）。上游不给时为 `undefined`（trae）—— 界面不画进度条。 */
-  readonly size?: number | undefined
-  readonly packages: readonly unknown[]
-  readonly plan?: unknown
-  /** 上游明说「不知道」时为 `false`；`undefined` = 该渠道没这个概念。 */
-  readonly known?: boolean | undefined
-  readonly unlimited?: boolean | undefined
-}
-
-/** 一个账号（宿主 `normalizeAccounts` 的输出）。 */
-export interface Account {
-  readonly authIndex: string | undefined
-  readonly authId: string
-  readonly nickname: string
-  readonly disabled: boolean
-  readonly exhausted: boolean
-  readonly credits: CreditsInfo | null
-  readonly checkin?: CheckinInfo | undefined
-}
-
 /** `AccountCard` 的入参。 */
 export interface AccountCardProps {
-  readonly account: Account
+  readonly account: NormalizedAccount
   readonly plugin: string
   /**
    * 渠道额度单位的**文案**（`积分` / `token`），不是 `'credits' | 'tokens'`。
