@@ -25,6 +25,11 @@
  * 3. **粒度到账号**：签到是按 `auth_index` 的，且**上游不给已禁用账号的
  *    签到块**（实测）—— 渠道级记账会把「签了一个号」错当成「全渠道都签了」。
  *
+ * ⚠️ 判定用「**任一键是今天**」而不是「优先哪个键」：开机补签只写渠道级，
+ * 而某个号的账号级键可能还留着昨天 —— 按优先级判会让昨天那条挡掉今天那条，
+ * 界面就整行没有标签（2026-10-06 实机踩到，见
+ * [决策记录](../.agents/notes/2026-10-05-checkin-ledger.md)「修正」一节）。
+ *
  * 纯函数、不碰 IO：读写磁盘在 `state.ts`，接线在 `operations.ts`。
  *
  * @module dsh-cpa-switch/checkin-ledger
@@ -50,16 +55,18 @@ export interface CheckinLedger {
  */
 export const CHANNEL_WIDE = ''
 
-/** 账本里查一个账号。 */
-function dayOf(ledger: CheckinLedger, plugin: string, authIndex: string): string | undefined {
-  const byAccount = ledger[plugin]
-  if (byAccount === undefined) return undefined
-  // 账号级优先，其次渠道级（「整渠道签过」也意味着这个号签过）
-  return byAccount[authIndex] ?? byAccount[CHANNEL_WIDE]
-}
-
 /**
  * 这个账号**今天**是否已被本机记为「签过」。
+ *
+ * ⚠️ **任一键是今天就算签过**，不是「优先那个键是今天才算」。
+ *
+ * 两者只在一种情形下不同，而那正是实机踩到的：
+ * 开机补签只写**渠道级**（那一刻不知道渠道里有哪些号），而某个号的**账号级**
+ * 键还留着**昨天**的日期。按「优先」判，昨天那条会把今天那条挡掉 → 界面整行
+ * 没有签到标签（qoder 的签到状态只来自账本，没有第二条数据源）。
+ *
+ * 所以账号级优先**只用于取值**（哪个日期串代表这个号），不参与这里的判定 ——
+ * 判定问的是「本机有没有说过这个号今天签过」，两条键各自独立地回答它。
  *
  * @param ledger - 账本。
  * @param plugin - 渠道 id。
@@ -72,7 +79,10 @@ export function isRecordedToday(
   authIndex: string,
   day: string,
 ): boolean {
-  return dayOf(ledger, plugin, authIndex) === day
+  const byAccount = ledger[plugin]
+  if (byAccount === undefined) return false
+  // 两条键各自独立地「说了今天」—— 任一命中即成立
+  return byAccount[authIndex] === day || byAccount[CHANNEL_WIDE] === day
 }
 
 /**

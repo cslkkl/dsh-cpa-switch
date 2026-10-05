@@ -79,6 +79,30 @@ describe('渠道级签到（保留键）', () => {
     const ledger = recordToday(signed, PLUGIN, CHANNEL_WIDE, DAY)
     expect(isRecordedToday(ledger, PLUGIN, ACC, DAY)).toBe(true)
   })
+
+  it('⚠️ 账号级记的是**昨天**、渠道级记的是**今天** → 仍算今天签过', () => {
+    // 实机踩过（2026-10-06）：开机补签只写渠道级（那一刻不知道渠道里有哪些号），
+    // 而该号的账号级键还留着**昨天**的日期 —— 旧写法 `byAccount[acc] ?? 渠道级`
+    // 让昨天那条短路了今天那条，界面于是什么都不显示（qoder 无第二条数据源）。
+    // 账号级优先只该决定「用哪一天」，不该用来**否定**渠道级已经说过的今天。
+    const ledger: CheckinLedger = {
+      [PLUGIN]: { [ACC]: OTHER_DAY, [CHANNEL_WIDE]: DAY },
+    }
+    expect(isRecordedToday(ledger, PLUGIN, ACC, DAY)).toBe(true)
+  })
+
+  it('两边都是昨天 → 不算今天签过（跨天仍要作废）', () => {
+    const ledger: CheckinLedger = {
+      [PLUGIN]: { [ACC]: OTHER_DAY, [CHANNEL_WIDE]: OTHER_DAY },
+    }
+    expect(isRecordedToday(ledger, PLUGIN, ACC, DAY)).toBe(false)
+  })
+
+  it('账号级是昨天时，不会因此把**别的号**也算成今天签过', () => {
+    // 保留「账号级记录不污染同渠道其它账号」：只有渠道级键能覆盖全渠道
+    const ledger: CheckinLedger = { [PLUGIN]: { [ACC]: OTHER_DAY } }
+    expect(isRecordedToday(ledger, PLUGIN, '别的号', DAY)).toBe(false)
+  })
 })
 
 describe('applyLedger —— 只补不覆盖', () => {
@@ -121,5 +145,23 @@ describe('applyLedger —— 只补不覆盖', () => {
   it('保留上游的其它字段（连签天数不能被账本抹掉）', () => {
     const reported = { checkedToday: false, streakDays: 7 }
     expect(applyLedger(reported, signed, PLUGIN, ACC, DAY)).toEqual(reported)
+  })
+
+  it('⚠️ 复现实机现象：开机补签写了渠道级，但该号账号级留着昨天 → 界面要显示已签到', () => {
+    // qoder 的签到状态只来自账本（它的 parseCheckin 恒 undefined），
+    // 所以这条路径一旦返回 undefined，卡片上就是**整行没有签到标签**
+    const ledger: CheckinLedger = {
+      [PLUGIN]: { [ACC]: OTHER_DAY, [CHANNEL_WIDE]: DAY },
+    }
+    expect(applyLedger(undefined, ledger, PLUGIN, ACC, DAY)).toEqual({ checkedToday: true })
+  })
+
+  it('⚠️ 渠道级是今天、账号级是昨天时，上游说「没签到」仍然是上游赢', () => {
+    // 修的是「哪一天」，不是「只补不覆盖」—— 上游能风控撤销签到
+    const reported = { checkedToday: false, streakDays: 0 }
+    const ledger: CheckinLedger = {
+      [PLUGIN]: { [ACC]: OTHER_DAY, [CHANNEL_WIDE]: DAY },
+    }
+    expect(applyLedger(reported, ledger, PLUGIN, ACC, DAY)).toEqual(reported)
   })
 })
