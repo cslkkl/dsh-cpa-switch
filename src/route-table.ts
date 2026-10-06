@@ -104,6 +104,18 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
          */
         const state = await deps.runtime.status()
         return json({
+          /**
+           * ⚠️ **`ok: true` 不是可选字段。** 浏览器半边的 `useResource` 用
+           * `result.ok` 判成败（`transport.ts` 把响应体原样当 `ApiResult`）。
+           * 缺了它 `result.ok` 是 `undefined` ⇒ 这条路由的数据在界面上**恒为空**，
+           * 而宿主这边 HTTP 200、`runtime.status()` 也正常 —— 症状是
+           * 「状态条与告警都不出现」，控制台与宿主日志都没有报错。
+           *
+           * ⚠️ 这条路由是**唯一**决定「画不画状态条」的，所以它一坏，挂在下面的
+           * 提示块（端口被外部实例占用 / 配置代际不符）也跟着一起静默消失。
+           * 判据：`tests/route-table.test.ts` 的「GET 路由的响应体都带 ok: true」。
+           */
+          ok: true,
           running: state.running,
           owned: state.owned,
           /**

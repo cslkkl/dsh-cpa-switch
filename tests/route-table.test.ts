@@ -98,6 +98,73 @@ describe('路由表自身', () => {
   })
 })
 
+/**
+ * **每条 GET 路由的响应体必须带 `ok: true`。**
+ *
+ * 守的是一个**已经存在了一段时间的静默 bug**：`/status` 的响应体里没有 `ok` 字段，
+ * 而浏览器半边的 `useResource` 用 `result.ok` 判定成功与否。于是：
+ * `result.ok` 是 `undefined` ⇒ 走「失败」分支 ⇒ `data` 恒为 `undefined` ⇒
+ * 状态条（`{status !== undefined && …}`）与挂在它下面的提示块**都不渲染**。
+ * 宿主那侧一切正常（HTTP 200、`runtime.status()` 返回值也对），所以从外面看
+ * 「什么都没有」，而控制台与日志都没有报错。
+ *
+ * ⚠️ 这条判据之所以必要：`/setup`、`/plugins`、`/account-intent` 都显式带了
+ * `ok: true`，只有 `/status` 漏了 —— 而 `/status` 恰恰是**唯一一条**用来决定
+ * 「画不画状态条与告警」的路由。它一坏，两条提示连同状态条一起静默消失。
+ *
+ * 怎么测才不依赖网络与磁盘：只打那些**不碰 CPA** 的 GET 路由，且只看**响应体里
+ * `ok` 这个键在不在**（不关心其它字段）。需要 CPA 的路由由 `ops-write-paths.test.ts`
+ * 那套假网关覆盖。
+ */
+describe('GET 路由的响应体都带 ok: true', () => {
+  /** 只打这几条：它们只读配置与内存对象，不发网络请求。 */
+  const OFFLINE_GET_PATHS = new Set([
+    '/api/v1/cpa/status',
+    '/api/v1/cpa/plugins',
+    '/api/v1/cpa/setup',
+    '/api/v1/cpa/account-intent',
+    '/api/v1/cpa/auto-checkin',
+    '/api/v1/cpa/priority',
+  ])
+
+  async function bodyOf(path: string): Promise<Record<string, unknown>> {
+    const route = routes.find((r) => r.path === path)
+    if (route === undefined) throw new Error(`没有这条路由：${path}`)
+    const request = new Request(`http://localhost${path}`)
+    const response = await route.handle(request)
+    const text = await response.text()
+    return text === '' ? {} : (JSON.parse(text) as Record<string, unknown>)
+  }
+
+  it('前提断言：这批路由确实存在，且都能跑出 JSON', async () => {
+    for (const path of OFFLINE_GET_PATHS) {
+      expect(
+        routes.some((r) => r.path === path),
+        `${path} 不在路由表里`,
+      ).toBe(true)
+      // auto-checkin / priority 需要 query 参数，用默认路径也要能返回 JSON
+      const body = await bodyOf(path)
+      expect(typeof body, `${path} 的响应体不是对象`).toBe('object')
+    }
+  })
+
+  it('每条响应体里都有 ok: true（缺它 = 该路由的数据在界面上永远为空）', async () => {
+    const missing: string[] = []
+    for (const path of OFFLINE_GET_PATHS) {
+      const body = await bodyOf(path)
+      if (body.ok !== true) missing.push(`${path}（ok=${JSON.stringify(body.ok)}）`)
+    }
+    expect(
+      missing,
+      missing.length === 0
+        ? ''
+        : `这些路由的响应体里没有 ok: true：${missing.join(' / ')}\n` +
+            '浏览器 useResource 用 result.ok 判成败，缺它就等于「永远读不到」——\n' +
+            '界面表现为这一块空白，且控制台与宿主日志都没有报错。',
+    ).toEqual([])
+  })
+})
+
 describe('README 的路由索引与代码一致', () => {
   /** 从 `src/README.md` 的「内部 HTTP 路由」一节里读那张表。 */
   function readmeRoutes(): Map<string, string[]> {

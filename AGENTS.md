@@ -210,6 +210,14 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
   宿主侧**清哪些 key 由 [gateway.ts](src/gateway.ts) 的 `cacheKeys` 决定**（键即失效前缀）——
   新增一个读 key 却忘了登记，那条读会永远显示写之前的值。
   **哪条写路径漏了调用**由 `tests/ops-write-paths.test.ts` 逐条钉住。
+- **路由响应体少一个 `ok: true`，整块界面静默空白** —— 浏览器 `useResource`
+  用 `result.ok` 判成败（[transport.ts](src/client/transport.ts) 把响应体原样当
+  `ApiResult`）。缺了它 `result.ok` 是 `undefined` ⇒ 走失败分支 ⇒ 那条路由的数据
+  恒为空，**而宿主这边 HTTP 200、逻辑也对，控制台与日志都没有报错**。
+  ⚠️ `/status` 曾长期漏掉（`/setup`、`/plugins`、`/account-intent` 都带了），
+  于是**状态条与两条告警一起消失**（2026-10-06 真机）。**新增或改任何一条路由的
+  响应体，`ok: true` 都要写上**；判据 `tests/route-table.test.ts` 的
+  「GET 路由的响应体都带 ok: true」（F47）。
 - **路径不许自己拼 `homedir()/.dsh`** —— 走 [src/paths.ts](src/paths.ts)。
   `DSH_HOME` 覆盖被忽略时**零报错**：状态与 40MB 运行时会落到另一个目录，
   用户看到的是「设置老是不生效」。
