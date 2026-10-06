@@ -137,12 +137,6 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 > 变模糊的要么补清背景、要么降级到 PLAN.md 的研究方向；新想法**先入 PLAN.md §2.6**，
 > 别直接塞这里 —— 待办混入未立项的想法就不再是「照做即可」的清单了。
 
-- [ ] **发布 0.4.0** —— `package.json` 已是 0.4.0（`v0.3.0` 已发），
-      正文 `docs/releases/v0.4.0.md` 已备好。
-      推 `v0.4.0` 标签即由 [publish.yml](.github/workflows/publish.yml) 跑全量门禁 →
-      校验 tag 与版本号一致 → `npm publish --provenance` → **建 GitHub Release**
-      （那一步在 workflow 里，不用手工补）。流程见[发布手册](docs/PUBLISHING.md) §3.1。
-
 - [ ] **重启 DSH 复验两条新提示**（提示块只在宿主半端生效，不随页面刷新加载）：
       端口被外部实例占用（应显示**琥珀**点 + 提示块，而不是绿色「运行中」）、
       以及把 `config.example.yaml` 的代际改成别的数时应出现「配置代际不符」。
