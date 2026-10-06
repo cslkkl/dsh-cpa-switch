@@ -71,3 +71,20 @@ export function managedConfigPath(): string {
 export function managedPluginsDir(): string {
   return join(managedCpaDir(), 'plugins')
 }
+
+/**
+ * 托管 CPA 的**启动输出**落点。
+ *
+ * 为什么要有这个文件：CPA 自己打印的失败原因（配置代际被拒、端口被占）
+ * 原先被 `stdio: 'ignore'` 丢掉，插件只剩一句 `start-timeout`。改成把子进程的
+ * stdout / stderr **重定向到这个文件**之后，失败时读回尾部就能认出原因。
+ *
+ * ⚠️ 选**文件重定向**而不是 pipe：pipe 必须有人**持续排空**，否则写满管道
+ * 会把 CPA 主进程阻塞（它的每条请求日志都往 stdout 写）。文件没有这个反压，
+ * 也不需要常驻读取循环。见 `src/process.ts` 的 `#spawnCpa`。
+ *
+ * 与 exe 同层，所以用户想手看时就在托管目录里。
+ */
+export function managedStartupLogPath(): string {
+  return join(managedCpaDir(), 'startup.log')
+}
