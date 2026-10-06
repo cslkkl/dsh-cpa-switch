@@ -49,15 +49,21 @@
   - 改后必测：`tests/paths.test.ts`
 - **`state.ts`** —— 状态文件读写，**纯 IO、无网络**。
   - 读：`localDay` / `readExeMemory` / `readStamp` / `readCheckinLedger` / `readAccountIntent`
-    / 类型 `AccountIntent`、`CheckinStamp`
+    / `readCachedRoutes` / 类型 `AccountIntent`、`CheckinStamp`、`CachedRoutes`
   - 写：**只有读改写单入口** —— `writeExeMemory`（单字段，普通写）/
     `updateStamp` / `updateCheckinLedger` / `updateAccountIntent`。
     ⚠️ **传的是「改法」不是「算好的值」**：值只能来自更早的某次读，而 `await` 之后的旧快照
     会盖掉别人刚写的东西（实踩，见[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)）
-  - 三份状态分开存：exe 记忆（长期）、签到 stamp + **今日签到账本**（按天，同一文件）、
-    账号意图（长期，仅面板写）
+  - 四份状态分开存：exe 记忆（长期）、签到 stamp + **今日签到账本**（按天，同一文件）、
+    账号意图（长期，仅面板写）、**路由清单缓存**（长期，仅读全时写）
+  - ⚠️ **路由清单缓存**（`readCachedRoutes` / `writeCachedRoutes`）是**唯一会写盘的
+    「上次成功清单」**：启动时立刻用它、不必等读 CPA（凭据加载是秒级的）。
+    三条约束：**不设硬过期**（过期后又会走回「等读 → 半成品 → `CPA ·`」）、
+    **只有完整快照才写**（半成品进缓存 = 下次启动又看到坏的）、
+    **`port` 变了作废**（`baseURL` 里焊着端口）。
+    写入口**自己再校验一遍形状**，不指望调用方自觉
   - 改后必测：账号意图的 `source !== 'panel'` 拒绝、`ignored` 剥离（读与写**两头**都要）、
-    并发写的丢更新（`tests/state-lost-update.test.ts`）
+    并发写的丢更新（`tests/state-lost-update.test.ts`）、缓存的四条约束（`tests/state.test.ts`）
 - **`select-plan.ts`** —— 「设为唯一」的**目标状态计算 + 回读验证**（纯函数，不碰 IO）。
   - 导出：`planSelect` / `verifySelect` / 类型 `SelectableFile` / `SelectChange` / `SelectPlan`
   - 为什么需要：`accountSelect` 要改同渠道**多个**账号，而上游
@@ -201,14 +207,29 @@
     各自判断自己的成败 —— 于是「目录齐了、归属没齐」时**两边都算成功**，
     推出去的清单里独供模型落进 `CPA · xxx` 兜底名（实机两次症状同根）。
     现在读收在 **`readReadySnapshot`** 一处，由 **`agreeOnOwnership`** 裁决：
-    供给面为空 = **还没读到**（继续等，短预算 750ms 退避）；
-    供给面有内容而某 id 仍无归属 = **确属无归属**（是事实，可以推）。
-    **本函数不读 CPA**（`buildProfileFrom` 纯计算）—— 读全在一处，判断才可能一致
+    供给面为空 = **还没读到**（继续等）；供给面有内容而某 id 仍无归属 = **确属无归属**
+    （是事实，可以推）。**本函数不读 CPA**（`buildProfileFrom` 纯计算）——
+    读全在一处，判断才可能一致
   - ⚠️ **暂时 vs 永远必须分开**（否则一个坏渠道把门永久卡死 → **所有**模型消失）：
     404/401/403/410 = **永久** → **跳过**该渠道、推其余，且**不写别名段**
     （别名整段替换，少一个渠道等于删别名）；其余（超时/5xx/连接被拒）= **暂时** → 等。
     判据 `failureKindOf`，边界见 `tests/route-registry.test.ts` 的
     「跳过永久坏渠道」与「暂时读不到时要等」两条配对
+  - ⚠️ **启动不等读，直接用磁盘缓存**（2026-10-06，实机第三例的修法）：
+    实测把「进程启动」与「凭据加载」分开了 —— DSH→CPA 进程差 **7.6 秒**，
+    `/v1/models` 只要 **2–4ms**（读的是内存注册表，**与凭据无关**），
+    而**凭据注册是秒级的**。于是端口一通目录就有内容、供给面还空着 →
+    归属算不出 → `CPA · xxx`（用户「点一下两秒就好」正是那个窗口）。
+    **修法不是「判断供给面好了没」**（「还在长」与「永远长不出来」在时间上不可区分），
+    而是**启动就不等**：推上次完整成功过的那份（`readCachedRoutes`），
+    再后台读新的。
+  - **快路径与慢路径都在 `refresh` 里，一个时机共用一个实现**：
+    快 = 零读推回 `lastGood`（启动来自磁盘缓存、重载来自本进程上次成功）；
+    慢 = `readReadySnapshot` → 完整则 `pushProfile` + 写缓存。
+    ⚠️ `lastGood` **同时是磁盘缓存的运行时镜像**，且**只在完整快照时更新** ——
+    一处赋值管住「重载回推什么」与「下次启动用什么」两件事，半成品进不来。
+    **写缓存只在「读全 + 没跳过任何渠道」时**（跳过意味着清单少一块，缓存下来
+    下次启动会未经任何读推给用户）
   - **「等多久」只有一处入口：注入的 `Clock`**（`deps.clock`，默认 `systemClock` = 真实计时器）。
     ⚠️ 别在等待路径上直接写 `setTimeout` / `Date.now`：那会让「间隔序列」和
     「等到上限就收场」变得只能拿真时间测（10 秒级），退化了也未必红 ——
