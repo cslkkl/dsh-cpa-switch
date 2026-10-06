@@ -58,9 +58,13 @@ Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own t
 | Channel   | Accounts | Balance unit | Check-in | Tasks |
 | --------- | -------- | ------------ | -------- | ----- |
 | WorkBuddy | several  | credits      | ✅       | ✅    |
-| Trae      | several  | credit pool  | ✅       | —     |
+| Trae      | several  | credits      | ✅       | —     |
 | Qoder     | single   | credits      | ✅       | —     |
 | ZCode     | single   | **token**    | —        | —     |
+
+The four channels do not report the same balance fields: Trae has a single balance pool and no
+total or used figure, so its "used" cell shows `—` and no bar is drawn — that means "upstream did
+not say", not "used 0".
 
 **Degrades by capability**: features a channel does not support are not rendered — no button
 that "does nothing when clicked".
