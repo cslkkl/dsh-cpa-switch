@@ -29,7 +29,9 @@
  *
  * 1. **`N 包`** —— 余额的**构成**（上游给几个包）。上游不给包就整个不出现，
  *    **不写 `0 包`**（Trae 就是这一条：它只有一个池子，没有包）。
- * 2. **档位** —— 上游 `plan` 值，认不出原样透传。
+ * 2. **档位** —— 上游 `plan` 值，认不出原样透传。**带 `套餐` 前缀**：
+ *    说明行同时放「N 包」与档位，光有值分不清哪个是包数、哪个是档位名，
+ *    而档位值本身可能只是个形容词（Trae 实测返回中文 `免费`）。
  * 3. **`剩余 ?`** —— 上游明说「余量未知」时才加，否则用户会以为号空了。
  *
  * 三项之间用 {@link FACTS_SEP} 连。那个分隔符**不进文案表**：它在两种语言下
@@ -96,9 +98,10 @@ function factsOf(t: Translate, credits: CreditEntry | null): string[] {
     facts.push(String(credits.packages.length) + ' ' + t('packs'))
   }
 
-  // 2. 档位。`planText` 认不出原样透传，空值不产生文案
+  // 2. 档位。`planText` 认不出原样透传，空值不产生文案。
+  //    前缀 + 冒号都取自文案表 —— 中文是全角 `：`，英文是 `: `（见 F28）
   const plan = credits === null ? undefined : planText(t, credits.plan)
-  if (plan !== undefined) facts.push(plan)
+  if (plan !== undefined) facts.push(t('planLabel') + t('colon') + plan)
 
   // 3. 余量未知。「余量未知」与「余量是 0」是两回事，必须显式说清
   if (credits?.known === false) facts.push(t('remain') + ' ?')

@@ -94,14 +94,21 @@ describe('说明行：包数 · 档位 · 余量未知', () => {
 
   it('⚠️ 没有包的渠道不写「0 包」（trae 只有一个池子，上游不给包）', () => {
     const view = creditViewOf({ t: tzh, unit: 'credits', credits: trae })
-    expect(view.factsText).not.toContain('包')
-    expect(view.factsText).not.toContain('0')
+    // ⚠️ 判据是「没有任何『N 包』」，**不是**「不含『包』字」—— 档位那项写的是
+    // 「套餐：…」，里面本来就有个「包」字（差点写成假红）
+    expect(view.factsText).not.toMatch(/\d+ 包/u)
+    expect(view.factsText).toBe('套餐：免费版')
   })
 
-  it('认不出的档位原样透传（zcode 的 coding-plan）', () => {
+  it('认不出的档位原样透传，但带上「套餐」前缀（zcode 的 coding-plan）', () => {
     const zcode: CreditEntry = { ...workbuddy, plan: 'coding-plan' }
-    const view = creditViewOf({ t: ten, unit: 'tokens', credits: zcode })
-    expect(view.factsText).toContain('coding-plan')
+    // 前缀与冒号都走文案表：中文全角、英文半角（拼死 `：` 会让英文下变成 `Plan：…`）
+    expect(creditViewOf({ t: tzh, unit: 'tokens', credits: zcode }).factsText).toBe(
+      '3 包' + FACTS_SEP + '套餐：coding-plan',
+    )
+    expect(creditViewOf({ t: ten, unit: 'tokens', credits: zcode }).factsText).toBe(
+      '3 packs' + FACTS_SEP + 'Plan: coding-plan',
+    )
   })
 
   it('⚠️ 余量未知要说出来（「余量未知」与「余量是 0」是两回事）', () => {
@@ -118,7 +125,7 @@ describe('说明行：包数 · 档位 · 余量未知', () => {
   it('多项之间用分隔符连（不是拼接成一坨）', () => {
     const multi: CreditEntry = { ...workbuddy, plan: 'coding-plan' }
     const view = creditViewOf({ t: tzh, unit: 'credits', credits: multi })
-    expect(view.factsText).toBe(['3 包', 'coding-plan'].join(FACTS_SEP))
+    expect(view.factsText).toBe(['3 包', '套餐：coding-plan'].join(FACTS_SEP))
   })
 })
 
