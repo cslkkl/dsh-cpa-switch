@@ -179,6 +179,28 @@ interface ChannelModels {
    * 清单少一个渠道则同名模型退化成裸名，用户选中的那条当场从目录里消失。
    */
   readonly complete: boolean
+  /**
+   * 读失败的凭据名（**逐个**记，不再只记一个布尔）。
+   *
+   * 为什么要区分「暂时」与「永远」（2026-10-06 补）：
+   *
+   * - **暂时**（超时、连接被拒、5xx）→ 它下一秒可能就好了，应当**等**；
+   * - **永远**（404、凭据已失效）→ 等多久都不会好。此时若仍然要求
+   *   「全部渠道都读到」，**一个坏渠道就能把门永久卡死** → 用户看到的是
+   *   「所有模型都消失」，比原来的「显示成 CPA · xxx」严重得多。
+   *
+   * 所以失败要记下**是谁**、**什么性质**，由调用方决定等还是跳过。
+   */
+  readonly failures: readonly ChannelFailure[]
+}
+
+/** 一条凭据读失败的原因分类。 */
+export interface ChannelFailure {
+  /** 凭据名（`auth-files` 里的 `name`）。 */
+  readonly name: string
+  readonly provider: string
+  /** `permanent` = 等也没用（404 / 凭据失效）；`transient` = 可能自愈。 */
+  readonly kind: 'permanent' | 'transient'
 }
 
 /**
@@ -188,9 +210,13 @@ interface ChannelModels {
  * `catch { map[provider] = [] }` —— 于是「这个渠道读失败了」与「这个渠道没有模型」
  * 长得一模一样，零信号，而下游会拿它算出残缺的别名表与残缺的清单
  * （2026-10-05 定位「选择框闪成 cpa/xxx」时发现）。
+ *
+ * 失败同时按**性质**分类（见 {@link ChannelFailure}）：404 / 凭据失效这类
+ * **永远好不了**的，必须能与「超时」分开 —— 否则一个坏渠道会让上层永远等下去。
  */
 async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels> {
   const byChannel: Record<string, string[]> = {}
+  const failures: ChannelFailure[] = []
   let files: AuthFileRef[]
   try {
     const list = (await deps.gateway.fetch('/v0/management/auth-files')) as {
@@ -198,9 +224,23 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
     }
     files = Array.isArray(list?.files) ? (list.files as AuthFileRef[]) : []
   } catch {
-    return { byChannel, complete: false }
+    /**
+     * ⚠️ **凭据列表读失败必须显式区别于「列表为空」**。
+     *
+     * 曾经这里返回 `{ byChannel, complete: false, failures: [] }` —— 于是上层
+     * 只看 `failures` 时会把「一条凭据都没读到」当成「没有凭据」，
+     * 进而落进 `ownership-unsynced` 的**重试**路径去傻等。
+     *
+     * 现在用 `complete: false` + 一个 `transient` 失败条目标出来 ——
+     * 它是**暂时**的（列表端点超时/连接被拒都会这样），要等；但**等的是这一次读**，
+     * 不是「等某个渠道」。
+     */
+    return {
+      byChannel,
+      complete: false,
+      failures: [{ name: '', provider: '', kind: 'transient' }],
+    }
   }
-  let complete = true
   await Promise.all(
     files.map(async (file) => {
       const provider = String(file?.provider ?? '')
@@ -214,12 +254,41 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
           .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
           .filter((id): id is string => typeof id === 'string' && id !== '')
         byChannel[provider] = [...new Set([...(byChannel[provider] ?? []), ...ids])]
-      } catch {
-        complete = false
+      } catch (error) {
+        failures.push({
+          name: String(file.name),
+          provider,
+          kind: failureKindOf(error),
+        })
       }
     }),
   )
-  return { byChannel, complete }
+  return { byChannel, complete: failures.length === 0, failures }
+}
+
+/**
+ * 判断一次读失败是**暂时**还是**永远**。
+ *
+ * 判据是「等下去有没有可能自己好」：
+ *
+ * - `4xx`（404 / 401 / 403）→ **永远**。接口不存在、凭据被撤销，重试一万次也一样；
+ * - 其余（超时、`ECONNREFUSED`、5xx、网络抖动）→ **暂时**，可能自愈。
+ *
+ * ⚠️ **宁可判成暂时**：误判成 permanent 会**跳过**一个其实健康的渠道，
+ * 于是它的模型从清单里消失（用户看到模型少了）；误判成 transient 只是**多等一轮**，
+ * 而重试有 120s 总预算兜底。代价不对称，所以只在**明确**是 4xx 时才判永久。
+ *
+ * 触发形态实测：CPA 的失败会以 `Error` 抛出、消息里带状态码或 `code` 字段
+ * （见 `cpa.ts` 的错误归一），所以这里同时看 `message` 与 `code`。
+ */
+export function failureKindOf(error: unknown): 'permanent' | 'transient' {
+  const text = `${(error as { message?: unknown })?.message ?? ''} ${
+    (error as { code?: unknown })?.code ?? ''
+  }`
+  // 4xx：400–499。带词界，避免把 "4017" 之类的端口号/计数误判
+  if (/\b4\d{2}\b/.test(text)) return 'permanent'
+  if (/\b(404|401|403|410)\b/.test(text)) return 'permanent'
+  return 'transient'
 }
 
 /**
@@ -435,6 +504,169 @@ export async function readStableCatalog(
 }
 
 /**
+ * **一份「就绪」的读快照**：模型目录与渠道供给面，且两者已被验证**互相对得上**。
+ *
+ * ## 为什么必须有这个类型
+ *
+ * 原先这两份数据是**各读各的**，各自判断自己的成败：
+ *
+ * | 读 | 自己的判据 | 它看不见什么 |
+ * | -- | ---------- | ------------ |
+ * | `runtime.status()` | `running` | 没起来时整个清单为空（**症状 1**：启动竞态） |
+ * | `readStableCatalog()` | 条数连续两次一致 | 渠道供给面还是不是空的（**症状 2**：`CPA · xxx`） |
+ * | `readChannelModels()` | 没抛错 → `complete` | 模型目录有没有跟上（**反向**同一个洞） |
+ *
+ * 三者**都通过**、却互相矛盾时，推出去的清单就是「id 齐了、归属没齐」——
+ * 展示名落进 `CPA` 兜底，而**没有任何判据会报错**。
+ *
+ * 所以「就绪」不再等于「每个读各自成功」，而是
+ * **「两份数据都在，且它们的交集关系是确定的」** —— 见 {@link agreeOnOwnership}。
+ */
+export interface ReadySnapshot {
+  /** 模型目录（`/v1/models`，已稳定）。 */
+  readonly catalog: { data?: unknown[] }
+  /** 渠道供给面（逐凭据读，`byChannel` 的键是渠道 id）。 */
+  readonly channels: Record<string, string[]>
+  /**
+   * 被**跳过**的渠道（永久性读失败的那些）。
+   *
+   * 非空表示这一轮清单是**残缺**的 —— 别名的生成范围因此收窄。
+   * 调用方据此决定要不要写别名段（见 `refresh`）。
+   */
+  readonly skipped: readonly ChannelFailure[]
+}
+
+/** 读取快照失败的原因（供 `degrade` 与日志用）。 */
+export type ReadyFailure =
+  | 'idle'
+  | 'catalog-unavailable'
+  | 'channel-read-failed'
+  | 'channel-read-incomplete'
+  | 'ownership-unsynced'
+
+/**
+ * **归属是否已经算全** —— 统一的「就绪」判据。
+ *
+ * 规则：目录里的每个 id，要么能在渠道供给面里找到归属，
+ * 要么它**确属无归属**（第三方自带 / 用户手配的直连，从来不在任一渠道的供给面里）。
+ *
+ * 两类必须分开，否则会把「还没读到」当成「确实没有」：
+ *
+ * - **供给面为空或明显偏少** → 很可能只是**慢半拍**，此时「查不到归属」是
+ *   **不确定**，不能当成事实 → 判为未就绪（继续等）。
+ * - **供给面有内容，却仍查不到某个 id 的归属** → 那这个 id 就是**真没归属**，
+ *   是事实 → 允许推（展示名 `CPA · …` 是对的）。
+ *
+ * 判据的形状（**保守**）：只看「供给面非空」这一个条件。
+ * 不试图猜「应该有几个渠道才够」—— 那会引入第二个会漂的事实。
+ * 代价是供给面「部分到」时可能多等一轮，而多等的代价远小于推一份错清单。
+ *
+ * ⚠️ **跳过的渠道不算「供给面为空」**：某渠道永久失败被跳过时，它名下的模型
+ * 就是查不到归属 —— 那是**已知残缺**，不是「还没读到」。所以只要还有**别的**
+ * 渠道读到了内容，就认为这一轮可信（残缺由 {@link ReadySnapshot.skipped} 显式带出）。
+ *
+ * @returns `true` = 可以推；`false` = 还没就绪，调用方应继续等或回推上一份。
+ */
+export function agreeOnOwnership(
+  catalog: { data?: unknown[] },
+  channels: Readonly<Record<string, readonly string[]>>,
+): boolean {
+  const ids = catalogIds(catalog)
+  if (ids.length === 0) return false
+
+  /**
+   * 供给面是否「有内容」。至少要有一个模型 —— 一个都没有说明这一轮
+   * `auth-files/models` 全是空读（CPA 刚起、凭据还在分批加载）。
+   */
+  const supplyCount = Object.values(channels).reduce((sum, list) => sum + list.length, 0)
+  if (supplyCount === 0) return false
+
+  return true
+}
+
+/**
+ * 供给面「慢半拍」时最多重试多少轮。
+ *
+ * 为什么**不是** 120s 全额预算：那个预算是给 `readStableCatalog`「等目录长齐」用的，
+ * 而这里的等待是「等**另一份**读追上」。两者量级不同 —— 目录要等 CPA 加载凭据
+ * （秒级到十几秒），而供给面与目录之间只差**一次往返**。
+ *
+ * 实测（2026-10-06）：给满 120s 会让「渠道一直读不到」这条既有路径从
+ * 「立刻 degrade」变成「等满 5 秒才 degrade」，把 4 条既有判据拖成超时。
+ *
+ * 所以给一个**短**预算（1s 内 3 轮：250 + 500），够覆盖「慢半拍」，
+ * 又不会把「真的读不到」拖成假死。**不许**调成 0 —— 那就是本批要修的那个洞。
+ */
+const SYNC_RETRY_BUDGET_MS = 750
+
+/**
+ * 读一份**就绪**的快照：两个目录都读到，且归属已经算得出来。
+ *
+ * ## 为什么「未就绪」要**重试**而不是直接放弃
+ *
+ * 未就绪有两种，必须分开对待：
+ *
+ * - **真的读不到**（CPA 没跑、接口报错）→ 立即放弃，交给 `degrade` 回推上一份。
+ *   死等没有意义 —— 等再久它也不会自己好。
+ * - **读到了但不同步**（`ownership-unsynced`）→ **这是「慢半拍」，要接着等**。
+ *   两个目录都在陆续填充（CPA 刚起、凭据分批加载），下一秒就一致了。
+ *
+ * ⚠️ 这正是原先那个洞的**反面**：老代码在「不同步」时**当成就绪**直接推；
+ * 而一刀切地「不同步就放弃」会走到另一个极端 —— 第一次读永远早于供货面，
+ * 于是**永远推不出清单**。
+ *
+ * ## 一个坏渠道不许把门永久卡死
+ *
+ * **永久性**失败的渠道（404 / 凭据失效）被**跳过**并记进 `skipped`，
+ * 不参与「等」—— 等它一万年也不会好。只有**暂时性**失败才进等待循环。
+ * 否则「一个渠道坏了」会升级成「所有模型都消失」，比原来的症状更严重。
+ *
+ * ## 重试不是无限等
+ *
+ * 两个等待都有**短**预算（{@link SYNC_RETRY_BUDGET_MS}），超了就如实返回失败，
+ * 由 `degrade` 回推上一份成功清单、没有历史则保持空 ——
+ * **绝不孤立地「不通过就不推」**。
+ *
+ * @returns 快照，或失败原因（调用方据此 `degrade`）。
+ */
+export async function readReadySnapshot(
+  deps: RouteRegistryDeps,
+): Promise<{ ok: true; snapshot: ReadySnapshot } | { ok: false; reason: ReadyFailure }> {
+  const clock = deps.clock ?? systemClock
+  if (!(await deps.runtime.status()).running) return { ok: false, reason: 'idle' }
+
+  const deadline = clock.now() + SYNC_RETRY_BUDGET_MS
+  let delayMs = 250
+  for (;;) {
+    const read = await readChannelModels(deps).catch(() => undefined)
+    if (read === undefined) return { ok: false, reason: 'channel-read-failed' }
+
+    /** 永久失败 → 跳过该渠道，带着 `skipped` 继续；暂时失败 → 等。 */
+    const transient = read.failures.filter((f) => f.kind === 'transient')
+    const skipped = read.failures.filter((f) => f.kind === 'permanent')
+    if (transient.length > 0) {
+      // 暂时读不到：退避后再来一轮（凭据可能正在加载）
+      if (clock.now() >= deadline) return { ok: false, reason: 'channel-read-incomplete' }
+      await clock.sleep(delayMs)
+      delayMs = Math.min(delayMs * 2, 4000)
+      continue
+    }
+
+    const catalog = await readStableCatalog(deps)
+    if (catalog === undefined) return { ok: false, reason: 'catalog-unavailable' }
+
+    if (agreeOnOwnership(catalog, read.byChannel)) {
+      return { ok: true, snapshot: { catalog, channels: read.byChannel, skipped } }
+    }
+
+    // 不同步 = 慢半拍：退避后再读一轮
+    if (clock.now() >= deadline) return { ok: false, reason: 'ownership-unsynced' }
+    await clock.sleep(delayMs)
+    delayMs = Math.min(delayMs * 2, 4000)
+  }
+}
+
+/**
  * 挂载路由注册表：注入 loader、订阅宿主重载事件，返回一个幂等的刷新函数。
  *
  * 订阅 `app-boot/config-reload` 是**修复的关键**：宿主每次重建 profile 都会发它，
@@ -557,28 +789,22 @@ export function attachRouteRegistry(
   }
 
   /**
-   * 读目录并算一份清单。拿不到就带回**原因**（不抛）：
-   * `idle` = CPA 没跑（本来就该是空的），`catalog-unavailable` = 读了但没读稳。
+   * 由**已就绪的快照**算一份清单（纯计算，不再读任何东西）。
    *
    * ⚠️ **别名表在这里才建**（不在 `refresh` 里）：识别别名要用**目录里的实际 id**
    * —— 别名是写进 CPA 配置的持久状态，上游供给面一变就不再重名，
    * 只看重叠会认不出自己写过的别名（2026-10-06 双重前缀）。
    * 所以顺序必须是「先读目录 → 再建表」。
+   *
+   * **本函数不读 CPA**：读全部收进 {@link readReadySnapshot}，
+   * 于是「读到的两份数据是否互相自洽」在唯一一处裁决 —— 见 {@link agreeOnOwnership}。
    */
-  const readProfile = async (
+  const buildProfileFrom = (
     trigger: string,
-    channels: Readonly<Record<string, readonly string[]>>,
-  ): Promise<{ profile: RouteProfile; aliases: AliasTable } | { reason: string }> => {
+    snapshot: ReadySnapshot,
+  ): { profile: RouteProfile; aliases: AliasTable } | { reason: string } => {
     try {
-      /**
-       * ⚠️ 用 {@link CpaRuntime.status}（只读探活），**不是** `ensure()`：
-       * 这里只是在决定「这份清单还准不准」，不该因为一次设置写入就把 CPA 拉起来。
-       * 也别绕开它自己 `probePort` —— 那会另开一条探活路径，
-       * 与面板的 `/status` 给出**相反**的答案（曾踩）。
-       */
-      if (!(await deps.runtime.status()).running) return { reason: 'idle' }
-      const catalog = await readStableCatalog(deps)
-      if (catalog === undefined) return { reason: 'catalog-unavailable' }
+      const { catalog, channels } = snapshot
       const ids = catalogIds(catalog)
       const aliases = aliasTableOf(channels, ids)
       return { profile: buildCpaRouteProfile(catalog, channels, aliases, deps), aliases }
@@ -593,34 +819,50 @@ export function attachRouteRegistry(
     const seq = ++computeSeq
 
     /**
-     * 渠道目录**只读一次**，别名段与清单共用。读不全就什么都不推 ——
-     * 半截别名会删掉 CPA 里已有的别名，半截清单会让选中项从目录里消失。
+     * **一份统一的「就绪」读**：模型目录与渠道供给面都读到，且归属已经算得出来
+     * （见 {@link readReadySnapshot} 与 {@link agreeOnOwnership}）。
+     *
+     * ⚠️ 这里**不许**再拆成两个各读各的调用 —— 那正是「id 齐了、归属没齐」
+     * 推出 `CPA · xxx` 的成因（2026-10-06 实机两次症状同根）。
+     * 读不全就什么都不推：`degrade` 会回推上一份成功清单，没有历史则保持空。
      */
-    const channels = await readChannelModels(deps).catch((error: unknown) => {
-      deps.logger?.warn?.('cpa-panel: channel read failed (%s): %o', trigger, error)
-      return undefined
-    })
-    if (channels === undefined) return degrade(trigger, 'channel-read-failed')
-    if (!channels.complete) return degrade(trigger, 'channel-read-incomplete')
+    const ready = await readReadySnapshot(deps)
+    if (!ready.ok) return degrade(trigger, ready.reason)
 
-    const outcome = await readProfile(trigger, channels.byChannel)
+    const outcome = buildProfileFrom(trigger, ready.snapshot)
     if (!('profile' in outcome)) return degrade(trigger, outcome.reason)
 
     /**
      * 把别名段补进托管配置。骨架虽已在 bundle patch 里，但同名模型清单
      * 只有实算得出，而 CPA 重启后目录会变 —— 这一步让**下次**重载仍有别名。
      *
-     * 顺序在 `readProfile` 之后：别名表要用目录里的实际 id 才能认出**已存在**的别名。
+     * 顺序在 `buildProfileFrom` 之后：别名表要用目录里的实际 id 才能认出
+     * **已存在**的别名。
+     *
+     * ⚠️ **有渠道被跳过时不写别名段**（`skipped` 非空）。别名段是**整段替换**
+     * （`patchModelAlias`），而跳过的渠道名下的模型这一轮**没参与**同名判定 ——
+     * 写下去等于把 CPA 里那些别名**删掉**（正是「渠道读不全时不写别名段」
+     * 那条既有判据的理由，这里把它扩展到「永久失败被跳过」这一新情形）。
+     *
+     * 跳过不影响**清单**：那是自愈的（下次轮次补齐），而别名是持久状态，删了要重写。
      */
-    try {
-      if (Object.keys(outcome.aliases.overlaps).length > 0 && patchModelAlias(outcome.aliases)) {
-        deps.logger?.info?.(
-          'cpa-panel: model aliases written (%s models)',
-          Object.keys(outcome.aliases.overlaps).length,
-        )
+    if (ready.snapshot.skipped.length > 0) {
+      deps.logger?.warn?.(
+        'cpa-panel: %d 个渠道永久读不到（%s）→ 本轮不写别名段（清单照常推）',
+        ready.snapshot.skipped.length,
+        ready.snapshot.skipped.map((f) => f.provider).join(','),
+      )
+    } else {
+      try {
+        if (Object.keys(outcome.aliases.overlaps).length > 0 && patchModelAlias(outcome.aliases)) {
+          deps.logger?.info?.(
+            'cpa-panel: model aliases written (%s models)',
+            Object.keys(outcome.aliases.overlaps).length,
+          )
+        }
+      } catch (error) {
+        deps.logger?.warn?.('cpa-panel: model alias write failed: %o', error)
       }
-    } catch (error) {
-      deps.logger?.warn?.('cpa-panel: model alias write failed: %o', error)
     }
 
     return pushProfile(outcome.profile, seq, trigger)

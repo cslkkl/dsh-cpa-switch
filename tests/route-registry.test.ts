@@ -196,6 +196,38 @@ interface FakeCpa {
   release(): void
   /** 让渠道列表读直接失败。 */
   failChannelList(): void
+  /**
+   * 让**逐凭据模型读**在「已经读过 N 次模型目录」之前返回空。
+   *
+   * 模拟实机那个过渡态：CPA 的**模型目录先就绪**（`/v1/models` 已经报全），
+   * 而**渠道供给面后到**（`auth-files/models` 还是空/半截）。
+   * 两者是分开读的，中间没有同步 —— 这正是 `CPA · xxx` 的成因。
+   */
+  delayChannelSupplyUntilCatalogReads(n: number): void
+  /**
+   * 反向：让**模型目录**在「已经读过 N 次渠道供给面」之前返回空。
+   *
+   * 同一个根的**相反方向** —— 供给面先到、目录后到。
+   * 分开两个方法而不是加参数，是因为两条判据要断言的行为不同
+   * （前者防「归属没齐」，后者防「别名与清单对不上」）。
+   */
+  delayCatalogUntilChannelReads(n: number): void
+  /**
+   * 让某个凭据的模型读**失败**（`times` 次），错误消息带 **404**。
+   *
+   * `404` 是「永久」的判据（见 `failureKindOf`）—— 接口不存在、凭据已失效，
+   * 等下去不会好。用来验「跳过坏渠道、推其余」。
+   *
+   * 不传 `name` 时对所有凭据生效（验「门不通过时回推 lastGood」）。
+   */
+  makeChannelSupplyPermanent(times: number, name?: string): void
+  /**
+   * 让某个凭据的模型读**超时**（`times` 次）—— **暂时**性失败。
+   *
+   * 消息不带状态码 → `failureKindOf` 判 `transient` → 上层**等**它。
+   * 与上一条配对，专门钉「暂时 vs 永远」的分界。
+   */
+  makeChannelSupplyTransient(times: number, name?: string): void
 }
 
 /** 假 CPA：只实现用到的三条读（渠道列表 / 逐凭据模型 / 模型目录）。 */
@@ -206,7 +238,13 @@ function fakeCpa(input: {
 }): FakeCpa {
   const waiting: (() => void)[] = []
   const gate: { match: string; count: number }[] = []
+  const permanentFailures: { count: number; name: string | undefined }[] = []
+  const transientFailures: { count: number; name: string | undefined }[] = []
   let channelListFails = false
+  let catalogReads = 0
+  let supplyReadyAfter = 0
+  let channelModelReads = 0
+  let catalogReadyAfter = 0
   const fetch = async (path: string): Promise<unknown> => {
     const hit = gate.find((row) => row.count > 0 && path.includes(row.match))
     if (hit !== undefined) {
@@ -218,12 +256,36 @@ function fakeCpa(input: {
       return { files: [...input.files] }
     }
     if (path.startsWith('/v0/management/auth-files/models')) {
+      channelModelReads += 1
       const name = decodeURIComponent(path.slice(path.indexOf('name=') + 5))
+      const fail = permanentFailures.find(
+        (row) => row.count > 0 && (row.name === undefined || row.name === name),
+      )
+      if (fail !== undefined) {
+        fail.count -= 1
+        // 消息带 404 —— `failureKindOf` 据此判「永久」
+        throw new Error(`404 models not found: ${name}`)
+      }
+      const slowFail = transientFailures.find(
+        (row) => row.count > 0 && (row.name === undefined || row.name === name),
+      )
+      if (slowFail !== undefined) {
+        slowFail.count -= 1
+        // 不带状态码 → `failureKindOf` 判「暂时」
+        throw new Error(`request timed out: ${name}`)
+      }
+      // 供给面「还没到」：读成功，但一条模型都没有 —— 不是失败，是**慢**
+      if (catalogReads < supplyReadyAfter) return { models: [] }
       const models = input.models[name]
       if (models === undefined || models === 'fail') throw new Error(`models unavailable: ${name}`)
       return { models: [...models] }
     }
-    if (path === '/v1/models') return { data: input.catalog.map((id) => ({ id })) }
+    if (path === '/v1/models') {
+      catalogReads += 1
+      // 反向：目录还没到（同样是「成功的空读」）
+      if (channelModelReads < catalogReadyAfter) return { data: [] }
+      return { data: input.catalog.map((id) => ({ id })) }
+    }
     throw new Error(`unexpected path: ${path}`)
   }
   return {
@@ -236,6 +298,18 @@ function fakeCpa(input: {
     },
     failChannelList: () => {
       channelListFails = true
+    },
+    delayChannelSupplyUntilCatalogReads: (n) => {
+      supplyReadyAfter = n
+    },
+    delayCatalogUntilChannelReads: (n) => {
+      catalogReadyAfter = n
+    },
+    makeChannelSupplyPermanent: (times, name) => {
+      permanentFailures.push({ count: times, name })
+    },
+    makeChannelSupplyTransient: (times, name) => {
+      transientFailures.push({ count: times, name })
     },
   }
 }
@@ -642,5 +716,244 @@ describe('同名的识别要剥掉前缀', () => {
     const config = readFileSync(configPath(), 'utf8')
     expect(config).not.toContain('vendor/')
     expect(config).not.toContain('model-alias')
+  })
+})
+
+// ── 「目录齐了、归属没齐」不许推 ────────────────────────────────────────────
+//
+// 实机（2026-10-06）：重启后选择器里出现一批 `CPA · xxx`
+// （`CPA · custom_model_gemini` / `CPA · deepseek-v3-2-volc`），点一下才变成
+// `Trae · …` / `WorkBuddy · …`。
+//
+// 根因：**模型目录与渠道供给面是分开读的，中间没有同步**。
+// `readStableCatalog` 只保证 `/v1/models` 的**条数**连续两次一致 —— 它看不见
+// `auth-files/models` 还是不是空的。
+//
+// 展示名的判据是 `plugin === undefined ? 'CPA' : channelLabel(plugin)`
+// （`route-registry.ts`），而 `plugin` 来自 `byChannel` 反查 —— 供给面还没到时
+// 反查不到，于是**独供模型也落进 `CPA` 兜底**，看起来像「这批模型没有归属」。
+//
+// 与既有的「渠道读失败」不是一回事：那时 `complete === false` 会被拦下。
+// 这里每条读**都成功**，只是供给面慢半拍 —— 所以旧判据**完全看不见**它。
+//
+// 不变量：**推清单前，归属必须也算全**。即：目录里的每个 id 都要能在渠道供给面里
+// 找到归属，或者它本来就该是「无归属」（第三方自带 id，不参与管理）。
+
+describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', () => {
+  let home = ''
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-sync-'))
+    process.env.DSH_HOME = home
+    const dir = join(home, 'cpa-panel', 'runtime', 'cpa')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(configPath(), 'config-version: 8\noauth:\n    auth-dir: "auth"\n', 'utf8')
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 两个模型都由**独供**渠道供给 —— 独供没有别名，展示名只能靠归属反查。 */
+  const FILES = [
+    { name: 'q1', provider: 'qoder' },
+    { name: 'w1', provider: 'workbuddy' },
+  ]
+  const MODELS = { q1: ['dfmodel'], w1: ['deepseek-v3-2-volc'] }
+  const CATALOG = ['dfmodel', 'deepseek-v3-2-volc']
+
+  /**
+   * 核心判据：供给面还是空的时候**不许推**（也不该写别名段）。
+   *
+   * 为什么选「不推」而不是「推出正确归属」：归属**此刻根本算不出来** ——
+   * 数据不在手里，凭空编一个渠道名就是编造。这与既有口径一致
+   * （`degrade`：拿不到完整清单时回推上一份成功清单，没有历史就保持空，
+   * **绝不发明清单**）。所以正确行为是**等**，等到供给面到齐。
+   */
+  it('⚠️ 供给面未到时不推清单（否则独供模型会落 CPA 兜底名）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // 前 2 次读模型目录时，供给面还没到 —— 目录先稳定、归属后到
+    cpa.delayChannelSupplyUntilCatalogReads(2)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    // 供给面到齐之后会推一次，但**推上去的绝不能有 CPA 兜底名**
+    const allNames = pushed.flatMap((p) => p.names)
+    expect(allNames.length).toBeGreaterThan(0) // 最终确实推了
+    for (const name of allNames) {
+      expect(name).not.toMatch(/^CPA · /)
+    }
+    // 正确归属必须在
+    expect(allNames).toContain('Qoder · dfmodel')
+    expect(allNames).toContain('WorkBuddy · deepseek-v3-2-volc')
+  })
+
+  /**
+   * 反向判据：供给面**一直**到不了时，不许推一份带 `CPA ·` 的清单 ——
+   * 宁可不推（保持上一份），因为「没有归属」比「显示成 CPA」更接近真相，
+   * 而后者会让用户以为这些模型是 CPA 自有的。
+   *
+   * ⚠️ 这条用**真实**时钟（`readStableCatalog` 的退避是真实 `setTimeout`），
+   * 所以只断言「在合理时间内没有推出带 CPA 兜底名的清单」，不追求跑满预算。
+   */
+  it('⚠️ 供给面一直为空时，绝不推出带 CPA 兜底名的清单', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.delayChannelSupplyUntilCatalogReads(Number.MAX_SAFE_INTEGER)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    void attachRouteRegistry(host, depsFor(cpa))('boot')
+    await tick(400) // 给它几次退避的机会
+
+    for (const record of pushed) {
+      for (const name of record.names) {
+        expect(name).not.toMatch(/^CPA · /)
+      }
+    }
+  })
+
+  /**
+   * 确实无归属的第三方 id 照常推出（与「还没读到」要分开）
+   */
+  it('确实无归属的第三方 id 照常推出（与「还没读到」要分开）', async () => {
+    const cpa = fakeCpa({
+      files: [{ name: 'w1', provider: 'workbuddy' }],
+      models: { w1: ['hy3'] },
+      catalog: ['hy3', 'vendor/gpt-x'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const names = pushed.flatMap((p) => p.names)
+    // 供给面非空（hy3 有归属）→ 这一轮可信 → vendor/gpt-x 的无归属是事实
+    expect(names).toContain('WorkBuddy · hy3')
+    expect(names).toContain('CPA · vendor/gpt-x')
+  })
+
+  /**
+   * **边界 1**：门不通过时必须接上既有的 `degrade` 机制 ——
+   * 有 `lastGood` 就推它，没有就保持空。**不许孤立地「不通过就不推」**，
+   * 否则一次门失败会让用户**已经选中的模型从选择器里消失**。
+   *
+   * ⚠️ 这条是「把门加安全」的核心：门只该拦**新**清单，不该把**旧的**弄丢。
+   */
+  it('门不通过时回推上一份成功清单（不许让模型凭空消失）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    const refresh = attachRouteRegistry(host, depsFor(cpa))
+
+    // 第一轮：正常推出清单
+    await refresh('boot')
+    expect(pushed).toHaveLength(1)
+    const firstIds = pushed[0]?.ids ?? []
+    expect(firstIds.length).toBeGreaterThan(0)
+
+    // 第二轮：供给面永久失败 → 门不通过 → **必须回推上一份**，不是清空
+    cpa.makeChannelSupplyPermanent(Number.MAX_SAFE_INTEGER)
+    const result = await refresh('oauth')
+
+    expect(result.models).toBeGreaterThan(0)
+    expect(pushed.length).toBeGreaterThanOrEqual(2)
+    // 最后一份推上去的仍是那批模型（不是空）
+    expect(pushed.at(-1)?.ids).toEqual(firstIds)
+  })
+
+  /**
+   * **边界 2**：一个**永久**坏掉的渠道不许把门永久卡死。
+   *
+   * 否则「一个渠道 404」会升级成「**全部**模型消失」—— 比原来的
+   * 「显示成 CPA · xxx」严重得多。正确行为：**跳过**它、推其余渠道。
+   */
+  it('⚠️ 一个渠道永久读不到时跳过它，其余照常推出（不许全灭）', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'q1', provider: 'qoder' },
+        { name: 'w1', provider: 'workbuddy' },
+      ],
+      models: { q1: ['dfmodel'], w1: ['deepseek-v3-2-volc'] },
+      catalog: ['dfmodel', 'deepseek-v3-2-volc'],
+    })
+    // workbuddy 这条**永久**读不到（404 / 凭据失效）
+    cpa.makeChannelSupplyPermanent(Number.MAX_SAFE_INTEGER, 'w1')
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const names = pushed.flatMap((p) => p.names).map(String)
+    // 好的那个渠道必须在 —— 这才是「跳过坏渠道、推其余」
+    expect(names).toContain('Qoder · dfmodel')
+  })
+
+  /**
+   * 跳过坏渠道时**不许写别名段**。
+   *
+   * 理由与「渠道读不全时不写别名段」完全同构：别名段是**整段替换**，
+   * 而被跳过的渠道名下的模型这一轮没参与同名判定 —— 写下去等于
+   * 把 CPA 里那些别名**删掉**。
+   *
+   * 清单照常推（它自愈），别名不写（它是持久状态，删了要重写）。
+   */
+  it('⚠️ 跳过永久坏渠道时，清单照推但不写别名段', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w1', provider: 'workbuddy' },
+        { name: 'z1', provider: 'zcode' },
+      ],
+      // 两家都供 glm-4.6（本该拆别名），但 zcode **永久**读不到
+      models: { w1: ['glm-4.6', 'hy3'], z1: ['glm-4.6'] },
+      catalog: ['glm-4.6', 'hy3'],
+    })
+    cpa.makeChannelSupplyPermanent(Number.MAX_SAFE_INTEGER, 'z1')
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    // 清单推了（好渠道的模型在）
+    expect(pushed.flatMap((p) => p.names).map(String)).toContain('WorkBuddy · hy3')
+    // 但别名段没写 —— 少一个渠道就不能整段替换
+    expect(readFileSync(configPath(), 'utf8')).not.toContain('model-alias')
+  })
+
+  /**
+   * 反向判据：**暂时**读不到时**要等**，不能立刻跳过。
+   *
+   * 与「跳过永久坏渠道」配对 —— 两条一起钉住「暂时 vs 永远」的分界：
+   * 若把暂时也当永久跳过，凭据加载中的那一轮就会推出**缺一个渠道**的清单，
+   * 同名的会退化成裸名（正是要防的事）。
+   *
+   * ⚠️ 这里用**超时**（无状态码 → transient），不是 404 ——
+   * 404 按定义就是永久的（见 `failureKindOf`），拿它测「要等」会把
+   * 判据本身写错。
+   */
+  it('⚠️ 暂时读不到时要等（不许当成永久而跳过）', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w1', provider: 'workbuddy' },
+        { name: 'z1', provider: 'zcode' },
+      ],
+      models: { w1: ['glm-4.6'], z1: ['glm-4.6'] },
+      catalog: ['glm-4.6'],
+    })
+    // z1 第一次读超时（transient），之后就好 —— 模拟凭据正在加载
+    cpa.makeChannelSupplyTransient(1, 'z1')
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    // 等到了 z1 → 两家都供 glm-4.6 → 别名拆得出来（证明没跳过一个健康渠道）
+    const config = readFileSync(configPath(), 'utf8')
+    expect(config).toContain('wb/glm-4.6')
+    expect(config).toContain('zcode/glm-4.6')
+    expect(pushed.flatMap((p) => p.names).map(String)).toContain('WorkBuddy · glm-4.6')
   })
 })
