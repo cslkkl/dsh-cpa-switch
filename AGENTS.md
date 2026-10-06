@@ -204,16 +204,6 @@ python check-line-endings.py <本仓根> --target lf
       [src/client/README.md](src/client/README.md) 槽位规范。
       ⚠️ 改颜色要与「红/警示色＝误报」的既有定案对齐 ——
       「今天没签」可能是有意不签，不是异常。改动属改行为，走 §2.9。
-- [ ] **CPA 启动慢于 30s 时，模型清单永不重推**（启动竞态，2026-10-06 实机复现）——
-      `boot.ts:84` 的 `runtime.ensure()` 有 `startTimeoutSeconds`（默认 **30s**）预算；
-      超时返回 `start-timeout` → `boot.ts:117` 只 warn 一句就结束，**没有重试**。
-      实测那次 CPA 比 DSH 晚起 **54 秒**（DSH 13:49:11 / CPA 13:50:05），
-      于是 pi-ai 的 `providers.cpa` 停在**空骨架**，用户选模型报
-      `pi-ai provider "cpa" has no configured model "wb/…"` `UNKNOWN_MODEL`；
-      直到某次设置写入触发 `app-boot/config-reload` 才补上。
-      **修法方向**：CPA 就绪后补一次重推 —— ⚠️ 但**不许**用轮询兜底
-      （与「恢复逻辑挂在语义上、不挂在时机上」的既定口径冲突），
-      先想清挂在哪个**事件**上。属改行为，走 §2.9 先补判据。
 - [ ] **研究方向见 [docs/PLAN.md](docs/PLAN.md)** —— 额度显示位置、每代理独立用号、
       调度维护界面等**尚未立项**的想法记在那里；本清单只放「确定要做、照做即可」的动作。
       **结构类改动**（会改行为或签名的）立项在那份的 §2.9：**先补判据再动结构**。
@@ -271,6 +261,14 @@ python check-line-endings.py <本仓根> --target lf
   无历史则保持空，渠道读不全**既不推清单也不写别名段**。
   恢复逻辑挂在「配置可能变」的**语义**上，挂在 boot / setup / oauth 这些时机上必漏。
   详见[架构说明](docs/ARCHITECTURE.md) F39 与[决策记录](.agents/notes/2026-10-05-route-reload-blank-window.md)。
+- **启动超时 ≠ 启动失败（`ensure()` 的等待必须可续）** —— `startTimeoutSeconds`
+  只是**一次等待预算**，用尽时 CPA 往往还在跑（实测比 DSH 晚起 54 秒，默认预算 30 秒）。
+  ⚠️ **超时后不许丢掉「正在起」的记忆** —— 丢了的话下一个调用方会**重新 spawn**，
+  于是永远在从头等一个已被自己放弃的窗口；症状是**静默**的：面板显示可用、
+  模型清单却是空的（`UNKNOWN_MODEL`），直到某次设置写入才碰巧补上。
+  反向同样要守：child 已退出（`exitCode !== null`）**必须**能重新拉起，
+  对着死进程空等比原 bug 更糟。判据 `tests/process.test.ts`（注入 seam，
+  8 例 170ms），决策见[决策记录](.agents/notes/2026-10-06-startup-timeout-is-not-failure.md)。
 - **宿主槽位的 error boundary 是锁存的** —— 一次抛出带走整块配置区，用户只能禁用
   再启用插件。所以 `PanelBoundary` 必需，且**必须是类组件**
   （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的 `react`

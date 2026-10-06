@@ -119,10 +119,21 @@
   - 改后必测：只有明文能用（bcrypt 哈希必须被挡掉）
 - **`process.ts`** —— CPA 子进程托管。
   - 导出：`CpaProcess`（类）/ `resolveExe` / `probePort` / `waitForPort` / `defaultExeCandidates` / `DEFAULT_PORT`
+  - 类型：`ProcessDeps` / `ChildProcessLike`（两个 `ensure` 的注入 seam，见下）
   - `CpaProcess` 只关自己启的进程；`resolveExe` 的优先级见架构
   - ⚠️ `isListening`（只读）与 `ensure`（可拉起）**语义不同**，别混用 ——
     调用方请走 [runtime.ts](runtime.ts) 的两个显式名字
-  - 改后必测：清空代理变量、带 `-no-browser`、只关 owned
+  - ⚠️ **超时 ≠ 失败**：`startTimeoutSeconds` 只是**一次等待预算**，用尽时子进程
+    往往还在跑（实测 CPA 比 DSH 晚起 54 秒，默认预算 30 秒）。所以超时后
+    **不丢弃「正在起」的记忆**，下次 `ensure()` 继续等那个 child 而**不重新 spawn**
+    —— 等待因此跟着**用户动作**（面板每次请求都经 `requireRunning` → `ensure`）
+    变成重试机会，**不需要任何轮询**。反向：child 已退出（`exitCode !== null`）
+    必须能重新拉起，对着死进程空等比原 bug 更糟
+  - `ProcessDeps` 的 `probe` / `spawn` / `resolveExe` / `pollIntervalMs` 都**可选**，
+    不传时生产行为逐字不变 —— 存在的理由是超时路径**只能确定性测**
+    （判据在 `tests/process.test.ts`，8 例 170ms 跑完）
+  - 改后必测：清空代理变量、带 `-no-browser`、只关 owned、
+    **超时后不重复 spawn / 死进程可重 spawn**
 - **`runtime.ts`** —— 「CPA 在不在跑」的唯一回答者。
   - 导出：`CpaRuntime`（类）/ 类型 `RuntimeDeps` / `RuntimeStatus`
   - `status()` 只读探活、**绝不起进程**（面板 `/status` 与路由注册表的判据用它）；
