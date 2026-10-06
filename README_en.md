@@ -119,6 +119,7 @@ or shows as "not running", see the active pitfalls in [AGENTS.md](AGENTS.md).
 | `manageLifecycle`     | `true`          | Whether the plugin starts and stops CPA                       |
 | `autoCheckinOnStart`  | `true`          | Run one catch-up check-in at startup                          |
 | `openControlPanel`    | `false`         | Also open CPA's own web console when it starts                |
+| `reasoningEfforts`    | `true`          | Whether models expose a thinking level (off / on)             |
 | `startTimeoutSeconds` | `30`            | Longest wait for CPA to become ready                          |
 
 ## Models for the conversation
@@ -135,6 +136,25 @@ model picker on their own:
 
 Adding or removing accounts updates the model list automatically. How it works is described in
 [Architecture](docs/ARCHITECTURE.md).
+
+### Thinking level
+
+Every model in the picker can switch its **thinking level** — two options:
+
+- **off**: the model answers directly, with no visible reasoning.
+- **on**: the model thinks first, and the reasoning is **visible** in the conversation.
+
+On by default (`reasoningEfforts: true`). To turn the whole thing off, disable that switch in the
+plugin settings — the Effort row disappears and requests go back to carrying no level.
+
+⚠️ **Two levels is deliberate, not unfinished.** Measured against the upstream, the intermediate
+notches (`low` / `medium` / `max`) **do not do what they say** — the spread within one level is
+larger than the difference between levels — so offering them would set a false expectation. Only
+two values with certain meaning are exposed: **off** and **on**. Data and reasoning are in the
+[decision record](.agents/notes/2026-10-06-reasoning-effort-two-levels.md).
+
+⚠️ If the upstream ever rejects a level value (the whole turn errors out), **switch that setting
+off** to recover.
 
 ## Known limitations
 

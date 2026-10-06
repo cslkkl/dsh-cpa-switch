@@ -132,6 +132,11 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     resolveApiKey: () => resolveApiKey({ credentials: ctx.credentials }),
     adminKey: () => adminKey.value,
     logger: ctx.logger,
+    /**
+     * 思考档位的总开关：**传函数不传值** —— 配置字段是 volatile 的，
+     * 面板一改就要在**下一次重推**生效，不能把启动时的值焊死在这里。
+     */
+    reasoningEffortsEnabled: () => readConfig().reasoningEfforts,
   })
 
   const ops = createOperations({

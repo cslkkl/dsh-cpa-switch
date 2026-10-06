@@ -47,6 +47,7 @@
 | `src/client/routing-text.ts`           | 路由策略的本地化与警示判定：**三个合法值都要有中文**；改动同步 `tests/routing-text.test.ts` + [src/ops/scheduling.ts](src/ops/scheduling.ts) 的策略白名单                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `src/client/panel.module.css`          | 只用 `--dsw-*` token（[架构说明](docs/ARCHITECTURE.md)）；类名哈希，产物断言会查；**卡片是固定槽位网格**，改行结构先读文件头                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `tsdown.config.ts` 的 externals        | [架构说明](docs/ARCHITECTURE.md) —— 漏一项会把 React 内联进浏览器产物                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `src/model-caps.ts`                    | 模型能力的**人工校准表** + 思考档位契约：窗口/图像按渠道分档（见文件头注），**思考档位只给 `off`/`high` 两档**（中间刻度实测测不出差别，不给假旋钮）；⚠️ 声明形状由宿主规定，**写错是整个 provider 注册失败、所有模型一起消失**（判据 `tests/model-reasoning.test.ts`）；改动同步[决策记录](.agents/notes/2026-10-06-reasoning-effort-two-levels.md) + `tests/model-caps.test.ts`                                                                                                                                                                                     |
 | 契约 / 对外行为                        | `package.json` 版本号 + [README.md](README.md)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ## 常用命令
@@ -289,6 +290,16 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 - **额度字段缺了就是 `undefined`，不许编 0**；**`credits_pool_known` 与 `remain_known`
   是两条独立的轴**，别合并。详见[架构说明](docs/ARCHITECTURE.md) F40 与
   [决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md)。
+- **`reasoningEfforts` 写错形状不是「这个模型没档位」，是*整个 provider 注册失败、
+  所有模型一起消失*** —— 宿主校验：空对象、除 `off` 外没有别的档位、除 `off` 外的
+  档位值为空串，三条任一命中即 `invalid`。所以这个值**只能由
+  `reasoningEffortsOf()` 返回常量**，别在推清单时手工拼。判据
+  `tests/model-reasoning.test.ts`；理由见[决策记录](.agents/notes/2026-10-06-reasoning-effort-two-levels.md)。
+- **上游会对推理档位返硬错误，让整轮会话失败**（2026-10-06 实踩 `11150 the reasoning
+effort value is not supported by the current model`，`503 auth_unavailable` 与 `400`
+  两种外壳都出现过）。所以「思考档位」这个开关的**首要价值是逃生通道**：
+  默认全开意味着每个请求都带档位，抽风时关掉即回到不声明。⚠️ 别把它当
+  「给不想用的人关掉」的普通偏好项删掉。
 
 **与 git / 本仓维护有关的**
 

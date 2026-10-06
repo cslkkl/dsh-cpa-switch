@@ -35,6 +35,7 @@ const CONFIG: PluginConfig = {
   manageLifecycle: true,
   autoCheckinOnStart: true,
   openControlPanel: false,
+  reasoningEfforts: true,
   startTimeoutSeconds: 30,
 }
 

@@ -187,16 +187,34 @@ const BASELINE = {
 interface PushRecord {
   readonly ids: readonly string[]
   readonly names: readonly string[]
-  readonly rows: { id?: unknown; name?: unknown; input?: unknown; contextWindow?: unknown }[]
+  readonly rows: {
+    id?: unknown
+    name?: unknown
+    input?: unknown
+    contextWindow?: unknown
+    reasoningEfforts?: unknown
+  }[]
 }
 
 /** 从条目 config 里取出 `providers.cpa.models`（模型选择器读的就是它）。 */
-function modelsOf(
-  config: unknown,
-): { id?: unknown; name?: unknown; input?: unknown; contextWindow?: unknown }[] {
+function modelsOf(config: unknown): {
+  id?: unknown
+  name?: unknown
+  input?: unknown
+  contextWindow?: unknown
+  reasoningEfforts?: unknown
+}[] {
   const providers = (config as { providers?: Record<string, unknown> } | null)?.providers
   const cpa = providers?.['cpa'] as
-    | { models?: { id?: unknown; name?: unknown; input?: unknown; contextWindow?: unknown }[] }
+    | {
+        models?: {
+          id?: unknown
+          name?: unknown
+          input?: unknown
+          contextWindow?: unknown
+          reasoningEfforts?: unknown
+        }[]
+      }
     | undefined
   return cpa?.models ?? []
 }
@@ -1287,5 +1305,99 @@ describe('启动用持久缓存', () => {
       expect(pushed.length).toBeGreaterThan(0)
     })
     expect(pushed[0]?.names).toContain('Qoder · dfmodel')
+  })
+})
+
+/**
+ * 思考档位：**声明必须真的落到推出去的清单里**。
+ *
+ * 单测 `reasoningEffortsOf` 只能证明那个纯函数对；这几条证明它**接上了**——
+ * 开关的两种取值各自产生什么请求形状。两条都要有：只测「开」的话，
+ * 「关掉不生效」这种最可能的回归（写了却忽略开关）没有判据。
+ */
+describe('思考档位声明', () => {
+  // 一份最小可用目录：一个渠道、一条凭据、一个模型。
+  const FILES = [{ name: 'w1', provider: 'workbuddy' }]
+  const MODELS = { w1: ['deepseek-v4.1-flash'] }
+  const CATALOG = ['deepseek-v4.1-flash']
+
+  /** 与 `depsFor` 同形，只多一个总开关。 */
+  function withReasoning(cpa: FakeCpa, enabled: () => boolean): RouteRegistryDeps {
+    return { ...depsFor(cpa), reasoningEffortsEnabled: enabled }
+  }
+
+  it('开关打开时每个模型都带上 off/high 两档', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => true),
+    )('boot')
+
+    const rows = pushed.at(-1)?.rows ?? []
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row.reasoningEfforts).toEqual({ off: 'off', high: 'high' })
+    }
+  })
+
+  it('⚠️ 开关关闭时一个都不带（回到「没有 Effort 行」的原状）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => false),
+    )('boot')
+
+    const rows = pushed.at(-1)?.rows ?? []
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row.reasoningEfforts).toBeUndefined()
+    }
+  })
+
+  it('不传这个依赖时按关闭处理（不改变既有行为）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    // depsFor 不带该字段 —— 与改动前的调用方一致
+    await attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))('boot')
+
+    const rows = pushed.at(-1)?.rows ?? []
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((row) => row.reasoningEfforts === undefined)).toBe(true)
+  })
+
+  it('⚠️ 开关是**现读**的：重推时按当时的值决定（不是启动时焊死）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host, emit } = fakeHost(entry)
+
+    let enabled = false
+    const refresh = attachRouteRegistry(
+      host,
+      withReasoning(cpa, () => enabled),
+    )
+    await refresh('boot')
+    expect(pushed.at(-1)?.rows[0]?.reasoningEfforts).toBeUndefined()
+
+    // 用户在面板上打开开关 —— 下一次重推就该带上
+    enabled = true
+    await refresh('config-reload')
+    expect(pushed.at(-1)?.rows[0]?.reasoningEfforts).toEqual({ off: 'off', high: 'high' })
+
+    // 关回去同样要立刻生效（这是这个功能的逃生通道）
+    enabled = false
+    await refresh('config-reload')
+    expect(pushed.at(-1)?.rows[0]?.reasoningEfforts).toBeUndefined()
+
+    // 走事件路径同样现读（面板改完由 config-reload 触发）
+    enabled = true
+    emit('app-boot/config-reload')
+    await until(() => {
+      expect(pushed.at(-1)?.rows[0]?.reasoningEfforts).toEqual({ off: 'off', high: 'high' })
+    })
   })
 })

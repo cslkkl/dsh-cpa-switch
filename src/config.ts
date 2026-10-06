@@ -30,6 +30,16 @@ export const Config = z.object({
    * 而且每次 DSH 重启都会弹。置 true 则透传（不加 `-no-browser`）。
    */
   openControlPanel: z.boolean().default(false).volatile(),
+  /**
+   * 要不要给模型声明思考档位（`off` / `high` 两档）。
+   *
+   * 默认 **true**：让模型选择器里出现 Effort 行、思考过程看得见。
+   * 关掉即回到「没有 Effort 行」——**这是本功能唯一的逃生通道**：
+   * 上游可能对档位值返硬错误（实测 `11150`），抽风时关掉即恢复。
+   *
+   * 为什么只有两档、值怎么定的，见 `model-caps.ts` 的 `REASONING_EFFORTS`。
+   */
+  reasoningEfforts: z.boolean().default(true).volatile(),
   startTimeoutSeconds: z.natural().min(3).max(180).default(30).volatile(),
 })
 
@@ -42,6 +52,7 @@ export interface ConfigRefs {
   manageLifecycle: { get: () => boolean }
   autoCheckinOnStart: { get: () => boolean }
   openControlPanel: { get: () => boolean }
+  reasoningEfforts: { get: () => boolean }
   startTimeoutSeconds: { get: () => number }
 }
 
@@ -75,6 +86,7 @@ export function makeReadConfig(refs: ConfigRefs): () => PluginConfig {
     manageLifecycle: refs.manageLifecycle.get(),
     autoCheckinOnStart: refs.autoCheckinOnStart.get(),
     openControlPanel: refs.openControlPanel.get(),
+    reasoningEfforts: refs.reasoningEfforts.get(),
     startTimeoutSeconds: refs.startTimeoutSeconds.get(),
   })
 }

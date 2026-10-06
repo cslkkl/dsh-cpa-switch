@@ -129,6 +129,62 @@ export interface ModelCaps {
 }
 
 /**
+ * 暴露给用户的思考档位 —— **只有两个**：关（`off`）与开（`high`）。
+ *
+ * ## 为什么不是一整套刻度
+ *
+ * 实测（2026-10-06，`wb/deepseek-v4.1-flash`，每个档位各测 10 次）：
+ *
+ * | 档位 | 思考 token 均值 | 标准差 |
+ * | --- | --- | --- |
+ * | `off` / `none` | **0**（合计 20 次全 0，无例外） | 0 |
+ * | `low` | 1003 | 276 |
+ * | `high` | 1044 | 249 |
+ * | `max` | 1213 | 296 |
+ *
+ * 三点结论：
+ *
+ * 1. **「关」是硬的** —— 恒为 0，唯一经得起复验的值；
+ * 2. **中间档位的差异够不着显著**（t = 0.35 / 1.39 / 1.64，一般要 ≥2），
+ *    而**同一档位内部的波动（±280）比档位之间的差（±200）还大**；
+ * 3. 因此「低/中/高/最大」这种刻度是在**制造错误预期** —— 用户选 `max`
+ *    未必比 `high` 想得多。
+ *
+ * ⚠️ **这是本仓替用户做的判断，不是上游的契约。** 上游**接受**一整套词汇
+ * （`minimal`/`low`/`medium`/`high`/`xhigh`/`max` 实测都收下并返回 200），
+ * 但**收下不等于会照做**。既然测不出差别，就不给用户一个假旋钮。
+ *
+ * ## 值的选择
+ *
+ * - 关 → `off`：实测让上游产出 0 个思考 token（与 `none` 等效）。
+ * - 开 → `high`：档位名用最熟悉的一个，**不承诺深浅**。
+ *
+ * 两档都不是「模型能力」而是「请求参数」—— 所以**不分渠道、不逐模型标注**，
+ * 由 {@link reasoningEffortsOf} 按总开关统一给出。
+ */
+export const REASONING_EFFORTS = { off: 'off', high: 'high' } as const
+
+/**
+ * 按总开关给出宿主要的 `reasoningEfforts` 声明；关掉时返回 `undefined`（不声明）。
+ *
+ * ⚠️ **返回形状由宿主规定**（`dsh-llm-pi-ai` 的 `resolveModelReasoning`），
+ * 违约的后果**不是「这个模型没档位」而是整个 provider 注册失败、所有模型一起消失**：
+ *
+ * - 空对象 → `invalid(...declared an empty reasoningEfforts...)`；
+ * - 除 `off` 外没有别的档位 → `offers no level beyond "off"`；
+ * - 除 `off` 外的档位值为空串 → `must not be an empty string`。
+ *
+ * 所以这里**返回常量而非拼装**：形状在源码里一眼看全，改不动就编译不过。
+ * 判据见 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)。
+ *
+ * @param enabled 面板上的总开关（「允许切换思考档位」）。
+ */
+export function reasoningEffortsOf(enabled: boolean): Readonly<Record<string, string>> | undefined {
+  if (!enabled) return undefined
+  return { ...REASONING_EFFORTS }
+}
+
+/**
  * 第三方来源的渠道（**未官方确认**）。
  *
  * 这些渠道的值来自第三方仓库推断，可信度低于官方档 —— 判据

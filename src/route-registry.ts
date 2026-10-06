@@ -33,7 +33,7 @@ import type { CpaGateway } from './gateway.ts'
 import type { CpaRuntime } from './runtime.ts'
 import { ROUTE_PREFIXES, channelLabel, channelOfPrefix, channelOrder } from './channels/registry.ts'
 import { buildAliasTable, type AliasTable } from './model-alias.ts'
-import { capsOf } from './model-caps.ts'
+import { capsOf, reasoningEffortsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
 import { readCachedRoutes, writeCachedRoutes } from './state.ts'
 import { CPA_API_KEY_REF, type LoggerLike } from './credentials.ts'
@@ -90,6 +90,14 @@ interface RouteModel {
    * 只在校准表里有该渠道的条目时才写（见 `model-caps.ts`）。
    */
   readonly contextWindow?: number
+  /**
+   * 可选的思考档位（宿主 `dsh-llm-pi-ai` 的字段名）。
+   *
+   * 形状由宿主规定，写错会让**整个 provider 注册失败**（不是单个模型没档位）——
+   * 所以只由 {@link reasoningEffortsOf} 产出一个常量，别在这里手工拼。
+   * 判据见 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)。
+   */
+  readonly reasoningEfforts?: Readonly<Record<string, string>>
 }
 
 /** 推给 `llm-pi-ai` 的 provider profile（形状须过其 profile schema）。 */
@@ -161,6 +169,17 @@ export interface RouteRegistryDeps {
   readonly logger?: LoggerLike | undefined
   /** 等多久的入口；不传就用真实时钟（见 {@link Clock}）。 */
   readonly clock?: Clock | undefined
+  /**
+   * 面板总开关：要不要给模型声明思考档位（`off` / `high` 两档）。
+   *
+   * **现读、不缓存**（配置字段全 volatile，值随时会变）；不传按 `false` ——
+   * 与「不开这个功能时行为不变」对齐，也让测试不必逐个补参数。
+   *
+   * ⚠️ 关掉它是这个功能**唯一的逃生通道**：上游可能对档位值返硬错误
+   * （实测 `11150 the reasoning effort value is not supported`），一旦要求
+   * 每个请求都带档位，抽风时就会**每次会话都中招**；关掉即回到不声明。
+   */
+  readonly reasoningEffortsEnabled?: (() => boolean) | undefined
 }
 
 /** `auth-files` 里一个凭据的形状（归属识别用）。 */
@@ -446,6 +465,13 @@ function buildCpaRouteProfile(
     if (ia !== ib) return ia - ib
     return a.bare.localeCompare(b.bare)
   })
+  /**
+   * 思考档位声明：**读一次，整份清单共用同一个对象**。
+   *
+   * 不逐行调用 —— 开关是全局的，逐行算会得到一堆内容相同的对象，
+   * 且「某个模型没带上」这种不一致从此无人能发现。
+   */
+  const reasoningEfforts = reasoningEffortsOf(deps.reasoningEffortsEnabled?.() ?? false)
   return {
     displayName: 'CPA Switch',
     api: 'openai-completions',
@@ -467,6 +493,17 @@ function buildCpaRouteProfile(
          * provider 中途拒绝，会话卡在反复重试。所以不写才是保守。
          */
         ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
+        /**
+         * 思考档位：**每个模型都带上同一份声明**（开关打开时）。
+         *
+         * ⚠️ **这是「乐观默认」，不是逐模型实测过的**：有些模型可能压根不产思考，
+         * 标了也只表现为「开了开关却看不到思考」，不会崩。这与
+         * `supportsImages`（多标会卡死会话）的方向**相反**，所以这里可以宽。
+         *
+         * ⚠️ 唯一的硬风险是上游对档位值返硬错误（实测 `11150`）——
+         * 逃生通道是面板上的总开关，不是这里的值。
+         */
+        ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
       }
     }),
   }
