@@ -18,8 +18,19 @@ name: publish
 on:
   push:
     tags: ['v*']
-  # 手动重跑一次失败的发布（npm 已发布的版本号不能重发，重跑前先确认版本没上去）。
+  # 手动重跑：补一个漏掉的 Release、或补正文。
+  #
+  # ⚠️ **`tag` 必须显式给** —— `workflow_dispatch` 用的是**该 ref 上的 workflow 文件**，
+  # 而 `github.ref_name` 是触发用的 ref。想要「用 main 上的新版 workflow 去补一个
+  # 老标签」，`--ref v0.3.0` 会跑**那个标签上的旧 workflow**（实踩：改了幂等逻辑却
+  # 发现跑的还是旧的一行命令），而 `--ref main` 又拿不到标签名。
+  # 所以标签走输入参数，`github.ref_name` 不再参与判断。
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的既有标签（如 v0.3.0）'
+        required: true
+        type: string
 
 permissions:
   id-token: write # OIDC 换发布权，必需
@@ -34,6 +45,11 @@ jobs:
     # 整轮上限。默认 6 小时：一旦有步骤挂住（不是失败，是不返回），
     # 不设限就等于白占一个 runner 半天。本仓全量约 1 分钟。
     timeout-minutes: 15
+    # 标签只在**一处**解析：推标签触发时是 `github.ref_name`，手动触发时是输入参数。
+    # 下面的步骤一律读这个 env，别各自写 `github.ref_name` —— 手动触发时它是
+    # `main`，会把版本号校验和 Release 都指错。
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
 
@@ -65,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $tag = $env:RELEASE_TAG -replace '^v', ''
           if ($pkg -ne $tag) {
             Write-Error "tag v$tag does not match package.json version $pkg"
             exit 1
@@ -109,7 +125,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:RELEASE_TAG
           $notes = "docs/releases/$tag.md"
 
           if (Test-Path $notes) {
