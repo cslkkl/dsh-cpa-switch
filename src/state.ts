@@ -83,6 +83,150 @@ export function writeExeMemory(path: string): void {
   writeJson(exeMemoryPath(), { path, at: new Date().toISOString() })
 }
 
+/* ── 路由清单缓存 ─────────────────────────────────────────────────────── */
+
+/**
+ * 缓存文件。与签到账本同构（`cpa-panel-*.json` 一族），生命周期不同：
+ * **长期有效，不按天重置**（见下面「不设硬过期」）。
+ */
+function cachedRoutesPath(): string {
+  return join(storagesDir(), 'cpa-panel-routes.json')
+}
+
+/**
+ * 缓存 schema 版本。
+ *
+ * 改 `RouteProfile` 形状时**必须**同时 bump 它 —— 老文件会因为版本不符被丢弃，
+ * 而不是被当成新形状误读。这是缓存这类「跨版本存活」的数据**唯一**的安全网：
+ * 形状变了而版本没变，读回来的就是一份字段对不上、却**看起来能用**的对象。
+ */
+const CACHED_ROUTES_VERSION = 1
+
+/** 磁盘上的缓存形状。 */
+interface CachedRoutesFile {
+  version?: unknown
+  /** 写这份缓存时的 CPA 端口（失效判据，见 {@link readCachedRoutes}）。 */
+  port?: unknown
+  /** 写盘时刻（ISO 串），**仅供诊断展示**，不参与失效判断。 */
+  savedAt?: unknown
+  profile?: unknown
+}
+
+/** 缓存里那份清单的最小形状（只验「够不够安全地用」，不复制 provider schema）。 */
+interface CachedProfile {
+  displayName: string
+  api: string
+  baseURL: string
+  apiKeyEnv: string
+  models: { id: string; name: string; contextWindow?: number }[]
+}
+
+/** 读到的缓存。 */
+export interface CachedRoutes {
+  readonly profile: CachedProfile
+  readonly port: number
+  readonly savedAt: string
+}
+
+/**
+ * 校验一份 profile **够不够格进缓存 / 从缓存出来**。
+ *
+ * ⚠️ **这是「宁可少显示，不可显示已删除的模型」这条决策的落点。**
+ *
+ * 缓存比普通状态更危险：它在**启动那一刻**就直接推给用户，
+ * 而那时后台读还没回来、**没有任何东西能纠正它**。所以坏的宁可不写、
+ * 不可读回：一份空清单或形状不对的清单进了缓存，用户下次启动就直接看到它。
+ *
+ * 只做**结构性**校验（字段在不在、models 非空），不比对 CPA 实际状态 ——
+ * 那要读 CPA，就失去缓存的意义了。
+ */
+function parseCachedProfile(value: unknown): CachedProfile | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as Record<string, unknown>
+
+  if (typeof raw['displayName'] !== 'string' || raw['displayName'] === '') return undefined
+  if (typeof raw['api'] !== 'string' || raw['api'] === '') return undefined
+  if (typeof raw['baseURL'] !== 'string' || raw['baseURL'] === '') return undefined
+  if (typeof raw['apiKeyEnv'] !== 'string' || raw['apiKeyEnv'] === '') return undefined
+  if (!Array.isArray(raw['models']) || raw['models'].length === 0) return undefined
+
+  const models: CachedProfile['models'] = []
+  for (const entry of raw['models']) {
+    if (typeof entry !== 'object' || entry === null) return undefined
+    const row = entry as Record<string, unknown>
+    if (typeof row['id'] !== 'string' || row['id'] === '') return undefined
+    if (typeof row['name'] !== 'string' || row['name'] === '') return undefined
+    models.push({
+      id: row['id'],
+      name: row['name'],
+      ...(typeof row['contextWindow'] === 'number' ? { contextWindow: row['contextWindow'] } : {}),
+    })
+  }
+  return {
+    displayName: raw['displayName'],
+    api: raw['api'],
+    baseURL: raw['baseURL'],
+    apiKeyEnv: raw['apiKeyEnv'],
+    models,
+  }
+}
+
+/**
+ * 读缓存的清单。
+ *
+ * ## 三条决策都在这里体现
+ *
+ * 1. **不设硬过期**：`savedAt` 只作诊断，**不参与判断**。
+ *    设了过期就会出现「过期 → 没缓存 → 等读 → 半成品 → `CPA ·`」——
+ *    把已经修好的症状请回来。过期这件事该由**读全之后覆盖**来自然解决，
+ *    不该由一个计时器来决定「什么时候没有数据可用」。
+ * 2. **宁可少显示**：形状不对 / 空清单 / 版本不符 → 一律 `undefined`
+ *    （退回原路径，而不是拿一份可疑数据去推）。
+ * 3. **`port` 变了必须失效**：`baseURL` 里焊着端口，端口一改旧缓存整个指错地方。
+ *
+ * @param currentPort - 当前配置的端口；给了才做失效判断。
+ * @returns 可用的缓存；不可用（缺失 / 损坏 / 版本不符 / 端口不符）时 `undefined`。
+ */
+export function readCachedRoutes(currentPort?: number): CachedRoutes | undefined {
+  const parsed = readJson<CachedRoutesFile>(cachedRoutesPath())
+  if (parsed === undefined) return undefined
+
+  if (parsed.version !== CACHED_ROUTES_VERSION) return undefined
+  const profile = parseCachedProfile(parsed.profile)
+  if (profile === undefined) return undefined
+
+  const port = typeof parsed.port === 'number' ? parsed.port : undefined
+  if (port === undefined) return undefined
+  // 端口不符 → 这份清单指向别的地方，作废（决策 3）
+  if (currentPort !== undefined && port !== currentPort) return undefined
+
+  return {
+    profile,
+    port,
+    savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : '',
+  }
+}
+
+/**
+ * 写缓存的清单。
+ *
+ * ⚠️ **只该在「读全了」之后调用**（[`route-registry`] 的完整快照分支）。
+ * 半成品一旦写进去，下次启动就会**立刻**把它推给用户，而那时没有任何读能纠正。
+ *
+ * 这里**再校验一次**，不指望调用方自觉：形状不对的直接不写 ——
+ * 宁可没有缓存（退回原路径），也不要一份坏缓存。
+ */
+export function writeCachedRoutes(profile: unknown, port: number): void {
+  const checked = parseCachedProfile(profile)
+  if (checked === undefined) return
+  writeJson(cachedRoutesPath(), {
+    version: CACHED_ROUTES_VERSION,
+    port,
+    savedAt: new Date().toISOString(),
+    profile: checked,
+  })
+}
+
 /* ── 补签 stamp + 今日签到账本 ────────────────────────────────────────── */
 
 /**
