@@ -148,6 +148,11 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 - [ ] **`providerId` 粒度裁决** —— 现在是按**渠道**（四个），要考虑是否该细化到
       **每单元**（号 / 模型组）。先想清「一个 providerId 到底代表什么」再动：
       它牵扯模型目录的分组方式，改错会让选择器里出现重复条目。
+- [ ] **面板只显示自己要的渠道与模型**（想法未定，仅记录）—— 现在四个渠道全列，
+      每个渠道下又平铺全部模型；有人只用一两个渠道、也只想看其中几个模型。
+      诉求是**可勾选**「哪些渠道 / 哪些模型出现在面板里」。
+      选项：设置里多选（渠道 + 模型各一层）、或面板上加一层筛选。
+      未拍板，先不动手。
 - [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 只能靠人工表，每次新模型都要补。
