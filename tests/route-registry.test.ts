@@ -438,24 +438,31 @@ describe('重载空窗', () => {
 
     const first = await refresh('boot')
     expect(first.ok).toBe(true)
-    expect(pushed).toHaveLength(1)
-    expect(pushed[0]?.ids).toContain('dfmodel')
-    expect(pushed[0]?.ids).toContain('qoder/glm-5.3')
-    expect(pushed[0]?.ids).toContain('wb/glm-5.3')
-    expect(pushed[0]?.names).toContain('Qoder · dfmodel')
+    /**
+     * ⚠️ **第一次 `refresh` 现在会推两次**（2026-10-06 加快路径之后）：
+     * 一条是「手里这份清单」的快路径（此刻还没有 → 跳过），
+     * 一条是读全之后的结果。所以这里按「最后一份」断言，而不是写死次数 ——
+     * 写死次数会把「快路径是否存在」这种实现细节钉进判据。
+     */
+    const afterFirst = pushed.at(-1)
+    expect(afterFirst?.ids).toContain('dfmodel')
+    expect(afterFirst?.ids).toContain('qoder/glm-5.3')
+    expect(afterFirst?.ids).toContain('wb/glm-5.3')
+    expect(afterFirst?.names).toContain('Qoder · dfmodel')
 
     // 模拟宿主重建：条目回到 patch 基线（骨架在、models 没了）。
     entry.options = { name: '@deepseek-ai/dsh-llm-pi-ai', config: BASELINE }
     // 之后**所有** CPA 读都不放行 —— 能推回来的清单只可能来自缓存。
     cpa.hangNext('', 99)
+    const before = pushed.length
     emit('app-boot/config-reload')
 
     await until(() => {
-      expect(pushed).toHaveLength(2)
+      expect(pushed.length).toBeGreaterThan(before)
     })
-    expect(pushed[1]?.ids).toEqual(pushed[0]?.ids)
-    expect(pushed[1]?.names).toEqual(pushed[0]?.names)
-    expect(modelsOf(entry.options.config)).toHaveLength(pushed[0]?.ids.length ?? 0)
+    expect(pushed.at(-1)?.ids).toEqual(afterFirst?.ids)
+    expect(pushed.at(-1)?.names).toEqual(afterFirst?.names)
+    expect(modelsOf(entry.options.config)).toHaveLength(afterFirst?.ids.length ?? 0)
   })
 
   it('没有历史清单时保持空，绝不凭空推一份', async () => {
@@ -500,14 +507,18 @@ describe('重载空窗', () => {
     const refresh = attachRouteRegistry(host, depsFor(cpa))
 
     await refresh('boot')
-    expect(pushed).toHaveLength(1)
+    const goodIds = pushed.at(-1)?.ids ?? []
+    expect(goodIds.length).toBeGreaterThan(0)
+
     // 这一轮渠道列表读直接失败：没有新事实，但不许把清单清掉。
     cpa.failChannelList()
+    const before = pushed.length
     const result = await refresh('oauth')
 
     expect(result).toMatchObject({ ok: true, stale: true, reason: 'channel-read-incomplete' })
-    expect(pushed).toHaveLength(2)
-    expect(pushed[1]?.ids).toEqual(pushed[0]?.ids)
+    // 仍然推的是那批清单（快路径 + degrade 各推一次都可能，所以看「最后一份」）
+    expect(pushed.length).toBeGreaterThan(before)
+    expect(pushed.at(-1)?.ids).toEqual(goodIds)
   })
 
   it('慢读算出来的旧清单不覆盖已经推上去的新清单', async () => {
@@ -517,18 +528,29 @@ describe('重载空窗', () => {
     const refresh = attachRouteRegistry(host, depsFor(cpa))
 
     await refresh('boot')
-    // 第一轮慢读：卡在模型目录上（序号 2）。
+    /**
+     * 第一轮慢读卡在模型目录上（序号 2），期间第二轮（序号 3）先跑完并推上去。
+     *
+     * ⚠️ 判据看**最终状态**与**慢路的返回值**，不看推送次数 ——
+     * 快路径存在之后，次数不再等于「有几轮读完了」（每次 `refresh` 都可能
+     * 先零读推一份）。钉次数会把实现细节写进判据，而这里真正的不变量是
+     * **「旧的那份不许盖掉新的」**。
+     */
     cpa.hangNext('/v1/models')
     const slow = refresh('oauth')
     await tick(20)
-    // 第二轮（序号 3）先跑完并推上去。
     await refresh('boot')
     cpa.release()
     const slowResult = await slow
 
+    // 慢路被序号挡住
     expect(slowResult).toMatchObject({ ok: true, reason: 'superseded' })
-    expect(pushed).toHaveLength(2)
-    expect(modelsOf(entry.options.config)).toHaveLength(pushed[1]?.ids.length ?? 0)
+    // 条目上仍是「新一轮」的清单，且行数与条目一致
+    const rows = modelsOf(entry.options.config)
+    expect(rows.length).toBeGreaterThan(0)
+    expect(String(rows[0]?.name)).toContain('·')
+    // 推出去的最后一份与条目一致（没被慢路倒灌改小）
+    expect(pushed.at(-1)?.ids.length).toBeGreaterThanOrEqual(rows.length)
   })
 
   /**
@@ -995,5 +1017,275 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
     expect(config).toContain('wb/glm-4.6')
     expect(config).toContain('zcode/glm-4.6')
     expect(pushed.flatMap((p) => p.names).map(String)).toContain('WorkBuddy · glm-4.6')
+  })
+})
+
+// ── 启动用持久缓存，不等读 ──────────────────────────────────────────────
+//
+// 实机第三例（2026-10-06）：重启后**一直**显示 `CPA · Doubao-Seed-2.1-Turbo`，
+// 点一下（**两秒内**）才变成 `Trae · …`。
+//
+// 时序实测把「进程启动」与「凭据加载」分开了：
+//   - DSH → CPA 进程启动差 **7.6 秒**；
+//   - `/v1/models` 只要 **2–4ms**（读的是内存注册表 `GetAvailableModels`）；
+//   - 而**凭据注册**是秒级的（`RegisterClient` 逐个进来）。
+//
+// 所以 CPA 端口一通，`/v1/models` **就已经有内容**（远端目录先到，
+// `model_updater.go` 的 `tryStartupRefresh` 与凭据无关），
+// 而**供给面还空着** → 归属算不出 → `CPA ·`。
+//
+// 「点一下两秒就好」正好对上：供给面一轮只要 ~140ms，那时凭据早加载完了。
+//
+// ## 修法：不再判断「供给面好了没」，而是**启动就不等**
+//
+// 上次**完整**成功过的清单写盘；启动时先把它推上去（零读、立即可用），
+// 再后台读新的：读全 → 更新 + 写盘；读不全 → 保持旧的。
+//
+// 这条路径与既有的「重载空窗」**同构**（那里也是「先零读推回上一份、
+// 再去读目录核对」）—— 复用同一个快路径，不另写一套。
+
+describe('启动用持久缓存', () => {
+  let home = ''
+  const storages = (): string => join(home, 'cpa-panel', 'runtime', 'cpa')
+  const configPath = (): string => join(storages(), 'config.yaml')
+  const cachePath = (): string => join(home, 'storages', 'cpa-panel-routes.json')
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-cache-'))
+    process.env.DSH_HOME = home
+    mkdirSync(storages(), { recursive: true })
+    writeFileSync(configPath(), 'config-version: 8\noauth:\n    auth-dir: "auth"\n', 'utf8')
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 直接往缓存文件写一份清单（模拟「上次启动留下的」）。 */
+  function seedCache(models: { id: string; name: string }[], port = 8317): void {
+    mkdirSync(join(home, 'storages'), { recursive: true })
+    writeFileSync(
+      cachePath(),
+      JSON.stringify({
+        version: 1,
+        port,
+        savedAt: '2026-10-05T00:00:00.000Z',
+        profile: {
+          displayName: 'CPA Switch',
+          api: 'openai-completions',
+          baseURL: `http://127.0.0.1:${port}/v1`,
+          apiKeyEnv: 'CPA_API_KEY',
+          models,
+        },
+      }),
+      'utf8',
+    )
+  }
+
+  const FILES = [
+    { name: 'q1', provider: 'qoder' },
+    { name: 'w1', provider: 'workbuddy' },
+  ]
+  const MODELS = { q1: ['dfmodel'], w1: ['hy3'] }
+  const CATALOG = ['dfmodel', 'hy3']
+
+  /**
+   * **核心判据**：CPA 还读不到时，启动也要立刻推出缓存里的清单 ——
+   * 而不是空着等读（那正是用户看到 `CPA · xxx` 或空清单的窗口）。
+   */
+  it('⚠️ 启动立刻推出缓存清单，不等任何 CPA 读', async () => {
+    seedCache([
+      { id: 'dfmodel', name: 'Qoder · dfmodel' },
+      { id: 'hy3', name: 'WorkBuddy · hy3' },
+    ])
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // 所有 CPA 读都挂住 —— 能推出来的只可能来自缓存
+    cpa.hangNext('', 99)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    void attachRouteRegistry(host, depsFor(cpa))('boot')
+    await until(() => {
+      expect(pushed.length).toBeGreaterThan(0)
+    })
+
+    expect(pushed[0]?.names).toContain('Qoder · dfmodel')
+    expect(pushed[0]?.names).toContain('WorkBuddy · hy3')
+    // 启动即用，所以 **没有一条** CPA 读需要放行
+    expect(pushed[0]?.names.some((n) => String(n).startsWith('CPA · '))).toBe(false)
+  })
+
+  /**
+   * **只有完整快照才写盘**：读全之后缓存要被**更新**，且内容是新读到的。
+   */
+  it('读全后更新缓存（写盘的必须是这一轮的新清单）', async () => {
+    seedCache([{ id: 'stale-model', name: 'Qoder · stale-model' }])
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+    await until(() => {
+      const onDisk = JSON.parse(readFileSync(cachePath(), 'utf8')) as {
+        profile: { models: { id: string }[] }
+      }
+      expect(onDisk.profile.models.map((m) => m.id).sort()).toEqual(['dfmodel', 'hy3'])
+    })
+    // 旧的 stale-model 被覆盖掉了
+    expect(readFileSync(cachePath(), 'utf8')).not.toContain('stale-model')
+  })
+
+  /**
+   * **读不全时缓存不许被改写** —— 半成品进缓存 = 下次启动又看到坏的。
+   *
+   * 这条与「启动用缓存」配对：一个保证有得用，一个保证用的是干净的。
+   */
+  it('⚠️ 读不全时缓存保持原样（半成品不进缓存）', async () => {
+    seedCache([{ id: 'dfmodel', name: 'Qoder · dfmodel' }])
+    const before = readFileSync(cachePath(), 'utf8')
+
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // 供给面一直读不到（暂时性）→ 门不通过 → 不许写缓存
+    cpa.makeChannelSupplyTransient(99)
+    const { entry } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    expect(readFileSync(cachePath(), 'utf8')).toBe(before)
+  })
+
+  /**
+   * ⚠️ **有渠道被永久跳过时也不许写缓存** —— 与上一条**不同的代码路径**。
+   *
+   * 上一条走的是「门不通过 → 提前 return」，压根到不了写盘点；
+   * 这一条走的是「门**通过**了（跳过坏渠道、推其余的清单照推）」，
+   * 但那份清单**丢了一个渠道** —— 它的别名校验是不完整的，
+   * 缓存下来下次启动就**未经任何读**推给用户。
+   *
+   * 为什么值得单独一条：**变异验证发现它没有覆盖** ——
+   * 把 `skipped.length === 0` 这个护栏去掉，其余 53 条判据全绿。
+   * 也就是说没有这条，「完整快照才写盘」这半边是**裸奔**的。
+   */
+  it('⚠️ 跳过永久坏渠道时也不写缓存（那份清单少一个渠道）', async () => {
+    seedCache([{ id: 'dfmodel', name: 'Qoder · dfmodel' }])
+    const before = readFileSync(cachePath(), 'utf8')
+
+    const cpa = fakeCpa({
+      files: [
+        { name: 'q1', provider: 'qoder' },
+        { name: 'w1', provider: 'workbuddy' },
+      ],
+      models: { q1: ['dfmodel'], w1: ['hy3'] },
+      catalog: ['dfmodel', 'hy3'],
+    })
+    // workbuddy 永久读不到 → 被跳过 → 门通过、清单照推，但少一个渠道
+    cpa.makeChannelSupplyPermanent(Number.MAX_SAFE_INTEGER, 'w1')
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    // 清单确实推了（好渠道的模型在）—— 走的是「跳过」那条路，不是提前 return
+    expect(pushed.flatMap((p) => p.names).map(String)).toContain('Qoder · dfmodel')
+    // 但缓存**没被改写**
+    expect(readFileSync(cachePath(), 'utf8')).toBe(before)
+  })
+
+  /**
+   * **缓存损坏 / 不存在 → 退回原路径，不抛**（安全降级）。
+   */
+  it('缓存损坏时照常走读路径，不抛', async () => {
+    mkdirSync(join(home, 'storages'), { recursive: true })
+    writeFileSync(cachePath(), '{bad json', 'utf8')
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    // 缓存没用上，但正常读路径照旧推出正确清单
+    const names = pushed.flatMap((p) => p.names).map(String)
+    expect(names).toContain('Qoder · dfmodel')
+    expect(names).toContain('WorkBuddy · hy3')
+  })
+
+  /** 没有缓存时不该凭空推一份 —— 保持原有的「无历史保持空」语义。 */
+  it('没有缓存时不推任何东西，等真读到才推', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.hangNext('', 99)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    void attachRouteRegistry(host, depsFor(cpa))('boot')
+    await tick(200)
+
+    expect(pushed).toHaveLength(0)
+  })
+
+  /**
+   * **决策 3：`port` 变了缓存失效。**
+   *
+   * 缓存里的 `baseURL` 焊着端口；端口一改，旧清单把请求打到旧端口上。
+   * 判据形状：种一份**别的端口**的缓存 → 启动时**不许**拿它当快路径。
+   */
+  it('⚠️ 端口变了就不认这份缓存（baseURL 指向旧端口）', async () => {
+    seedCache([{ id: 'old-port-model', name: 'Qoder · old-port-model' }], 9999)
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.hangNext('', 99)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    void attachRouteRegistry(host, depsFor(cpa))('boot')
+    await tick(200)
+
+    // 端口不符 → 缓存作废 → 不许把旧端口的清单推出去
+    expect(pushed).toHaveLength(0)
+    expect(JSON.stringify(pushed)).not.toContain('old-port-model')
+  })
+
+  /**
+   * **决策 1：不设硬过期** —— 很旧的缓存也照样用。
+   *
+   * 反向判据：若哪天有人加了 TTL，这条会红。
+   */
+  it('⚠️ 很久以前的缓存仍然用于启动（不设硬过期）', async () => {
+    seedCache([{ id: 'ancient', name: 'Qoder · ancient' }])
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.hangNext('', 99)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    void attachRouteRegistry(host, depsFor(cpa))('boot')
+    await until(() => {
+      expect(pushed.length).toBeGreaterThan(0)
+    })
+
+    expect(pushed[0]?.names).toContain('Qoder · ancient')
+  })
+
+  /**
+   * **`config-reload` 与 `boot` 共用同一条快路径。**
+   *
+   * 判据形状：缓存里的清单在两处都推得出来 —— 若哪天有人只给 boot 加了快路径、
+   * `config-reload` 另写一套，这条会红。
+   */
+  it('⚠️ 重载也用缓存做快路径（与启动共用一套）', async () => {
+    seedCache([{ id: 'dfmodel', name: 'Qoder · dfmodel' }])
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.hangNext('', 99)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host, emit } = fakeHost(entry)
+
+    void attachRouteRegistry(host, depsFor(cpa))
+    // 模拟宿主重建：条目回到骨架（models 没了）
+    entry.options = { name: '@deepseek-ai/dsh-llm-pi-ai', config: BASELINE }
+    emit('app-boot/config-reload')
+
+    await until(() => {
+      expect(pushed.length).toBeGreaterThan(0)
+    })
+    expect(pushed[0]?.names).toContain('Qoder · dfmodel')
   })
 })

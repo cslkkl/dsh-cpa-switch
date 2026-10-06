@@ -35,6 +35,7 @@ import { ROUTE_PREFIXES, channelLabel, channelOfPrefix, channelOrder } from './c
 import { buildAliasTable, type AliasTable } from './model-alias.ts'
 import { capsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
+import { readCachedRoutes, writeCachedRoutes } from './state.ts'
 import { CPA_API_KEY_REF, type LoggerLike } from './credentials.ts'
 
 /**
@@ -709,11 +710,45 @@ export function attachRouteRegistry(
    * （最坏几十秒）。留着它就能**零读**先把空窗补回，再慢慢核对。
    *
    * 序号防倒灌：慢路径可能比快路径后落，旧清单不许覆盖新清单。
+   *
+   * ## 它同时是**磁盘缓存的运行时镜像**（2026-10-06）
+   *
+   * 磁盘缓存存在的理由：CPA 端口一通 `/v1/models` 就**已经有内容**
+   * （读的是内存注册表，与凭据无关），而**凭据注册是秒级的** ——
+   * 于是插件会在「目录齐了、归属没齐」的窗口里推出一批 `CPA · xxx`。
+   * 实测「点一下两秒就好」正好对上那个窗口。
+   *
+   * 修法不是「判断供给面好了没」（「还在长」与「永远长不出来」在时间上
+   * 不可区分），而是**启动就不等**：直接推上次完整成功过的那份。
+   *
+   * ⚠️ 于是 `lastGood` 与磁盘缓存**只在完整快照时更新** —— 一处赋值管住两件事：
+   * 「重载空窗回推什么」与「下次启动用什么」。半成品进不来，
+   * 也就不会出现「兜底把坏数据永久化」。
    */
   let lastGood: RouteProfile | undefined
   let lastGoodSeq = 0
   let pushedSeq = 0
   let computeSeq = 0
+
+  /**
+   * 启动时**预填** `lastGood`：从磁盘缓存读一份完整清单。
+   *
+   * 端口不符 / 版本不符 / 形状不对 / 文件损坏 → 一律读不到，退回原路径。
+   * 这是**同步**读一次（不是每轮 `refresh` 都读盘）——
+   * 之后 `lastGood` 由 `pushProfile` 维护。
+   *
+   * ⚠️ **不设硬过期**：过期后又会走回「等读 → 半成品」的老路。
+   * 偏旧这件事由「读全后覆盖」自然解决，不由计时器决定「什么时候没数据可用」。
+   */
+  const restored = readCachedRoutes(deps.gateway.port)
+  if (restored !== undefined) {
+    lastGood = restored.profile as RouteProfile
+    deps.logger?.info?.(
+      'cpa-panel: 启动用磁盘缓存清单（%d models，存于 %s）',
+      lastGood.models.length,
+      restored.savedAt,
+    )
+  }
 
   /** inject 是异步解析的，boot 可能先跑到这里 —— 最多等 10 秒。 */
   const findEntry = async (): Promise<LoaderEntryLike | undefined> => {
@@ -838,6 +873,30 @@ export function attachRouteRegistry(
     const seq = ++computeSeq
 
     /**
+     * **快路径**：先把手上这份清单零读推回去，再去读目录核对。
+     *
+     * 这份清单有两个来源，**同一个机制**：
+     * - 本进程内上次成功的（重载空窗：重建把 volatile 值抹掉了）；
+     * - 磁盘缓存预填的（启动：不等读，立刻可用）。
+     *
+     * ⚠️ **只推、不改 `lastGood`**：它是「上一份」，不是这一轮的事实。
+     * 序号也用 `lastGoodSeq` 而不是新 `seq` —— 否则这次快推会把自己
+     * 标记成「最新」，随后慢路径算出来的清单反而被序号挡掉。
+     */
+    if (lastGood !== undefined) {
+      void (async () => {
+        const quick = await pushProfile(lastGood as RouteProfile, lastGoodSeq, `${trigger}:fast`)
+        deps.logger?.info?.(
+          'cpa-panel: 快路径推回（%s）：%s',
+          trigger,
+          quick.ok ? `${String(quick.models ?? 0)} models` : (quick.reason ?? 'failed'),
+        )
+      })().catch((error: unknown) => {
+        deps.logger?.warn?.('cpa-panel: 快路径失败（%s）: %o', trigger, error)
+      })
+    }
+
+    /**
      * **一份统一的「就绪」读**：模型目录与渠道供给面都读到，且归属已经算得出来
      * （见 {@link readReadySnapshot} 与 {@link agreeOnOwnership}）。
      *
@@ -884,6 +943,24 @@ export function attachRouteRegistry(
       }
     }
 
+    /**
+     * **完整快照 → 写盘**（下次启动就不必等读）。
+     *
+     * ⚠️ **这里是唯一的写盘点**，且**必须**在「读全 + 算得出清单」之后：
+     * - 放在 `pushProfile` 里不行 —— 那个函数**快路径与 degrade 也会调**，
+     *   会把「上一份」反复写回去（甚至一开始就没写过盘）；
+     * - 跳过的渠道非空时也不写：那份清单的归属判定**丢了一个渠道**，
+     *   比完整清单更可能已经过时（见下）。
+     *
+     * 为什么跳过渠道时保守不写：决策是「**宁可少显示，不可显示已删除的模型**」。
+     * 少一个渠道的清单里，同名模型可能已经退化成裸名 —— 缓存下来，
+     * 下次启动**未经任何读**就把它推给用户，而那时没有东西能纠正它。
+     * 代价只是「这次没更新缓存」，下次读全了自然会更新。
+     */
+    if (ready.snapshot.skipped.length === 0) {
+      writeCachedRoutes(outcome.profile, deps.gateway.port)
+    }
+
     return pushProfile(outcome.profile, seq, trigger)
   }
 
@@ -912,27 +989,20 @@ export function attachRouteRegistry(
     const startedAt = clock.now()
     deps.logger?.info?.('cpa-panel: host config-reload received, repushing models')
     /**
-     * 快路径：重建刚把清单抹掉（基线里 `cpa` 只有骨架、没有 models），
-     * **不等任何 CPA 读**先把上一份原样推回。空窗的长短就是用户看到的
-     * 「闪成 cpa/xxx + composer 停用」的时长。
+     * ⚠️ 快路径**不在这里** —— 它已经在 `refresh` 内部（同一个机制同时服务
+     * 「重载空窗」与「启动用缓存」）。这里只负责「记下空窗补了多久」。
+     *
+     * 曾经这里单独写着一份 `pushProfile(cached, lastGoodSeq, 'config-reload:fast')`，
+     * 与 `refresh` 里那份**逻辑相同、实现两份** —— 于是给 `boot` 加快路径时
+     * 极易只改一处。收进 `refresh` 之后，两个时机共用一套。
      */
-    const cached = lastGood
-    if (cached !== undefined) {
-      void pushProfile(cached, lastGoodSeq, 'config-reload:fast')
-        .then((result) => {
-          deps.logger?.info?.(
-            'cpa-panel: 重载空窗补回（%d ms）：%s',
-            clock.now() - startedAt,
-            result.ok ? `${String(result.models ?? 0)} models` : (result.reason ?? 'failed'),
-          )
-        })
-        .catch((error: unknown) => {
-          deps.logger?.warn?.('cpa-panel: 重载快路径失败: %o', error)
-        })
-    }
     void refresh('config-reload')
       .then((result) => {
-        deps.logger?.info?.('cpa-panel: config-reload repush done: %o', result)
+        deps.logger?.info?.(
+          'cpa-panel: 重载空窗补回（%d ms）与重推完成: %o',
+          clock.now() - startedAt,
+          result,
+        )
       })
       .catch((error: unknown) => {
         deps.logger?.warn?.('cpa-panel: config-reload repush failed: %o', error)
