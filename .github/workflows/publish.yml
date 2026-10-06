@@ -1,0 +1,75 @@
+# 发布：推 `v*` 标签即自动发到 npm。
+#
+# 认证走 **Trusted Publishing（OIDC）**，仓库里不存任何 npm token ——
+# 配置步骤见根 [AGENTS.md](../AGENTS.md) 的待办区。
+#
+# ⚠️ `id-token: write` 是 OIDC 换发布权的必需项：少了它 npm 侧收不到
+# provenance，发布会以「未授权」失败。
+#
+# ⚠️ 不要加 `NPM_TOKEN` secret —— OIDC 已替代它。加了反而会在 token 过期后
+# 静默回到「能跑但发不出去」的状态。
+#
+# ⚠️ 这个 workflow 只负责**发布**，不负责改版本号。版本号必须在打标签前
+# 已经在 `package.json` 里 bump 过（`pnpm version … --no-git-tag-version`），
+# 且 **build 在 bump 之后** —— 顺序反了产物里就是旧版本号，而 npm 上不可覆盖。
+# 见 [docs/PUBLISHING.md](../docs/PUBLISHING.md)。
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  # 手动重跑一次失败的发布（npm 已发布的版本号不能重发，重跑前先确认版本没上去）。
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC 换发布权，必需
+  contents: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    # 整轮上限。默认 6 小时：一旦有步骤挂住（不是失败，是不返回），
+    # 不设限就等于白占一个 runner 半天。本仓全量约 1 分钟。
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          # 版本基线以 .node-version 为唯一来源，避免 CI 与本机漂移。
+          node-version-file: .node-version
+          cache: pnpm
+          # Trusted Publishing 要求 npm CLI ≥ 11.5.1；Node 24 自带的够新，
+          # 这里显式钉住 registry 以免继承本机/runner 的镜像配置。
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --config.node-linker=hoisted
+
+      # 发布前跑全量门禁（与 `pnpm check` 同一份脚本）——
+      # **标签打错位置比不发更糟**：发出去的版本号不可撤销，只能发下一个版本。
+      - name: Check
+        run: pnpm check
+
+      # ⚠️ tag 与 package.json 必须一致：标签是 `v0.3.0` 就该发 0.3.0。
+      # 对不上时 npm 会成功发**另一个**版本号（标签名不参与 npm 版本判定），
+      # 于是产生一个没人预期的版本 —— 所以这里显式挡住。
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          if ($pkg -ne $tag) {
+            Write-Error "tag v$tag does not match package.json version $pkg"
+            exit 1
+          }
+          Write-Output "publishing $pkg"
+
+      # OIDC 发布：npm 侧凭「本仓库的这条 workflow」授权，无需 token。
+      # `--provenance` 让 npm 记录产物来源（由 OIDC 提供），供应链可追溯。
+      - name: Publish
+        run: npm publish --access public --provenance

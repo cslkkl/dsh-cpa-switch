@@ -7,8 +7,18 @@
 
 ## 0. 现状
 
-**发布是手工的**：`npm publish` 由维护者本机执行，尚无自动发布 workflow。
-把它改成 OIDC 自动发布是待办，见根 [AGENTS.md](../AGENTS.md) 的待办区。
+**自动发布 workflow 已入库**：[.github/workflows/publish.yml](../.github/workflows/publish.yml)
+—— 推 `v*` 标签即发到 npm，认证走 **Trusted Publishing（OIDC）**，仓库里不存 token。
+
+⚠️ **但 npm 侧的 Trusted Publisher 还没配** —— 配置完成前，推标签会在
+`npm publish` 那一步以「未授权」失败。配置步骤见根 [AGENTS.md](../AGENTS.md) 的待办区。
+在那之前仍可本机手工 `npm publish`（见 §3）。
+
+`publish.yml` 与 `ci.yml` **跑同一份门禁**（`pnpm check`），并额外挡两件事：
+
+- **tag 与 `package.json` 版本号必须一致** —— 标签名不参与 npm 的版本判定，
+  对不上时会静默发成另一个版本号；
+- **`id-token: write`** —— 少了它 OIDC 换不到发布权。
 
 ---
 
@@ -68,6 +78,25 @@ git commit -m "chore: <版本>"
 
 ## 3. 发布
 
+### 3.1 自动（推荐，需先配好 Trusted Publisher）
+
+```powershell
+git push origin main
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+标签推上去触发 [publish.yml](../.github/workflows/publish.yml)：跑全量门禁 →
+核对 tag 与 `package.json` 一致 → `npm publish --provenance`。
+
+⚠️ **版本号必须在打标签之前就 bump 且 build 过**（见 §1 的 ③）—— workflow 不改版本号。
+标签名只是触发条件与校验依据，**决定发哪个版本的是 `package.json`**。
+
+⚠️ **已发布的版本号不能重发**。发布失败要重来，若 npm 上已有该版本，
+先 bump 到下一个 patch 再打新标签，别反复推同一个标签。
+
+### 3.2 手工（Trusted Publisher 配好之前）
+
 ```powershell
 pnpm pack                    # 先看打包清单（dry-run 语义）
 npm publish --access public
@@ -77,7 +106,7 @@ npm publish --access public
 `cordis.patch.yml`、`icon.svg`、`locale/*.json`、`README.md`、`LICENSE`。
 **不含** `src/`、`tests/`、`scripts/` —— 那是开发面，进包只会让体积翻倍。
 
-发布后复核：
+### 3.3 发布后复核
 
 ```powershell
 npm view dsh-cpa-switch version dist-tags
