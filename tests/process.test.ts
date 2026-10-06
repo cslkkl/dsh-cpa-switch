@@ -60,6 +60,19 @@ function makeHarness(initialListening = false): Harness {
       probeCalls += 1
       return listening
     },
+    /**
+     * ⚠️ **`resolveExe` 必须一起注入，否则这条判据会依赖「本机装没装 CPA」**。
+     *
+     * 实踩（CI 红了、本机绿）：只注入 `probe` 与 `spawn` 时，`ensure()` 里
+     * `resolveExe(options.exePath)` 仍走真实实现 —— 它扫本机候选路径，
+     * 本机有 CPA 就返回路径、于是走到注入的 `spawn`（判据成立）；
+     * CI 上没有 CPA，直接返回空串 → `exe-not-found`，**`spawn` 一次都没调到**，
+     * 于是所有判据都在测一件没发生过的事。
+     *
+     * 凡是「走到某一步之前需要先满足某个条件」的路径，那个条件的**全部**
+     * 前置都要注入 —— 漏一个，用例就变成环境依赖，而且**本机是绿的**。
+     */
+    resolveExe: () => 'C:/fake/cpa/cli-proxy-api.exe',
     spawn: () => {
       spawnCalls += 1
       exited = false
