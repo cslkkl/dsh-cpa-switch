@@ -25,6 +25,8 @@
 | `src/route-registry.ts`                | 模型路由唯一入口：[架构说明](docs/ARCHITECTURE.md) + [别名决策](.agents/notes/2026-10-04-channel-pinned-model-alias.md) + [空窗决策](.agents/notes/2026-10-05-route-reload-blank-window.md) + [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)（重载丢路由的定位与验证）；目录与 `baseURL` 经 `gateway`、探活经 `runtime`，**别自己 `probePort`**；等待（退避 / loader 轮询 / 耗时计时）一律走注入的 `Clock`，**别裸写 `setTimeout` / `Date.now`**（[决策记录](.agents/notes/2026-10-06-route-clock-injection.md)，判据 `tests/route-registry.test.ts`） |
 | `src/gateway.ts` 对 CPA 的通道         | 读写一律 `gateway.fetch()`、前置用 `requireRunning` / `requireReady`；**缓存键必须用 `cacheKeys` 构造器**（键即失效前缀），新增读 key 要同步 `invalidateChannel`（[决策记录](.agents/notes/2026-10-05-cpa-gateway.md)，判据 `tests/gateway.test.ts`）                                                                                                                                                                                                                                                                                                                 |
 | `src/runtime.ts` 运行态门面            | `status()` **绝不起进程**、`ensure()` 才可能拉起；两者共用同一份探活记忆，**不许再开第三条探活路径**（判据 `tests/runtime.test.ts`）                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `src/process.ts` / `startup-log.ts`    | **CPA 起不来的原因必须可观测**：子进程输出**落文件不落 pipe**（pipe 要求持续排空，排空一停会阻塞 CPA 主进程）；端口归属是**推断**且只在 `manageLifecycle` 为真时报；**认不出就不报原因**（给错的原因比不给更糟）。同步 [架构说明](docs/ARCHITECTURE.md) F46 + [决策记录](.agents/notes/2026-10-06-startup-output-file-redirect.md) + `tests/startup-log.test.ts` / `tests/process.test.ts`                                                                                                                                                                            |
+| `src/client/status-text.ts`            | 状态条的圆点语义与提示块**全在这里判**（不含 JSX，所以 Node 侧测得到）：优先级「占用 > 起不来 > 正常」；**两个版本号缺一个就不提数字**。改动同步 `tests/status-text.test.ts` + [client/README](src/client/README.md)                                                                                                                                                                                                                                                                                                                                                  |
 | `src/ops/**` 业务层                    | **一域一文件，域按语义分**：`actions` 作用于全部号含已禁用的（F35）、`enable` 只动调度面；域之间不许互相 import，共享的下沉到 `ops/result.ts`；越界由 `check:layering` 的 `ops-no-outer` 拦（[手册](src/ops/README.md)、[决策记录](.agents/notes/2026-10-05-ops-domains.md)）                                                                                                                                                                                                                                                                                         |
 | 写操作（`ops/**` 里改 CPA 状态的那些） | 成功后必须 `gateway.invalidateChannel(plugin)`（跨渠道用空串）；**界面值取回读**（F33）；改启用态要回读确认 + 逐个容错（F43）；判据在 `tests/ops-write-paths.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `src/select-plan.ts`                   | 「设为唯一」的目标状态计算与回读验证（纯函数）；改动同步 [决策记录](.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -129,6 +131,17 @@ python check-line-endings.py <本仓根> --target lf
 > **两份都要活跃**：做完的**立即删**（历史去 `git log` / 决策记录，不留 `[x]` 充数）；
 > 变模糊的要么补清背景、要么降级到 PLAN.md 的研究方向；新想法**先入 PLAN.md §2.6**，
 > 别直接塞这里 —— 待办混入未立项的想法就不再是「照做即可」的清单了。
+
+- [ ] **发布 0.4.0** —— `package.json` 已是 0.4.0，未发布（`v0.3.0` 已发）。
+      推 `v0.4.0` 标签即由 [publish.yml](.github/workflows/publish.yml) 自动发布；
+      ⚠️ **另需显式建 GitHub Release**（推 tag 不会自动产生它），正文放
+      `docs/releases/v0.4.0.md` —— 见本文件「推 tag 不会自动产生 Release」那条活跃坑，
+      以及[发布手册](docs/PUBLISHING.md)。
+
+- [ ] **重启 DSH 复验两条新提示**（提示块只在宿主半端生效，不随页面刷新加载）：
+      端口被外部实例占用（应显示**琥珀**点 + 提示块，而不是绿色「运行中」）、
+      以及把 `config.example.yaml` 的代际改成别的数时应出现「配置代际不符」。
+      本轮真机只验到**命令行一级**（真日志行认出 `port-in-use`、本机两侧都是 8 不误报）。
 
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。

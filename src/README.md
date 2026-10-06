@@ -48,14 +48,20 @@
   - 优先级与宿主 `dsh-home-paths` 一致：非空白 `DSH_HOME` > `~/.dsh`；空白按未设置
   - 改后必测：`tests/paths.test.ts`
 - **`state.ts`** —— 状态文件读写，**纯 IO、无网络**。
-  - 读：`localDay` / `readExeMemory` / `readStamp` / `readCheckinLedger` / `readAccountIntent`
-    / `readCachedRoutes` / 类型 `AccountIntent`、`CheckinStamp`、`CachedRoutes`
+  - 读：`localDay` / `readExeMemory` / `readRunPid` / `readStamp` / `readCheckinLedger` /
+    `readAccountIntent` / `readCachedRoutes` / 类型 `AccountIntent`、`CheckinStamp`、`CachedRoutes`
   - 写：**只有读改写单入口** —— `writeExeMemory`（单字段，普通写）/
-    `updateStamp` / `updateCheckinLedger` / `updateAccountIntent`。
+    `writeRunPid`（单字段，普通写）/ `updateStamp` / `updateCheckinLedger` /
+    `updateAccountIntent`。
     ⚠️ **传的是「改法」不是「算好的值」**：值只能来自更早的某次读，而 `await` 之后的旧快照
     会盖掉别人刚写的东西（实踩，见[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)）
-  - 四份状态分开存：exe 记忆（长期）、签到 stamp + **今日签到账本**（按天，同一文件）、
-    账号意图（长期，仅面板写）、**路由清单缓存**（长期，仅读全时写）
+  - 五份状态分开存：exe 记忆（长期）、**运行 pid 记忆**（跟着一次启动）、
+    签到 stamp + **今日签到账本**（按天，同一文件）、账号意图（长期，仅面板写）、
+    **路由清单缓存**（长期，仅读全时写）
+  - ⚠️ **运行 pid 记忆**（`readRunPid` / `writeRunPid`）解决的是**跨进程**的归属问题：
+    `CpaProcess.owned` 只活在本进程里，而 DSH 被 `taskkill /F` 杀掉时 CPA 子进程会活下来 ——
+    没有这个记忆，重启后的插件会把**自己的** CPA 认成外部实例并报警。
+    **非法值（0 / 负数 / 非整数）一律不写也不认**：`process.kill(0, 0)` 会打到整个进程组
   - ⚠️ **路由清单缓存**（`readCachedRoutes` / `writeCachedRoutes`）是**唯一会写盘的
     「上次成功清单」**：启动时立刻用它、不必等读 CPA（凭据加载是秒级的）。
     三条约束：**不设硬过期**（过期后又会走回「等读 → 半成品 → `CPA ·`」）、
@@ -125,25 +131,46 @@
   - 改后必测：只有明文能用（bcrypt 哈希必须被挡掉）
 - **`process.ts`** —— CPA 子进程托管。
   - 导出：`CpaProcess`（类）/ `resolveExe` / `probePort` / `waitForPort` / `defaultExeCandidates` / `DEFAULT_PORT`
-  - 类型：`ProcessDeps` / `ChildProcessLike`（两个 `ensure` 的注入 seam，见下）
+  - 类型：`ProcessDeps` / `ChildProcessLike` / `PortState` / `EnsureResult`
   - `CpaProcess` 只关自己启的进程；`resolveExe` 的优先级见架构
   - ⚠️ `isListening`（只读）与 `ensure`（可拉起）**语义不同**，别混用 ——
-    调用方请走 [runtime.ts](runtime.ts) 的两个显式名字
+    调用方请走 [runtime.ts](runtime.ts) 的两个显式名字；`portState` 是第三个只读名字，
+    它比 `isListening` 多回答「端口上的是不是自己人」
+  - ⚠️ **启动输出落到文件，不用 pipe**：从前是 `stdio: 'ignore'`，于是上游自己说的
+    失败原因（代际被拒 / 端口被占）全丢，`ensure()` 只剩一句 `start-timeout`。
+    现在重定向到 `managedStartupLogPath()`，失败时读回尾部交给
+    [startup-log.ts](startup-log.ts) 辨认。**pipe 是错的**：CPA 在文件日志关闭时
+    （默认）把每条请求日志写 stdout，pipe 必须持续排空，排空一停就**阻塞 CPA 主进程**
+    —— 详见[决策记录](../.agents/notes/2026-10-06-startup-output-file-redirect.md)
   - ⚠️ **超时 ≠ 失败**：`startTimeoutSeconds` 只是**一次等待预算**，用尽时子进程
     往往还在跑（实测 CPA 比 DSH 晚起 54 秒，默认预算 30 秒）。所以超时后
     **不丢弃「正在起」的记忆**，下次 `ensure()` 继续等那个 child 而**不重新 spawn**
     —— 等待因此跟着**用户动作**（面板每次请求都经 `requireRunning` → `ensure`）
     变成重试机会，**不需要任何轮询**。反向：child 已退出（`exitCode !== null`）
     必须能重新拉起，对着死进程空等比原 bug 更糟
-  - `ProcessDeps` 的 `probe` / `spawn` / `resolveExe` / `pollIntervalMs` 都**可选**，
-    不传时生产行为逐字不变 —— 存在的理由是超时路径**只能确定性测**
-    （判据在 `tests/process.test.ts`，8 例 170ms 跑完）
+  - ⚠️ **归属只在 `manageLifecycle` 为真时才判「外部占用」**：关掉生命周期 =
+    用户明说「CPA 我自己管」，那时端口上有别人的实例是预期内的，报警只是噪音
+  - `ProcessDeps` 的 `probe` / `spawn` / `resolveExe` / `pollIntervalMs` / `probeTtlMs` /
+    `readStartupLog` / `pidAlive` 都**可选**，不传时生产行为逐字不变 ——
+    存在的理由是这些路径**只能确定性测**（判据在 `tests/process.test.ts`，毫秒级跑完）
   - 改后必测：清空代理变量、带 `-no-browser`、只关 owned、
-    **超时后不重复 spawn / 死进程可重 spawn**
+    **超时后不重复 spawn / 死进程可重 spawn / 失败原因认得对 / 归属反映此刻**
+- **`startup-log.ts`** —— 从子进程输出里认出**启动失败的具体原因**。**纯函数**。
+  - 导出：`classifyStartupIssue` / `expectedConfigVersionInLog` / 类型 `StartupIssue`（在 [contracts/](contracts/README.md)）
+  - ⚠️ **规则顺序即优先级**：`config-version-rejected` 必须排在 `config-load-failed` 之前
+    —— 上游把代际错误包在宽的那条里一起打（`failed to load config: unsupported config-version (expected 8)`），
+    先匹到宽的就只剩「配置加载失败」，而真正可操作的是代际不符
+  - ⚠️ **认不出就返回 `undefined`，不猜**：给一个错的原因比不给更糟 ——
+    用户会照着它去修一个不存在的问题
+  - ⚠️ 辨认靠**匹配上游文案**，上游改措辞即失效；失效只降级成「只知道超时」，不会给错原因
+  - 改后必测：`tests/startup-log.test.ts`
 - **`runtime.ts`** —— 「CPA 在不在跑」的唯一回答者。
   - 导出：`CpaRuntime`（类）/ 类型 `RuntimeDeps` / `RuntimeStatus`
   - `status()` 只读探活、**绝不起进程**（面板 `/status` 与路由注册表的判据用它）；
     `ensure()` 才可能按配置拉起（面板 `/start`、启动流程、读前置用它）
+  - `status()` 另外回答两件面板必须知道的事：`foreign`（端口在监听但**不是自己人**，
+    面板据此把绿点改成琥珀）与 `issue`（上次启动失败的具体原因）。两者都**原样透传**，
+    在这一层被覆盖掉就没有第二次机会
   - ⚠️ 两者共用 `CpaProcess` 的探活记忆 —— **别再自己 `probePort`**，
     否则两条路径会给出相反的答案（状态条说「运行中」、列表报 `cpa-unavailable`）
   - 改后必测：`tests/runtime.test.ts`（含「`status` 一次都不许调 `ensure`」）
