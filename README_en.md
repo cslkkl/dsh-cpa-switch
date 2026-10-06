@@ -93,6 +93,15 @@ plugin_manager action: install_bundle
 target: <absolute path to this directory>
 ```
 
+From this repository's source:
+
+```
+cd <this repository>
+pnpm install
+pnpm build
+dsh plugin --profile web add .
+```
+
 The plugin must be installed under the chosen profile's `node_modules/`. If it does not show up
 or shows as "not running", see the active pitfalls in [AGENTS.md](AGENTS.md).
 

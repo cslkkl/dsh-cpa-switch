@@ -80,6 +80,15 @@ plugin_manager action: install_bundle
 target: <本目录绝对路径>
 ```
 
+从本仓库源码安装：
+
+```
+cd <本仓库目录>
+pnpm install
+pnpm build
+dsh plugin --profile web add .
+```
+
 插件必须装进所选 profile 的 `node_modules/` 下。装完不显示、或显示「未运行」，
 见 [AGENTS.md](AGENTS.md) 的活跃坑。
 
