@@ -8,7 +8,7 @@
  * 3. **Windows 上子进程不随父进程退出** —— 所以清理必须显式 kill。
  */
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { dirname, join } from 'node:path'
@@ -130,14 +130,59 @@ export function probePort(port: number, timeoutMs = 1200): Promise<boolean> {
   })
 }
 
-/** 等待端口就绪。轮询间隔 400ms，与 CPA 的启动耗时匹配。 */
-export async function waitForPort(port: number, timeoutMs = 20000): Promise<boolean> {
+/**
+ * 等待端口就绪。轮询间隔 400ms，与 CPA 的启动耗时匹配。
+ *
+ * `probe` 与 `intervalMs` 可注入：超时路径的判据必须能确定性地跑完
+ * （见 {@link ProcessDeps}）。默认就是 {@link probePort} 与 400ms，
+ * 生产行为不变。
+ */
+export async function waitForPort(
+  port: number,
+  timeoutMs = 20000,
+  probe: (port: number, timeoutMs: number) => Promise<boolean> = probePort,
+  intervalMs = 400,
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    if (await probePort(port)) return true
+    if (await probe(port, 1200)) return true
     if (Date.now() > deadline) return false
-    await new Promise((r) => setTimeout(r, 400))
+    await new Promise((r) => setTimeout(r, intervalMs))
   }
+}
+
+/**
+ * `CpaProcess` 的注入点。
+ *
+ * 两个 seam 都**可选**，不传时生产行为逐字不变（与 {@link Clock} 同一套做法）：
+ * 真探活就是 `probePort`，真起进程就是 `spawn`。存在的理由是
+ * 「启动超时」这条路径**只能靠假时钟与假探活确定性地测** —— 拿真 TCP
+ * 与真子进程测它，要么跑满真实超时窗口、要么依赖本机装没装 CPA。
+ *
+ * ⚠️ `spawn` 的返回值只需满足 `exitCode` / `unref` / `kill` 三个成员 ——
+ * 「子进程已退出」的判据只看 `exitCode`。
+ */
+export interface ProcessDeps {
+  /** 探活实现。默认 `probePort`。 */
+  readonly probe?: ((port: number, timeoutMs: number) => Promise<boolean>) | undefined
+  /** 起进程实现。默认 {@link CpaProcess} 内部的真实 `spawn`。 */
+  readonly spawn?: ((exe: string, options: ProcessOptions) => ChildProcessLike) | undefined
+  /** 解析 exe 路径。默认 {@link resolveExe}。 */
+  readonly resolveExe?: ((configuredPath: string) => string) | undefined
+  /** 等待端口的轮询间隔（毫秒）。默认 400。 */
+  readonly pollIntervalMs?: number | undefined
+}
+
+/**
+ * 子进程的最小形状。
+ *
+ * 不直接用 `ChildProcess`：真实类型带几十个成员，测试里造一个完整的
+ * 得写一大段与判据无关的桩；而这里真正用到的只有三个。
+ */
+export interface ChildProcessLike {
+  readonly exitCode: number | null
+  unref: () => void
+  kill: () => void
 }
 
 /**
@@ -147,7 +192,8 @@ export async function waitForPort(port: number, timeoutMs = 20000): Promise<bool
  * 退出不该顺手关掉别人的服务。
  */
 export class CpaProcess {
-  #child: ChildProcess | undefined
+  readonly #deps: ProcessDeps
+  #child: ChildProcessLike | undefined
   #owned = false
   #starting = false
 
@@ -161,8 +207,17 @@ export class CpaProcess {
    * 记忆的 TTL 很短（1.5 秒）—— 它只用来**折叠同一次点击里的并发**，
    * 不承担「缓存运行状态」的职责。真正要停 CPA 时有显式的
    * {@link invalidateProbe}，见那里的注释。
+   *
+   * ⚠️ **在构造函数里赋值，不能用字段初始化器** —— 字段初始化器跑在
+   * 构造体**之前**，那时 `this.#deps` 还是 `undefined`（实踩：`Cannot read
+   * properties of undefined`）。
    */
-  readonly #probe = new ProbeCache({ probe: probePort })
+  readonly #probe: ProbeCache
+
+  constructor(deps: ProcessDeps = {}) {
+    this.#deps = deps
+    this.#probe = new ProbeCache({ probe: deps.probe ?? probePort })
+  }
 
   /**
    * 端口探活的当前结论。
@@ -190,7 +245,21 @@ export class CpaProcess {
     return this.#owned
   }
 
-  /** 确保 CPA 在跑。 */
+  /**
+   * 确保 CPA 在跑。
+   *
+   * ⚠️ **超时 ≠ 失败**（2026-10-06 实机教训）。`startTimeoutSeconds` 只是一次
+   * **等待预算**，预算用尽时子进程往往**还在跑**，只是比我们的耐心慢 ——
+   * 实测 CPA 比 DSH 晚起 54 秒，而默认预算是 30 秒。
+   *
+   * 所以超时之后**不丢弃「正在起」的事实**：下次调用继续等那个 child，
+   * 而不是重新 spawn 一个。等待因此变成「跟着用户动作来的重试机会」
+   * （面板每次请求都经 `gateway.requireRunning()` → 这里），
+   * **一行轮询都不用写**。
+   *
+   * 反过来，child 若已退出（`exitCode !== null`）就必须能重新拉起 ——
+   * 对着死进程空等比原 bug 更糟。这条由 {@link #startingChild} 判。
+   */
   async ensure(options: ProcessOptions): Promise<EnsureResult> {
     if (await this.#probe.isListening(options.port)) return { running: true, owned: this.#owned }
     // 刚探到端口不通：上面的记忆已经是「false」了，但要留给下面的分支真去起
@@ -198,20 +267,37 @@ export class CpaProcess {
     if (!options.manageLifecycle)
       return { running: false, owned: false, reason: 'lifecycle-disabled' }
 
+    /**
+     * 已经在起的 child：**继续等它**，不重新 spawn。
+     *
+     * 与「别人正在起，我等它」（原 `#starting` 分支）的差别在**超时之后**：
+     * 原来 `finally` 会把 `#starting` 清掉，于是下一个调用方以为没人起、
+     * 重新走 spawn 分支 —— 而它等的是同一个永远不会被自己等到的东西。
+     */
+    const pending = this.#startingChild()
+    if (pending !== undefined) {
+      const ok = await this.#waitFor(options)
+      // 走的是轮询，所以这里的结论要重新记进记忆层
+      this.#probe.remember(ok)
+      return ok
+        ? { running: true, owned: this.#owned }
+        : { running: false, owned: true, reason: 'start-timeout' }
+    }
+
     if (this.#starting) {
-      const ok = await waitForPort(options.port, options.startTimeoutSeconds * 1000)
+      const ok = await this.#waitFor(options)
       return { running: ok, owned: this.#owned }
     }
 
-    const exe = resolveExe(options.exePath)
+    const exe = (this.#deps.resolveExe ?? resolveExe)(options.exePath)
     if (exe === '') return { running: false, owned: false, reason: 'exe-not-found' }
 
     this.#starting = true
     try {
       this.#child = this.#spawnCpa(exe, options)
       this.#owned = true
-      const ok = await waitForPort(options.port, options.startTimeoutSeconds * 1000)
-      // 走的是 waitForPort（轮询），所以这里的结论要重新记进记忆层
+      const ok = await this.#waitFor(options)
+      // 走的是轮询，所以这里的结论要重新记进记忆层
       this.#probe.remember(ok)
       return ok
         ? { running: true, owned: true }
@@ -221,12 +307,48 @@ export class CpaProcess {
     }
   }
 
+  /** 等端口就绪，走注入的探活（默认 `probePort`）。 */
+  async #waitFor(options: ProcessOptions): Promise<boolean> {
+    return await waitForPort(
+      options.port,
+      options.startTimeoutSeconds * 1000,
+      this.#deps.probe ?? probePort,
+      this.#deps.pollIntervalMs ?? 400,
+    )
+  }
+
+  /**
+   * 「有一个本插件拉起的 child 仍在运行」时返回它，否则 `undefined`。
+   *
+   * 两个条件缺一不可：
+   * - `#owned` —— 只有我们启的才归我们管。用户自己跑的 CPA 不在这里，
+   *   它的「起没起」由探活回答，不该被我们记成「正在起」。
+   * - `exitCode === null` —— 进程还活着。已退出的 child 必须被丢弃，
+   *   否则一次崩溃就会让插件永远空等（比原来的 bug 更糟）。
+   *
+   * 顺带清理死掉的 child：探到它退出就地清掉，下次调用自然重新 spawn。
+   */
+  #startingChild(): ChildProcessLike | undefined {
+    const child = this.#child
+    if (child === undefined || !this.#owned) return undefined
+    if (child.exitCode !== null) {
+      // 进程已退出：忘掉它，让调用方重新拉起
+      this.#child = undefined
+      this.#owned = false
+      return undefined
+    }
+    return child
+  }
+
   /**
    * 启动子进程。
    *
    * 清空代理变量：否则子进程请求 `127.0.0.1` 会被系统代理拦成 502。
    */
-  #spawnCpa(exe: string, options: ProcessOptions): ChildProcess {
+  #spawnCpa(exe: string, options: ProcessOptions): ChildProcessLike {
+    const inject = this.#deps.spawn
+    if (inject !== undefined) return inject(exe, options)
+
     const env = { ...process.env }
     for (const key of [
       'HTTP_PROXY',
