@@ -571,3 +571,76 @@ describe('推送行的模态与展示名', () => {
     expect(pushed[0]?.names.some((n) => n.includes('wb/'))).toBe(false)
   })
 })
+
+// ── 别名要在「凭据报的是别名形态」时也能算出来 ──────────────────────────
+//
+// 实机发现（2026-10-06）：`auth-files/models` 返回的**就是别名形态**
+// （`wb/glm-4.6`、`zcode/glm-4.6`），不是裸名。而 `invertByChannel` 原样收键，
+// 于是 `wb/glm-4.6` 与 `zcode/glm-4.6` 成了**两个不同的键** ——
+// 同名关系永远算不出来，`overlaps` 恒为空，**别名不再自动生成**。
+//
+// ⚠️ 这是静默失效：`patchModelAlias` 要求 `overlaps` 非空，空则整个跳过，
+// 配置里只留下历史别名；新出现的重名模型会在所有渠道的号之间轮询
+// （正是 §2.2 花大力气解决的问题），而且**没有任何报错**。
+
+describe('同名的识别要剥掉前缀', () => {
+  let home: string
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-alias-'))
+    process.env.DSH_HOME = home
+    // `patchModelAlias` 是**补写**已有配置（找不到 `oauth:` 段就放弃），
+    // 所以先种一份最小 config.yaml —— 否则测试会因「文件不存在」而假绿。
+    const dir = join(home, 'cpa-panel', 'runtime', 'cpa')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'config.yaml'),
+      'config-version: 8\noauth:\n  auth-dir: "~/.cli-proxy-api"\n',
+      'utf8',
+    )
+  })
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 读回种下的 config.yaml（别名段由被测代码补写）。 */
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
+
+  it('⚠️ 凭据报别名形态时，仍要认出「两个渠道供同一个模型」并写进 config.yaml', async () => {
+    // workbuddy 与 zcode 都供 glm-4.6，且**各自报的是带前缀的形态**
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w1', provider: 'workbuddy' },
+        { name: 'z1', provider: 'zcode' },
+      ],
+      models: { w1: ['wb/glm-4.6'], z1: ['zcode/glm-4.6'] },
+      catalog: ['wb/glm-4.6', 'zcode/glm-4.6'],
+    })
+    const { entry } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    // 别名段必须真的写出来 —— 认不出同名时 `overlaps` 为空，`patchModelAlias` 整个跳过
+    const config = readFileSync(configPath(), 'utf8')
+    expect(config).toContain('wb/glm-4.6')
+    expect(config).toContain('zcode/glm-4.6')
+    expect(config).toContain('name: "glm-4.6"')
+  })
+
+  it('⚠️ 剥前缀只认已知渠道前缀，第三方自带的斜杠 id 不当同名依据', async () => {
+    // `vendor/x` 不是我们的渠道 → 不该被剥成裸名 x，也不该与别的渠道「同名」
+    const cpa = fakeCpa({
+      files: [{ name: 'w1', provider: 'workbuddy' }],
+      models: { w1: ['vendor/gpt-x', 'wb/glm-4.6'] },
+      catalog: ['vendor/gpt-x', 'wb/glm-4.6'],
+    })
+    const { entry } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    // 两个条目都只由一家供给 → 不该生成任何别名段
+    const config = readFileSync(configPath(), 'utf8')
+    expect(config).not.toContain('vendor/')
+    expect(config).not.toContain('model-alias')
+  })
+})

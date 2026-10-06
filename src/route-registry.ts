@@ -31,7 +31,7 @@
 
 import type { CpaGateway } from './gateway.ts'
 import type { CpaRuntime } from './runtime.ts'
-import { ROUTE_PREFIXES, channelLabel, channelOrder } from './channels/registry.ts'
+import { ROUTE_PREFIXES, channelLabel, channelOfPrefix, channelOrder } from './channels/registry.ts'
 import { buildAliasTable, type AliasTable } from './model-alias.ts'
 import { capsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
@@ -222,19 +222,48 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
   return { byChannel, complete }
 }
 
-/** 渠道 → 模型，反过来再翻成 模型 → 渠道。别名表要的是后者。 */
+/**
+ * 渠道 → 模型，反过来再翻成 模型 → 渠道。别名表要的是后者。
+ *
+ * ⚠️ **收键前必须先剥渠道前缀**：实测 `auth-files/models` 返回的是**别名形态**
+ * （`wb/glm-4.6`、`zcode/glm-4.6`），不是裸名。原样收键会让「同一模型的两条别名」
+ * 变成两个不同的键，**同名关系永远算不出来**：
+ *
+ * ```
+ * 'wb/glm-4.6'    → ['workbuddy']     ← 各自成键
+ * 'zcode/glm-4.6' → ['zcode']         ← 于是 overlaps 看不到「两家都供」
+ * 裸名 'glm-4.6' 根本不在键里
+ * ```
+ *
+ * 后果是**静默失效**：`overlaps` 恒为空 → `patchModelAlias` 整个跳过
+ * （它要求 `overlaps` 非空）→ 别名不再自动生成，新出现的重名模型在所有渠道的号
+ * 之间轮询（正是 §2.2 解决的问题），而**没有任何报错**。
+ *
+ * 剥前缀只认**已知渠道前缀**（{@link channelOfPrefix}）—— 第三方自带的
+ * `vendor/xxx` 这类斜杠 id 原样保留，不参与同名判定。
+ */
 function invertByChannel(
   byChannel: Readonly<Record<string, readonly string[]>>,
 ): Record<string, string[]> {
   const out: Record<string, string[]> = {}
   for (const [channel, models] of Object.entries(byChannel)) {
-    for (const model of models) {
-      if (model === '') continue
-      if (out[model] === undefined) out[model] = []
-      out[model].push(channel)
+    for (const raw of models) {
+      if (raw === '') continue
+      const bare = stripChannelPrefix(raw)
+      if (bare === '') continue
+      if (out[bare] === undefined) out[bare] = []
+      out[bare].push(channel)
     }
   }
   return out
+}
+
+/** 剥掉开头的已知渠道前缀（`wb/glm-4.6` → `glm-4.6`）；认不出前缀就原样返回。 */
+function stripChannelPrefix(id: string): string {
+  const slash = id.indexOf('/')
+  if (slash <= 0) return id
+  const known = channelOfPrefix(id.slice(0, slash)) !== undefined
+  return known ? id.slice(slash + 1) : id
 }
 
 /**
