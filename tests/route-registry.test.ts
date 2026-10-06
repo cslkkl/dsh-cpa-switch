@@ -187,6 +187,8 @@ const BASELINE = {
 interface PushRecord {
   readonly ids: readonly string[]
   readonly names: readonly string[]
+  /** 路由级默认档位（`providers.cpa.reasoning`）—— 决定选择器里有没有 `Default` 行。 */
+  readonly reasoning?: unknown
   readonly rows: {
     id?: unknown
     name?: unknown
@@ -194,6 +196,12 @@ interface PushRecord {
     contextWindow?: unknown
     reasoningEfforts?: unknown
   }[]
+}
+
+/** 从条目 config 里取出 `providers.cpa`（模型选择器读的就是它）。 */
+function cpaProfileOf(config: unknown): Record<string, unknown> | undefined {
+  const providers = (config as { providers?: Record<string, unknown> } | null)?.providers
+  return providers?.['cpa'] as Record<string, unknown> | undefined
 }
 
 /** 从条目 config 里取出 `providers.cpa.models`（模型选择器读的就是它）。 */
@@ -239,6 +247,7 @@ function fakeEntry(baseline: unknown): {
       pushed.push({
         ids: rows.map((row) => String(row.id)),
         names: rows.map((row) => String(row.name)),
+        reasoning: cpaProfileOf(next.config)?.['reasoning'],
         rows: rows.map((row) => ({ ...row })),
       })
     },
@@ -1342,6 +1351,44 @@ describe('思考档位声明', () => {
     }
   })
 
+  /**
+   * ⚠️ **这条钉的是「选择器里不再出现 `Default` 行」**，也就是用户实际看到的界面。
+   *
+   * 宿主只在**路由级 `reasoning` 有值**时才给出 `defaultEffort`，而
+   * `dsh-client-ui-model-selection` 恰恰在 `defaultEffort === undefined` 时补一行
+   * `Default`（见 `model-caps.ts` 的 `REASONING_DEFAULT`）。所以「声明了几个档位」
+   * 与「菜单里有几行」是两件事：删 `off` 改不了行数，声明默认才能。
+   */
+  it('⚠️ 路由带上默认档位 —— 否则选择器会多出一行 Default', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => true),
+    )('boot')
+
+    expect(pushed.at(-1)?.reasoning).toBe('high')
+  })
+
+  it('⚠️ 默认档位必须落在声明的档位里（写错值时宿主零报错，只是 Default 又回来）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => true),
+    )('boot')
+
+    const record = pushed.at(-1)
+    expect(record?.reasoning).toBeDefined()
+    for (const row of record?.rows ?? []) {
+      expect(Object.keys((row.reasoningEfforts ?? {}) as object)).toContain(
+        String(record?.reasoning),
+      )
+    }
+  })
+
   it('⚠️ 开关关闭时一个都不带（回到「没有 Effort 行」的原状）', async () => {
     const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
     const { entry, pushed } = fakeEntry(BASELINE)
@@ -1358,6 +1405,22 @@ describe('思考档位声明', () => {
     }
   })
 
+  /**
+   * ⚠️ **关掉开关必须连默认一起撤** —— 留下 `reasoning` 就是个半截状态：
+   * 界面没有 Effort 行，而每个请求仍被钉在 `high` 上，正是这个开关要逃开的东西。
+   */
+  it('⚠️ 开关关闭时默认档位也要撤掉（否则逃生通道漏了一半）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => false),
+    )('boot')
+
+    expect(pushed.at(-1)?.reasoning).toBeUndefined()
+  })
+
   it('不传这个依赖时按关闭处理（不改变既有行为）', async () => {
     const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
     const { entry, pushed } = fakeEntry(BASELINE)
@@ -1368,6 +1431,8 @@ describe('思考档位声明', () => {
     const rows = pushed.at(-1)?.rows ?? []
     expect(rows.length).toBeGreaterThan(0)
     expect(rows.every((row) => row.reasoningEfforts === undefined)).toBe(true)
+    // 不声明档位时也不许声明默认 —— 那会让「没有 Effort 行」与「钉在 high」并存。
+    expect(pushed.at(-1)?.reasoning).toBeUndefined()
   })
 
   it('⚠️ 开关是**现读**的：重推时按当时的值决定（不是启动时焊死）', async () => {
