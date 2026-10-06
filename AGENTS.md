@@ -269,6 +269,19 @@ python check-line-endings.py <本仓根> --target lf
   反向同样要守：child 已退出（`exitCode !== null`）**必须**能重新拉起，
   对着死进程空等比原 bug 更糟。判据 `tests/process.test.ts`（注入 seam，
   8 例 170ms），决策见[决策记录](.agents/notes/2026-10-06-startup-timeout-is-not-failure.md)。
+- **「就绪」是一个统一判据，不是「每个读各自成功」** —— 模型路由的清单由**多份读**
+  拼成（模型目录 `/v1/models` + 逐凭据供给面 `auth-files/models`），它们
+  **分开读、无同步**。每份读**各自**判断成败时，「目录齐了、归属没齐」会
+  **两边都算成功** → 推出去的清单里独供模型落进 `CPA · xxx` 兜底名，
+  而**没有任何判据报错**（2026-10-06 实机症状，与启动竞态同根）。
+  **三条纪律**：① 读收在 `readReadySnapshot` 一处，由 `agreeOnOwnership` 裁决
+  （供给面为空 = 还没读到 → 等；有内容却仍无归属 = 确属无归属 → 是事实，可推）；
+  ② **稳定看内容不看条数** —— 计数相同而集合不同时，陈旧目录会被当成新事实；
+  ③ **暂时 vs 永远必须分开**（404/401/403/410 = 永久 → 跳过该渠道推其余；
+  超时/5xx = 暂时 → 等），否则**一个坏渠道就能把门永久卡死 → 全部模型消失**，
+  比原症状更重。门不通过时**必须**走 `degrade` 回推 `lastGood`，不许孤立地「不推」。
+  判据 `tests/route-registry.test.ts`；决策见
+  [决策记录](.agents/notes/2026-10-06-unified-readiness-gate.md)。
 - **宿主槽位的 error boundary 是锁存的** —— 一次抛出带走整块配置区，用户只能禁用
   再启用插件。所以 `PanelBoundary` 必需，且**必须是类组件**
   （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的 `react`
