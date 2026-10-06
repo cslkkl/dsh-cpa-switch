@@ -19,6 +19,7 @@
 | `ops-write-paths.test.ts`      | **业务层写路径**：12 条写操作逐条断言作废了哪个渠道、7 条读路径断言**不动作废**、签到账本（单号 / 渠道级 / 任务不记 / 不串渠道）、回读说了算（回读仍是禁用就返回禁用；回读失败不谎报；意图记回读值不记请求计划）                                                                                                                                                                                                                                                                                                                                       |
 | `gateway.test.ts`              | **对 CPA 的唯一通道**：连接参数每次现取（改端口/密钥立刻生效）、`port` 与 `fetch` 同源、`requireRunning`/`requireReady` 的判据与顺序、`cacheKeys` 造出的每个键都被 `invalidateChannel` 清掉                                                                                                                                                                                                                                                                                                                                                            |
 | `runtime.test.ts`              | **「看」与「要」不许混**：`status()` 只探活、`ensure()` **一次都不许被调**（只看返回值区分不出来）、`owned` 取自进程本身、配置现读                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `process.test.ts`              | **超时 ≠ 失败**：`CpaProcess` 的启动竞态 —— 超时后第二次调用**不重复 spawn**、端口在后续调用期间起来时**等待可续**、child 已退出**可重新 spawn**（不对死进程空等）、连续超时都如实报 `start-timeout`、已在监听/生命周期关闭时不动手、`stopIfOwned` 后记忆清干净。注入 `probe`/`spawn`/`pollIntervalMs` 后 8 例 170ms 跑完（真等要 13s）                                                                                                                                                                                                                |
 | `read-cache.test.ts`           | 浏览器侧 `ReadCache` 的新鲜 / 陈旧两档、跨 key 隔离与按前缀作废；切渠道的按 key 认领；预取                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `action-outcome.test.ts`       | 写操作返回的**归一**：`summary` 缺失时从 `results` 累加、净增量累加、失败项带名字与原因                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `action-report.test.ts`        | 批量动作的四种反馈分支、失败明细逐个点名、中英标点（`：` vs `: `）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -53,10 +54,15 @@
 **为什么预取的判据是「缓存里有值」**：预取失败是**刻意的静默**（它只是优化），
 所以「调用了没抛」对失败一样成立 —— 只信「没报错」等于没测。
 
-**未覆盖**（有意）：网络、子进程、浏览器组件渲染、CSS 布局 —— 需要真实环境或
+**未覆盖**（有意）：网络、**真实**子进程与 TCP、浏览器组件渲染、CSS 布局 —— 需要真实环境或
 DOM / 渲染引擎；`pnpm check` 的类型检查与 `scripts/verify-artifacts.cjs`
 的产物断言覆盖它们的接口面。卡片等高这类**纯视觉**属性留给真机验收，
 断言它需要渲染引擎。
+
+⚠️ **子进程的「超时之后怎么办」不再属于未覆盖**：那条路径靠
+`ProcessDeps` 的注入 seam（`probe` / `spawn` / `pollIntervalMs`）做成了确定性判据，
+见 `process.test.ts`。仍然不覆盖的是**真的 fork 一个进程**与**真的开 TCP** ——
+那需要本机装没装 CPA，正是当初把它划出去的理由。
 
 ## 怎么跑
 
