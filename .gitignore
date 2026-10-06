@@ -12,6 +12,10 @@ dist/
 # 上游参考源码：本地只读、不进版本库，不属文档网络（见 reference/README.md）
 reference/
 
+# 实测探测的临时目录：脚本与原始响应本地保留、不进版本库。
+# 结论请看 docs/reasoning-effort-audit.md（那才是入册的文档）。
+.probe/
+
 # 编辑器 / 系统噪音
 .DS_Store
 Thumbs.db
