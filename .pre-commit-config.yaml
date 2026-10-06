@@ -13,6 +13,13 @@
 #   - 只跑格式化与 lint（秒级）。typecheck / 构建 / 测试留给 ci.yml。
 #   - 自动修复（--write / --fix）会让文件在工作树里变化，**需要重新 git add**。
 #
+# ⚠️ **下面 prettier 钩子的 `files:` 与 `package.json` 的 `format:check` glob
+# 是两个家。** 它们漂开过一次：门禁那条原本只有 `{ts,json,md,yml,yaml}`，
+# 比这里少 8 种（tsx / js / jsx / mjs / cjs / css / scss / html）—— 于是
+# `.tsx` / `.css` 那批文件的格式**不在门禁里**，而 `pnpm check` 照样打印
+# 「All matched files use Prettier code style!」并以 0 退出，没有任何信号。
+# 改任何一处都要同时改另一处；判据 `tests/format-scope.test.ts` 钉住「门禁 ⊇ 钩子」。
+#
 # 启用（每个 clone 执行一次；pre-commit 本体用 `uv tool install pre-commit` 装到 ~/.local/bin）：
 #   pre-commit install
 # 全量跑一次：
