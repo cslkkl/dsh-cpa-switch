@@ -107,6 +107,35 @@ git push origin v0.3.0
 机制作为子条目，内部重构只留一段概括。判据同 PR 正文 ——
 一段如果只是把 commit 列表复述一遍，就不该存在。
 
+#### 补建历史 Release（老标签没有页面时）
+
+**别用 publish workflow 补** —— 它是**发布**管线，跑不动历史版本：
+
+- 在 `main` 上跑：那步「tag 与 `package.json` 一致」的校验必然失败（`main` 的版本号
+  已经往前走过了）；
+- 在 `--ref v0.1.2` 上跑：会用**那个标签当时的 workflow**（可能根本没有 Release 步骤），
+  且那时的树里也没有 `docs/releases/<tag>.md`。
+
+正确做法是直接用 `gh` 建，**绕过发布管线**（版本早已在 npm 上，本就不该再发）：
+
+```powershell
+# 先把正文写进 docs/releases/<tag>.md 并提交到 main（它是记录，不为本次触发服务）
+gh release create v0.1.2 --title "v0.1.2 — …" --notes-file docs/releases/v0.1.2.md --verify-tag
+```
+
+⚠️ **补建会把「Latest」抢走** —— GitHub 按**创建时间**判定 Latest，新补的老版本会
+盖过真正的最新版（访客看到「最新版是 0.1.2」）。补完必须显式指回去：
+
+```powershell
+gh release edit v0.3.0 --latest
+```
+
+⚠️ `gh release edit <老版本> --latest=false` **不管用**（实测仍占着 Latest）——
+要**正向指定**哪个才是 Latest，而不是否定老的。
+
+⚠️ 补建的正文是**事后据 `git log` 整理**的，不是发布当时写的 ——
+在文件末尾注明这一点，免得后人当成当时的口径。
+
 ### 3.2 手工（备用）
 
 ```powershell
