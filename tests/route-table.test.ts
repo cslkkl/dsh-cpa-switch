@@ -117,15 +117,17 @@ describe('路由表自身', () => {
  * `ok` 这个键在不在**（不关心其它字段）。需要 CPA 的路由由 `ops-write-paths.test.ts`
  * 那套假网关覆盖。
  */
-describe('GET 路由的响应体都带 ok: true', () => {
-  /** 只打这几条：它们只读配置与内存对象，不发网络请求。 */
-  const OFFLINE_GET_PATHS = new Set([
-    '/api/v1/cpa/status',
-    '/api/v1/cpa/plugins',
+describe('平铺 GET 路由的响应体都带 ok: true', () => {
+  /**
+   * handler 在 `route-table.ts` 里自己拼 `json({...})` 的 GET 路由。
+   *
+   * ⚠️ 改这个集合时要同步 route-table.ts —— 判据的价值在于「新增一条平铺路由
+   * 会被自动盯上」，而漏登记它等于判据失效。
+   */
+  const FLAT_GET_PATHS = new Set([
     '/api/v1/cpa/setup',
+    '/api/v1/cpa/status',
     '/api/v1/cpa/account-intent',
-    '/api/v1/cpa/auto-checkin',
-    '/api/v1/cpa/priority',
   ])
 
   async function bodyOf(path: string): Promise<Record<string, unknown>> {
@@ -137,13 +139,28 @@ describe('GET 路由的响应体都带 ok: true', () => {
     return text === '' ? {} : (JSON.parse(text) as Record<string, unknown>)
   }
 
+  /**
+   * 浏览器半边的 `useResource` **用 `result.ok` 判成败**（`transport.ts` 把响应体
+   * 原样当 `ApiResult`）。缺了它 `result.ok` 是 `undefined` ⇒ 走失败分支 ⇒ 那条路由
+   * 的数据在界面上**恒为空**，而宿主这边 HTTP 200、逻辑也对 —— 症状是某一块空白，
+   * 控制台与宿主日志都没有报错。
+   *
+   * ⚠️ **`/status` 曾长期漏掉它**：状态条与挂在它下面的两条告警一起静默消失
+   * （2026-10-06 真机发现；回退到 v0.3.0 依旧不显示，佐证早于 0.4.0）。
+   * 同一批重构还加了 `if (result.ok) readCache.put`，于是它连缓存都写不进去。
+   *
+   * ⚠️ **只管「平铺」路由，不管 ops 委托的路由** —— 后者的 `ok` 归 `ops` 管，
+   * **合法的业务拒绝就该是 `ok:false`**（没配密钥时的 `no-admin-key`），浏览器正是
+   * 靠它显示「读取失败」。判据若一刀切要求 `ok === true`，反而会把正确的业务失败
+   * 判成 bug（CI 上 `/auto-checkin` 就因此报红）。
+   */
   it('前提断言：这批路由确实存在，且都能跑出 JSON', async () => {
-    for (const path of OFFLINE_GET_PATHS) {
+    expect(FLAT_GET_PATHS.size).toBeGreaterThan(0)
+    for (const path of FLAT_GET_PATHS) {
       expect(
         routes.some((r) => r.path === path),
         `${path} 不在路由表里`,
       ).toBe(true)
-      // auto-checkin / priority 需要 query 参数，用默认路径也要能返回 JSON
       const body = await bodyOf(path)
       expect(typeof body, `${path} 的响应体不是对象`).toBe('object')
     }
@@ -151,7 +168,7 @@ describe('GET 路由的响应体都带 ok: true', () => {
 
   it('每条响应体里都有 ok: true（缺它 = 该路由的数据在界面上永远为空）', async () => {
     const missing: string[] = []
-    for (const path of OFFLINE_GET_PATHS) {
+    for (const path of FLAT_GET_PATHS) {
       const body = await bodyOf(path)
       if (body.ok !== true) missing.push(`${path}（ok=${JSON.stringify(body.ok)}）`)
     }
@@ -159,13 +176,26 @@ describe('GET 路由的响应体都带 ok: true', () => {
       missing,
       missing.length === 0
         ? ''
-        : `这些路由的响应体里没有 ok: true：${missing.join(' / ')}\n` +
+        : `这些平铺路由的响应体里没有 ok: true：${missing.join(' / ')}\n` +
             '浏览器 useResource 用 result.ok 判成败，缺它就等于「永远读不到」——\n' +
             '界面表现为这一块空白，且控制台与宿主日志都没有报错。',
     ).toEqual([])
   })
-})
 
+  /**
+   * 反向判据：ops 委托的路由**不要求** `ok:true`。
+   *
+   * 它钉住本判据的**范围** —— 没有它，将来有人看到上面那条会以为「所有 GET 路由
+   * 都必须 ok:true」，于是把 `/auto-checkin` 那种**合法的**业务失败也改成 `ok:true`，
+   * 错误提示就没了。
+   */
+  it('ops 委托的路由不在本判据范围内（它们可以合法返回 ok:false）', async () => {
+    const body = await bodyOf('/api/v1/cpa/auto-checkin')
+    // 形状合法即可（真机上没配密钥时就是 ok:false，那正是它该有的样子）
+    expect(body.ok === false || body.ok === true).toBe(true)
+    expect(FLAT_GET_PATHS.has('/api/v1/cpa/auto-checkin')).toBe(false)
+  })
+})
 describe('README 的路由索引与代码一致', () => {
   /** 从 `src/README.md` 的「内部 HTTP 路由」一节里读那张表。 */
   function readmeRoutes(): Map<string, string[]> {
