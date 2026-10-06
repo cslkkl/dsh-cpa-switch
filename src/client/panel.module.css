@@ -59,6 +59,59 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* ---- Notice ------------------------------------------------------------ */
+
+/* A standing problem worth acting on, sitting directly under the status bar.
+ *
+ * Same shape as `.setup` — the 3px leading edge is the host's own way of saying
+ * "this is a notice, not data" — but here the edge carries the **severity**:
+ * amber for "attention needed, not yet a failure", red for "already broken".
+ * The status bar above answers "what state is the port in"; this block answers
+ * "what that means and what to do".
+ *
+ * Deliberately not a `Toast`: a toast answers "what did my click just do" and
+ * leaves after a few seconds. Both conditions here are **standing facts** —
+ * a foreign instance keeps holding the port, a rejected config generation keeps
+ * being rejected. A banner that vanishes would report neither. */
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-left: 3px solid var(--dsw-alias-label-secondary);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.noticeWarn {
+  border-left-color: var(--dsw-alias-state-warn-primary);
+}
+
+.noticeError {
+  border-left-color: var(--dsw-alias-state-error-primary);
+}
+
+/* The main sentence. 13px/600 matches `.setupTitle`'s tier one step down:
+   a notice under the status bar is a secondary region, not a page heading. */
+.noticeTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.noticeHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.noticeActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
 /* ---- Environment setup block ------------------------------------------- */
 
 /* Read as a distinct region rather than another account card: a 3px leading

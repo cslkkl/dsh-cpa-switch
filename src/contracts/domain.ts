@@ -11,6 +11,26 @@
  * @module dsh-cpa-switch/contracts/domain
  */
 
+/**
+ * CPA **启动失败的具体原因** —— 从子进程输出里认出来的那一类。
+ *
+ * 为什么需要：插件用 `stdio: 'ignore'` 起 CPA，于是 CPA 自己打印的失败原因
+ * **全部丢失**，插件只能报一句 `start-timeout`。用户看到的是「CPA 没起来」，
+ * 而看不到「为什么」——版本被拒与端口被占在界面上长得一模一样。
+ *
+ * 三条各对应上游源码里的一句原文（辨认规则见 `src/startup-log.ts`）：
+ *
+ * | 值 | 上游原文 | 上游位置 |
+ * | --- | --- | --- |
+ * | `config-version-rejected` | `unsupported config-version (expected N)` | `internal/config/config_v8.go` 的硬校验 |
+ * | `config-load-failed` | `failed to load config: …` | `cmd/server/main.go` |
+ * | `port-in-use` | `failed to start HTTP server: …` | `internal/api/server.go` 的 `net.Listen` 失败 |
+ *
+ * ⚠️ 辨认靠**匹配上游文案**，上游改了措辞就认不出来 —— 认不出时如实返回
+ * `undefined`，不猜。
+ */
+export type StartupIssue = 'config-version-rejected' | 'config-load-failed' | 'port-in-use'
+
 /** 该渠道支持哪些操作。面板据此决定渲染哪些按钮 —— 不支持的不显示。 */
 export interface Capabilities {
   readonly credits: boolean

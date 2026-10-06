@@ -13,13 +13,20 @@
   - ⚠️ 配置只在**文件不存在**时写 —— 用户手改过的不能被覆盖
 - **`paths.ts`** —— 插件自己的运行时布局与下载源。
   - 导出：`SOURCES` / `managedCpaDir` / `managedExePath` /
-    `managedConfigPath` / `managedPluginsDir` / 类型 `SourceKey`
+    `managedConfigPath` / `managedPluginsDir` / `managedStartupLogPath` / 类型 `SourceKey`
   - **家目录解析不在这里** —— 认 `DSH_HOME` 的那一层在 [`../paths.ts`](../paths.ts)
   - exe、`config.yaml`、`plugins/` **刻意同层** —— CPA 的 `plugins.dir` 相对工作目录解析
+  - `managedStartupLogPath` 是**一次启动的输出**（每次 spawn 截断），不是历史日志：
+    子进程的 stdout / stderr 重定向到这里，失败时读回尾部认原因。选文件而非 pipe
+    的理由见[决策记录](../../.agents/notes/2026-10-06-startup-output-file-redirect.md)
   - ⚠️ `SOURCES.cpa` **绝不能指向没有 Release 的仓库**（没有兜底）
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
-  - 导出：`renderConfig` / `patchModelAlias` / `writeConfig` / `generateSecretKey` /
-    `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`
+  - 导出：`CONFIG_VERSION` / `readConfigVersion` / `renderConfig` / `patchModelAlias` /
+    `writeConfig` / `generateSecretKey` / `generateApiKey` / `looksLikeBcrypt` /
+    `readSecretKeyFromConfig`
+  - ⚠️ `CONFIG_VERSION` 是上游的**硬校验**值（不是 `8` 就拒绝启动，没有降级兼容）。
+    它与 CPA 的**软件版本号没有映射关系** —— 上游不存在「版本 → 代际」的表，
+    所以代际只能**读对端声明的那个数**，推不出来。`readConfigVersion` 就是那个读法
   - ⚠️ 渠道必须**逐个** `enabled: true`；漏了 dll 全部未激活 → 账号接口一律 404。
     这份清单**由调用方给**（`prepare()` 传磁盘上的 dll，见 `listPluginIds`），
     不再是一份会漂的手写常量
@@ -32,6 +39,11 @@
   - `listPluginIds` 是生成配置那条路的**启用清单来源**（磁盘上有什么就启用什么）
   - 解压用系统 `tar`（Windows 10+ 自带 bsdtar）—— 不引 zip 依赖，插件保持零 npm 依赖
   - `inspect()` 返回的 `ok` 含义是「**环境齐不齐**」，与路由层的 `ok`（查询成功没）不是一件事
+  - ⚠️ `inspect()` 另外判**配置代际**（`configVersionMismatch`）：`expected` 读对端 exe
+    自带的 `config.example.yaml`（它声明的是**这个 exe 要哪一代**），`actual` 读将要加载的
+    `config.yaml`（不存在时是插件将写入的那一代）。**两侧都读不到就判不了 —— 如实不报**
+  - ⚠️ 代际只在**托管副本**上判：用户把 `exePath` 指向别处时，那里既没有我们的
+    `config.yaml` 也没有它的 `config.example.yaml`
 - **`net.ts`** —— 带代理支持的 HTTP（下载用）。
   - 导出：`detectProxy` / `getJson` / `downloadTo` / `describeProxy`
   - 为什么不用内置 `fetch`：它默认忽略 `HTTPS_PROXY`，受限网络下用户会永远装不上

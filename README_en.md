@@ -47,6 +47,9 @@ Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own t
   caught up when the plugin starts.
 - **Process hosting**: CPA starts with DSH (an already-running instance is reused) and stops
   with it.
+- **Says why it will not start**: a port taken by another CPA, a config-generation mismatch,
+  and a bad config each get their own message; a port held by someone else's instance no longer
+  reports "Running".
 - **Models registered automatically**: once the plugin is installed and an account is added,
   the four channels' models appear in DSH's model picker on their own.
 

@@ -8,12 +8,19 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { downloadTo, getJson } from './net.ts'
-import { SOURCES, managedConfigPath, managedExePath, managedPluginsDir } from './paths.ts'
+import { CONFIG_VERSION, readConfigVersion } from './config.ts'
+import {
+  SOURCES,
+  managedConfigPath,
+  managedCpaDir,
+  managedExePath,
+  managedPluginsDir,
+} from './paths.ts'
 import type { SourceKey } from './paths.ts'
 
 /** 一个可下载的 Release 资产。 */
@@ -197,6 +204,52 @@ export interface SetupStatus {
   readonly missing: readonly string[]
   readonly port: number | undefined
   readonly hasSecretKey: boolean
+  /**
+   * **配置代际不符** —— 能判且判出不符时才有这个字段。
+   *
+   * 判据（完全在托管目录里，不需要任何「版本 → 代际」映射）：
+   * - `expected` = 对端 exe 自带的 `config.example.yaml` 里声明的代际
+   *   （它由上游同一次构建产出，等于**这个 exe 要哪一代**）；
+   * - `actual` = 将被加载的那份配置的代际：`config.yaml` 存在就用它，
+   *   不存在就是插件即将写入的 {@link CONFIG_VERSION}。
+   *
+   * 两边不等 ⇒ 这份 CPA 会以 `unsupported config-version` 拒绝启动。
+   * 提前判出来的意义：用户不必先撞上「起不来」，再看不出为什么。
+   *
+   * ⚠️ 只覆盖**托管副本**。用户把 `exePath` 指向别处的 CPA 时，那里既没有
+   * 我们的 `config.yaml` 也没有它的 `config.example.yaml`，判不了 ——
+   * 那时如实不报（`undefined`），不猜。
+   */
+  readonly configVersionMismatch?: { readonly expected: number; readonly actual: number }
+}
+
+/** 读文本文件；读不到（不存在、权限、编码）时返回空串 —— 判据自己会认「读不到」。 */
+function readText(path: string): string {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 判**配置代际**是否对不上。
+ *
+ * 两侧都不需要「软件版本 → 配置代际」映射（那映射在上游**不存在**）：
+ * - `expected` 读对端 exe 自带的 `config.example.yaml` —— 它与 exe 同批产出，
+ *   声明的是**这个 exe 要哪一代**；
+ * - `actual` 读将被加载的 `config.yaml`；它还不存在时，就是插件即将写入的
+ *   {@link CONFIG_VERSION}。
+ *
+ * 任一侧读不到就返回 `undefined`（判不了），**不猜**。
+ */
+function detectConfigVersionMismatch(): { expected: number; actual: number } | undefined {
+  const expected = readConfigVersion(readText(join(managedCpaDir(), 'config.example.yaml')))
+  if (expected === undefined) return undefined
+
+  const existing = readConfigVersion(readText(managedConfigPath()))
+  const actual = existing ?? CONFIG_VERSION
+  return expected === actual ? undefined : { expected, actual }
 }
 
 /** 当前环境探测：装了没、缺什么。 */
@@ -213,6 +266,12 @@ export function inspect(input: { port?: number; secretKey?: string } = {}): Setu
   if (dllCount === 0) missing.push('plugins')
   if (hasExe && !hasConfig) missing.push('config')
 
+  /**
+   * 代际只在**有 exe** 时才判：没有 exe 就没有「对端要哪一代」这件事，
+   * 那份 `config.example.yaml` 也就无从谈起。
+   */
+  const mismatch = hasExe ? detectConfigVersionMismatch() : undefined
+
   return {
     ok: missing.length === 0,
     exePath: hasExe ? exe : '',
@@ -222,5 +281,6 @@ export function inspect(input: { port?: number; secretKey?: string } = {}): Setu
     missing,
     port: input.port,
     hasSecretKey: typeof input.secretKey === 'string' && input.secretKey !== '',
+    ...(mismatch === undefined ? {} : { configVersionMismatch: mismatch }),
   }
 }

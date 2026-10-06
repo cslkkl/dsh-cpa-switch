@@ -83,6 +83,39 @@ export function writeExeMemory(path: string): void {
   writeJson(exeMemoryPath(), { path, at: new Date().toISOString() })
 }
 
+/* ── 最近一次拉起的 CPA 进程 ─────────────────────────────────────────── */
+
+/** 「本插件最后拉起的那个 CPA 进程」的落地文件。 */
+function runPidPath(): string {
+  return join(storagesDir(), 'cpa-panel-run.json')
+}
+
+/**
+ * 记住本插件刚拉起的 CPA 进程号。
+ *
+ * **为什么需要一个跨重启的记忆**：`CpaProcess` 的 `owned` 只活在**本进程**里。
+ * 于是「DSH 被 `taskkill /F` 杀掉、CPA 子进程活了下来、DSH 再启动」这条
+ * 已知路径上，插件会看到「端口在监听但不 owned」，从而把**自己的** CPA
+ * 误判成外部实例并发出警告。
+ *
+ * 记下 pid 之后就能问一句「那个进程还活着吗」：活着 ⇒ 端口上多半就是它，
+ * 不是外人。跨进程判断因此有了依据，而不是靠猜。
+ *
+ * 与 exe 记忆分开存：那个文件的语义是「路径在哪」（单字段、普通写入），
+ * 这个是「哪个进程」（同样是单字段，但生命周期跟着一次启动）。
+ */
+export function writeRunPid(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  writeJson(runPidPath(), { pid, at: new Date().toISOString() })
+}
+
+/** 读回上次记的进程号；读不到或不是一个正整数时返回 0（表示「不知道」）。 */
+export function readRunPid(): number {
+  const parsed = readJson<{ pid?: unknown }>(runPidPath())
+  const pid = parsed?.pid
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0 ? pid : 0
+}
+
 /* ── 路由清单缓存 ─────────────────────────────────────────────────────── */
 
 /**

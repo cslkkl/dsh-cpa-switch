@@ -30,7 +30,8 @@
 
 推 `v*` 标签即由 [publish.yml](../.github/workflows/publish.yml) 自动发布，
 认证走 Trusted Publishing（OIDC），仓库不存 token —— 2026-10-06 以 `v0.3.0`
-首次跑通（带 SLSA provenance 证明）。版本号现查
+首次跑通（带 SLSA provenance 证明）。⚠️ **`package.json` 已是 0.4.0，
+npm latest 是 0.3.0** —— 已 bump 未发布（见 §2.4）。版本号现查
 [package.json](../package.json) 与 [npm](https://www.npmjs.com/package/dsh-cpa-switch)，
 不要抄本文件的数字。
 
@@ -223,6 +224,9 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
 
 ### 2.4 发布与供应链（P1）
 
+- [ ] **发布 0.4.0** —— `package.json` 已是 0.4.0，未发布（`v0.3.0` 已发）。
+      推 `v0.4.0` 标签即自动发布；⚠️ **另需显式建 GitHub Release**（推 tag 不会
+      自动产生它），正文放 `releases/v0.4.0.md` —— 见[发布手册](PUBLISHING.md)。
 - [ ] **`cslkkl/CLIProxyAPI` 的 `release-windows.yml` 没有 pin 上游 tag** ——
       `actions/checkout@v6` 编译的是 fork 当前 HEAD，`inputs.version` 只进产物名与
       ldflags，**不能证明二进制对应上游该 tag 的源码**。

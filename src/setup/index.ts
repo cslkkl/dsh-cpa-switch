@@ -14,6 +14,7 @@ export {
   managedExePath,
   managedConfigPath,
   managedPluginsDir,
+  managedStartupLogPath,
 } from './paths.ts'
 export type { SourceKey } from './paths.ts'
 export {
@@ -30,10 +31,12 @@ export {
 } from './download.ts'
 export type { Asset, Downloaded, SetupStatus, VerifyResult } from './download.ts'
 export {
+  CONFIG_VERSION,
   generateApiKey,
   generateSecretKey,
   looksLikeBcrypt,
   patchModelAlias,
+  readConfigVersion,
   readSecretKeyFromConfig,
   renderConfig,
   writeConfig,

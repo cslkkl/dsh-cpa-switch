@@ -16,6 +16,7 @@
 
 import { json } from './cpa.ts'
 import { CHANNEL_IDS, CHANNELS } from './channels/registry.ts'
+import { CONFIG_VERSION } from './setup/index.ts'
 import type { PluginConfig } from './config.ts'
 import type { AdminKeyStore } from './credentials.ts'
 import type { Operations } from './ops/index.ts'
@@ -105,6 +106,19 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
         return json({
           running: state.running,
           owned: state.owned,
+          /**
+           * 端口被插件以外的实例占用 —— 面板据此在状态条上报出来，
+           * 而不是让用户对着「运行中」却全空的账号列表猜。
+           */
+          foreign: state.foreign,
+          /** 上次启动失败的**具体原因**（配置代际被拒 / 端口被占 / 配置加载失败）。 */
+          issue: state.issue,
+          issueExpectedConfigVersion: state.issueExpectedConfigVersion,
+          /**
+           * 本插件生成配置时声明的代际。界面上要把话说具体（「它要 v8，你是 v7」）
+           * 就得让这一侧知道插件写的是哪一代 —— 别让浏览器自己抄一个常量。
+           */
+          configVersion: CONFIG_VERSION,
           port: config.port,
           hasAdminKey: adminKey.value !== '',
           adminKeySource: adminKey.source,
@@ -300,7 +314,13 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       methods: ['POST'],
       handle: async () => {
         const state = await deps.runtime.ensure()
-        return json({ ok: state.running, owned: state.owned, reason: state.reason })
+        return json({
+          ok: state.running,
+          owned: state.owned,
+          reason: state.reason,
+          /** 起不来的**具体原因**；认不出时为 `undefined`（界面退回只说超时）。 */
+          issue: state.issue,
+        })
       },
     },
   ]

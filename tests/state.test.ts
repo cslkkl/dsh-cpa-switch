@@ -20,6 +20,8 @@ const {
   updateAccountIntent,
   readExeMemory,
   writeExeMemory,
+  readRunPid,
+  writeRunPid,
   localDay,
   writeCachedRoutes,
   readCachedRoutes,
@@ -109,6 +111,66 @@ describe('exe 记忆', () => {
     writeFileSync(join(home, '.dsh', 'storages', 'cpa-panel-exe.json'), '{bad', 'utf8')
     expect(() => readExeMemory()).not.toThrow()
     expect(readExeMemory()).toBe('')
+  })
+})
+
+/**
+ * 运行进程记忆。
+ *
+ * 它存在的唯一理由是一条**已知路径**：DSH 被 `taskkill /F` 杀掉时插件清理跑不到，
+ * CPA 子进程活了下来；DSH 再启动时 `CpaProcess.owned` 是全新的 `false`，
+ * 于是**自己的** CPA 会被「端口被外部实例占用」那条提示误报。
+ *
+ * 所以判据不只是「记得住」，还包括**记得住的必须是能用来判断的东西**：
+ * 非法值一律当「不知道」（返回 0），不许留下一个会让 `pidAlive` 抛出去的数。
+ */
+describe('运行进程记忆', () => {
+  it('写进去能读回来', () => {
+    writeRunPid(4321)
+    expect(readRunPid()).toBe(4321)
+  })
+
+  /** 后一次启动要覆盖前一次 —— 留旧 pid 会把「自己的 CPA」认成别人的。 */
+  it('再写一次覆盖前一次', () => {
+    writeRunPid(1111)
+    writeRunPid(2222)
+    expect(readRunPid()).toBe(2222)
+  })
+
+  it('没有文件时返回 0（＝不知道）', () => {
+    expect(readRunPid()).toBe(0)
+  })
+
+  it('文件损坏时返回 0，不抛', () => {
+    writeFileSync(join(home, '.dsh', 'storages', 'cpa-panel-run.json'), '{bad', 'utf8')
+    expect(() => readRunPid()).not.toThrow()
+    expect(readRunPid()).toBe(0)
+  })
+
+  /**
+   * ⚠️ `0` 与负数**不是**「记过一个进程」：`process.kill(0, 0)` 会打到整个进程组，
+   * 那会给出一个彻底错的答案。所以它们既不写、也不认。
+   */
+  it('⚠️ 非法值一律不写、不认', () => {
+    writeRunPid(0)
+    expect(readRunPid()).toBe(0)
+    writeRunPid(-5)
+    expect(readRunPid()).toBe(0)
+    writeRunPid(1.5)
+    expect(readRunPid()).toBe(0)
+
+    writeFileSync(
+      join(home, '.dsh', 'storages', 'cpa-panel-run.json'),
+      JSON.stringify({ pid: 0 }),
+      'utf8',
+    )
+    expect(readRunPid()).toBe(0)
+    writeFileSync(
+      join(home, '.dsh', 'storages', 'cpa-panel-run.json'),
+      JSON.stringify({ pid: '4321' }),
+      'utf8',
+    )
+    expect(readRunPid()).toBe(0)
   })
 })
 

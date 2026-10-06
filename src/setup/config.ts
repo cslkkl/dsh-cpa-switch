@@ -48,6 +48,46 @@ export interface RenderConfigInput {
 }
 
 /**
+ * 本插件生成配置时声明的**配置代际**。
+ *
+ * ⚠️ 这是上游的**硬校验**值。`internal/config/config_v8.go` 里
+ * `config-version` 只认 `8`，别的值直接
+ * `unsupported config-version (expected 8)` **拒绝启动**（不是降级兼容）：
+ *
+ * ```go
+ * if version := yamlPath(root, "config-version"); version != nil && (version.Tag != "!!int" || version.Value != "8") {
+ *     return nil, fmt.Errorf("unsupported config-version (expected 8)")
+ * }
+ * ```
+ *
+ * ⚠️ **它与 CPA 的软件版本号没有任何映射关系。** 上游**不存在**「版本 → 代际」
+ * 的对应表：`buildinfo.Version`（如 `8.0.13`）由 ldflags 注入、与配置代际各自
+ * 演进；全仓 `config-version` 只以上面这个字面量的形式出现。
+ * 所以**不能**从版本号推出代际 —— 只能读对端自己声明的那个数
+ * （{@link readConfigVersion} 读的是它的 `config.example.yaml`）。
+ *
+ * 改这个常量必须与 {@link renderConfig} 生成的内容**同代**，否则插件会亲手
+ * 造出一份对端拒绝启动的配置。
+ */
+export const CONFIG_VERSION = 8
+
+/**
+ * 从 YAML 文本里取顶层的 `config-version`。
+ *
+ * 只做朴素正则，不引 YAML 解析器（插件保持零依赖）：目标行是**顶格**的
+ * `config-version: <整数>`。注释里提到它（`# … config-version: 8 …`）不会被匹到，
+ * 因为行首是 `#`。
+ *
+ * @returns 代际；读不到或不是整数时 `undefined` —— 不猜。
+ */
+export function readConfigVersion(text: string): number | undefined {
+  const matched = /^config-version:[ \t]*(\d+)[ \t]*$/mu.exec(text)
+  if (matched?.[1] === undefined) return undefined
+  const value = Number(matched[1])
+  return Number.isInteger(value) ? value : undefined
+}
+
+/**
  * 生成一份最小可用的 `config.yaml`。
  *
  * 要点：
@@ -69,7 +109,7 @@ export function renderConfig(input: RenderConfigInput): string {
   const aliasBlock = input.aliases === undefined ? [] : renderAliasYaml(input.aliases).split('\n')
   return [
     '# 由 dsh-cpa-switch 自动生成 —— 手改会在下次「重新准备环境」时被覆盖。',
-    'config-version: 8',
+    `config-version: ${String(CONFIG_VERSION)}`,
     '',
     'server:',
     '  host: "127.0.0.1"',

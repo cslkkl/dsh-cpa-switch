@@ -12,15 +12,20 @@ import { prefetch } from './read-cache.ts'
 import { PluginPanel, progressLine } from './PluginPanel.tsx'
 import type { PluginMeta } from './PluginPanel.tsx'
 import { RoutingSection } from './RoutingSection.tsx'
+import { statusView } from './status-text.ts'
+import type { StatusInput, StatusView } from './status-text.ts'
 import { useResource } from './use-resource.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
-/** 宿主 `GET /status` 的返回。 */
-interface StatusInfo {
-  readonly running?: boolean
-  readonly port?: number
-  readonly hasAdminKey?: boolean
+/**
+ * 宿主 `GET /status` 的返回。
+ *
+ * ⚠️ 认不出的字段一律 `undefined`，界面按「不知道」处理 —— 不编默认值
+ * （与 `SetupInfo` 同一条口径）。
+ */
+interface StatusInfo extends StatusInput {
+  readonly hasAdminKey?: boolean | undefined
 }
 
 /**
@@ -34,6 +39,11 @@ interface SetupInfo {
   readonly missing?: readonly string[]
   readonly running?: boolean
   readonly progress?: unknown
+  /**
+   * 配置代际不符。判据在宿主（读对端 exe 自带的 `config.example.yaml` 与
+   * 将要加载的 `config.yaml`），浏览器这一侧只负责说 —— 见 `status-text.ts`。
+   */
+  readonly configVersionMismatch?: { readonly expected: number; readonly actual: number }
 }
 
 /**
@@ -165,7 +175,25 @@ export function Panel(props: PanelProps): ReactNode {
     await statusResource.reload({ force: true })
   }
 
+  /**
+   * 「重新检测」：状态与环境一起重读。
+   *
+   * 提示块上那个按钮用它。两处都要读 —— 端口占用与代际不符都可能在
+   * 用户去处理（停掉外部实例、换掉 exe）之后变好，只看一处会显示半新半旧的结论。
+   */
+  const recheck = useCallback(async (): Promise<void> => {
+    await Promise.all([
+      statusResource.reload({ force: true }),
+      setupResource.reload({ force: true }),
+    ])
+  }, [statusResource, setupResource])
+
   const status = statusResource.data
+  /**
+   * 状态条该怎么画 —— 圆点语义、主句、要不要挂提示块，全在 `status-text.ts`
+   * 里判（那边不含 JSX，所以 Node 侧测得到）。
+   */
+  const view: StatusView | undefined = status === undefined ? undefined : statusView(t, status)
   const activeMeta = plugins.find((p) => p.id === active)
   const port = String(status?.port)
   /** 环境准备进度那一行（拿不到就为空串，退回只显示通用文案）。 */
@@ -173,6 +201,8 @@ export function Panel(props: PanelProps): ReactNode {
   const missing = Array.isArray(setupResource.data?.missing)
     ? (setupResource.data?.missing ?? [])
     : []
+  /** 配置代际不符（装**之前**就能判出来的那个，见宿主 `inspect()`）。 */
+  const mismatch = setupResource.data?.configVersionMismatch
   /** 还没查到时 `undefined`：那块引导区不渲染，不打扰已经装好的用户。 */
   const setupReady = setupResource.data !== undefined
 
@@ -190,13 +220,15 @@ export function Panel(props: PanelProps): ReactNode {
 
   return (
     <div className={css.wrap}>
-      {status !== undefined && (
+      {status !== undefined && view !== undefined && (
         <div className={css.status}>
-          {/* 官方状态点：done=绿、error=红，语义比自绘圆点更准 */}
-          <StateDot state={status.running === true ? 'done' : 'error'} />
-          <span className={css.statusText}>
-            {(status.running === true ? t('running') : t('stopped')) + ' · 127.0.0.1:' + port}
-          </span>
+          {/*
+           * 圆点语义由 `status-text.ts` 判：正常绿、端口被外部实例占用是**琥珀**
+           * （「需注意」而不是「坏了」—— 确实有东西在监听，只是不是我们的）、
+           * 起不来才是红。三档都在官方 `StateDot` 的取值里，不自绘。
+           */}
+          <StateDot state={view.dot} />
+          <span className={css.statusText}>{view.text}</span>
           {status.running !== true && (
             <Button variant="outline" size="sm" onClick={() => void start()}>
               {t('start')}
@@ -225,15 +257,48 @@ export function Panel(props: PanelProps): ReactNode {
       )}
 
       {/*
+       * 提示块：状态条说「是什么状态」，这里说「那意味着什么、能做什么」。
+       *
+       * 为什么是**常驻块**而不是 `Toast`：端口被外部实例占用、配置代际被拒，
+       * 两者都是**持续成立的事实**，不是「用户刚点了一下」的结果。
+       * Toast 三秒就消失，等于没报。
+       */}
+      {view?.notice !== undefined && (
+        <div
+          className={
+            css.notice + ' ' + (view.notice.tone === 'warning' ? css.noticeWarn : css.noticeError)
+          }
+        >
+          <div className={css.noticeTitle}>{view.notice.text}</div>
+          {view.notice.hint !== undefined && (
+            <div className={css.noticeHint}>{view.notice.hint}</div>
+          )}
+          {view.notice.action === 'recheck' && (
+            <div className={css.noticeActions}>
+              <Button variant="outline" size="sm" onClick={() => void recheck()}>
+                {t('setupRefresh')}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/*
        * 环境准备引导。
        *
-       * 只在**托管目录缺东西**时出现 —— 用户已经自己装好 CPA 的话这块完全不渲染，
-       * 不打扰。
+       * 出现条件有两个，各自的理由不同：
+       * - **托管目录缺东西**（`ok !== true`）—— 用户还没装，需要引导；
+       * - **配置代际不符** —— 东西齐了，但这份 CPA 会拒绝启动。
+       *   它必须在**装/起之前**说出来，用户才不必先撞上「起不来」再看不出为什么。
        */}
-      {setupReady && setupResource.data?.ok !== true && (
+      {setupReady && (setupResource.data?.ok !== true || mismatch !== undefined) && (
         <div className={css.setup}>
           <div className={css.setupTitle}>{t('setupTitle')}</div>
-          <div className={css.hint}>{t('setupIntro')}</div>
+          {/*
+           * 介绍段只在**真的缺东西**时出现：它讲的是「本插件不含 CPA 本体」，
+           * 而代际不符时本体早就在了 —— 照旧显示会答非所问。
+           */}
+          {missing.length > 0 && <div className={css.hint}>{t('setupIntro')}</div>}
 
           {missing.length > 0 && (
             <div className={css.hint}>
@@ -252,6 +317,15 @@ export function Panel(props: PanelProps): ReactNode {
                         : t('setupConfig'),
                   )
                   .join(t('listSeparator')),
+              })}
+            </div>
+          )}
+
+          {mismatch !== undefined && (
+            <div className={css.error}>
+              {t('setupVersionMismatch', {
+                expected: String(mismatch.expected),
+                actual: String(mismatch.actual),
               })}
             </div>
           )}
