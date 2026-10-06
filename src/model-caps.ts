@@ -78,14 +78,29 @@
  * - **二档（第三方社区验证）**：Qoder 的 `dmodel`/`dfmodel`（第三方仓库标注）。
  *
  * ⚠️ **它比窗口更需要保守**：窗口写大只是压缩晚点，图像写错是**会话卡死**
- * （见 {@link ModelCaps.supportsImages}）。所以第三档之外还砍掉了三类：
+ * （见 {@link ModelCaps.supportsImages}）。所以第三档之外还砍掉了两类：
  *
  * - 官方**明说纯文本**的（Qoder `gmodel`/`gm51model`/`mmodel`、WorkBuddy `glm-4.6` 等）
  * - **有矛盾信息**的（WorkBuddy `hunyuan-2.0-thinking` —— 官方给的是混元 2.0，
  *   未单独确认 thinking 变体；ZCode `glm-4.5-air` —— 维护者明确「未知，暂不标记」）
- * - 维护者标的「⚠️ 保留意见」（Qoder `auto`）
  *
- * Trae 的 11 条平台模型**整条不填**（渠道侧证据不足），走宿主兜底。
+ * ## 「不确定」与「有反证」是**两回事**（维护者 2026-10-06 定）
+ *
+ * 维护者口径：「不确定的填 1M、图片也标 ✅，接受代价」。
+ * ⚠️ **但这条只适用于「不确定」，不适用于「已知不支持」** —— 两者代价不同：
+ *
+ * | | 处理 | 理由 |
+ * | --- | --- | --- |
+ * | **真·不确定**（查不到出处） | 填 1M / 标 ✅ | 代价可接受，用户基本不用老旧模型 |
+ * | **有明确反证**（官方说纯文本） | **保持不标** | 标了就是拿**已知错误**换风险，而图像代价**不可逆** |
+ *
+ * 前者是**猜**，后者是**推翻事实**。混为一谈会让「不确定也标」这条口径
+ * 悄悄变成「标错了也没关系」，而图像标错的后果是会话卡死。
+ * 落到表上：`qoder.auto`（智能路由，本来就说不准）标了 ✅；
+ * `qoder.gmodel`/`gm51model`/`mmodel` 有官方纯文本出处，**保持不标**。
+ *
+ * Trae 的 11 条裸名**整条不填**（渠道侧证据不足），走宿主兜底。
+ * 渠道侧实际 id 清单见 `channels/README.md` 的事实源一节。
  *
  * @module dsh-cpa-switch/model-caps
  */
@@ -193,6 +208,25 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
   /**
    * ⚠️ **第三方档，未官方确认**：14 个别名与窗口来自第三方 Qoder CN Proxy
    * 仓库的发布说明。注释里不重复清单（会漂），逐条看下面的表体。
+   *
+   * ## 归属已另有一份**渠道侧**核对（2026-10-06）
+   *
+   * 用渠道插件自己的 `/models/groups` 返回逐个对过 display name ——
+   * **10/14 与第三方总结一致**，4 条不一致（`dfmodel` 插件报 `DeepSeek-Flash`、
+   * `kmodel` 报 **`Kimi-K2.8-Preview`** 而非第三方说的 K2.7-Code、
+   * `dmodel`/`mmodel` 只是连字符差异）。
+   * 本表**不含模型名**（只存能力），所以那处差异不影响这里；
+   * 记下来是为了下次别再照抄第三方那份过期的映射。
+   *
+   * ## 窗口值：插件源码是 180000，本表按口径填 1M
+   *
+   * 渠道插件（`reference/cpa-multi-plugins/plugins/qoder/models.go`）的
+   * **动态路径**取上游 `max_input_tokens`、缺省回落 **180000**；
+   * **静态 fallback** 里 `qmodel_38max`/`qfmodel`/`kmodel`/`kmodel_latest` 都写 **180000**。
+   *
+   * ⚠️ 也就是说 1M **不是「查不到」——是「有一个已知值 180000，我们选择填 1M」**。
+   * 这是维护者口径（2026-10-06：「不确定的填 1M，接受代价」）的**知情应用**，
+   * 不是笔误。窗口写大的代价只是压缩晚点。
    */
   qoder: {
     qmodel_38max: { contextWindow: 1_000_000, supportsImages: true },
@@ -202,16 +236,26 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     q37fmodel: { contextWindow: 1_000_000, supportsImages: true },
     dmodel: { contextWindow: 1_000_000, supportsImages: true },
     dfmodel: { contextWindow: 1_000_000, supportsImages: true },
-    // 智谱官方：GLM-5.3 仅文本 → 不标
+    // 智谱官方：GLM-5.3 仅文本 → 保持不标（**有反证**，不是「不确定」）
     gmodel: { contextWindow: 1_000_000 },
     gfmodel: { contextWindow: 1_000_000, supportsImages: true },
-    // GLM-5.2 纯文本 → 不标
+    // GLM-5.2 纯文本 → 保持不标（**有反证**）
     gm51model: { contextWindow: 1_000_000 },
-    kmodel: { contextWindow: 256_000, supportsImages: true },
-    // M2.7 不支持图片 → 不标
-    mmodel: { contextWindow: 204_800 },
-    // ⚠️ 维护者标的是「⚠️」（官方文档有，但保留意见）→ 按「不确定不标」处理
-    auto: { contextWindow: 180_000 },
+    // ⚠️ 窗口：插件源码 wbModels() 写 180000、动态路径取上游 max_input_tokens
+    //    （缺省回落 180000）。按维护者口径「不确定填 1M」——**这是知情取舍**，
+    //    不是查不到：真实值逐账号不同，我们拿不到。图片标 ✅（Kimi K2.x 系列）。
+    kmodel: { contextWindow: 1_000_000, supportsImages: true },
+    // M2.7 官方不支持图片 → 保持不标（**有反证**）。
+    // 窗口：同理按口径填 1M（原有出处是 204800）。
+    mmodel: { contextWindow: 1_000_000 },
+    /**
+     * 智能路由：**真正的不确定**（它本身不是模型，是路由器）——
+     * 按维护者口径填 1M + 标 ✅。
+     *
+     * 窗口另有出处：插件源码 `wbModels()` 给 `auto` 的是 200000。
+     * 两者不同是有意的（口径优先），不是笔误。
+     */
+    auto: { contextWindow: 1_000_000, supportsImages: true },
     // 无来源，按口径填 1M（见头注）。
     kmodel_latest: { contextWindow: 1_000_000, supportsImages: true },
   },
