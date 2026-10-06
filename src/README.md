@@ -197,7 +197,12 @@
 - **`model-caps.ts`** —— 模型能力（上下文窗口 + 图像输入）校准表。
   - 导出：`capsOf` / `calibratedChannels` / `capSources` / 类型 `ModelCaps` / `CapSources`
   - ⚠️ **262144 是宿主 `dsh-llm-pi-ai` 的兜底值，不是模型真实能力**；
-    CPA 的 `/v1/models` 不报容量，渠道插件的能力字段只存在于 dll 内部
+    CPA 的 `/v1/models` 实测只给 `id` / `object` / `owned_by`
+  - ⚠️ **但「不报容量」的原因不是 CPA 不支持透出** —— 上游 `openai` handler 会在
+    registry 里该模型 `ContextLength > 0` 时输出 `context_length`，
+    插件总线（`sdk/pluginapi/types.go`）也带这些字段；**是渠道插件没填值**。
+    所以人工表是在**等渠道插件**，不是等 CPA 加功能：
+    [决策记录](../.agents/notes/2026-10-06-why-manual-table-remains.md)
   - 校准值按**渠道**存 —— 同一模型名在不同渠道上限可能不同；查不到就留兜底
   - **出处分三档**（官方 / 第三方 / 无来源），第三方档的值**未官方确认**：
     分档由 `capSources()` 现查，理由见[决策记录](../.agents/notes/2026-10-06-model-caps-source-tiers.md)
