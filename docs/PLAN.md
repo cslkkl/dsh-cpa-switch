@@ -286,6 +286,11 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   `route-registry` 的别名表构造因此移到读目录之后：
   [决策记录](../.agents/notes/2026-10-06-alias-identity-vs-generation.md)、
   判据 [tests/route-registry.test.ts](../tests/route-registry.test.ts)。
+- **算同名前剥渠道前缀**（`route-registry.ts` 的 `invertByChannel`）—— 先补判据证明
+  「凭据报别名形态时算不出同名」（改动前是红的），再让收键前剥掉已知渠道前缀。
+  实测 `overlaps` 从 **0 → 12**，整条别名机制原本处于静默失效状态：
+  [决策记录](../.agents/notes/2026-10-06-strip-prefix-before-overlap.md)、
+  判据 [tests/route-registry.test.ts](../tests/route-registry.test.ts)。
 - **图像能力与模型归属**（`model-caps.ts` / `channels/README.md`）—— 先把
   「只标确认支持的」与「归属不看 `owned_by`」写成判据与手册规范，再补数据：
   [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)、
