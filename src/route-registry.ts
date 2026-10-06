@@ -473,7 +473,19 @@ function buildCpaRouteProfile(
 
 /**
  * 等目录稳定：CPA 启动后凭据**分批加载**，`/v1/models` 从空慢慢变多 ——
- * 立刻读会拿到残缺目录。连续两次计数一致才认为稳定；到上限仍为空视为无可用模型。
+ * 立刻读会拿到残缺目录。连续两次**内容**一致才认为稳定；到上限仍为空视为无可用模型。
+ *
+ * ## 为什么看内容而不是条数（2026-10-06，第 2 层的根）
+ *
+ * 旧判据是「连续两次**计数**一致」，而计数相等**不等于**目录没变：
+ *
+ * - CPA 换了凭据 / 刚加完号 → 目录**内容**变了，但**条数恰好没变** ⇒ 被当成「稳定」；
+ * - 于是一份**陈旧**目录被当作新事实推出去，与渠道供给面对不上 ——
+ *   与 `CPA · xxx` **同源**（两份读不一致），只是方向相反。
+ *
+ * 判据升级为「**排序后的 id 集合**连续两次相同」：条数相同而集合不同时继续等。
+ * 代价是稳定判定**最多**多等一轮（250ms 起），换来的是「稳定」这个词
+ * 真正等于「不再变了」。
  *
  * 读取间隔**指数退避**：冷启动从 250ms 起，逐轮翻倍到 4s 封顶 —— 既不拖慢
  * 已稳定的读取，也不放大冷启动的轮询量。**不许退回固定间隔**：固定 4s 意味着
@@ -487,16 +499,23 @@ export async function readStableCatalog(
   const apiKey = await deps.resolveApiKey()
   const bearer = apiKey !== '' ? apiKey : deps.adminKey()
   const deadline = clock.now() + 120000
-  let previous = -1
+  let previous = ''
   let delayMs = 250
   while (clock.now() < deadline) {
     const fetched = (await deps.gateway.fetch('/v1/models', {
       headers: { authorization: `Bearer ${bearer}` },
       timeoutMs: 15000,
     })) as { data?: unknown[] }
-    const count = (fetched.data ?? []).length
-    if (count > 0 && count === previous) return fetched
-    previous = count
+    const ids = catalogIds(fetched)
+    /**
+     * 空目录不算稳定（继续等凭据加载完）；非空则比较**内容指纹**。
+     *
+     * 指纹用「排序后拼接」而不是 `JSON.stringify(原序)` —— 上游返回顺序
+     * 未必稳定，用原序会把「只是重排」误判成「还在变」，白等满预算。
+     */
+    const fingerprint = ids.length > 0 ? [...ids].sort().join('\n') : ''
+    if (fingerprint !== '' && fingerprint === previous) return fetched
+    previous = fingerprint
     await clock.sleep(delayMs)
     delayMs = Math.min(delayMs * 2, 4000)
   }

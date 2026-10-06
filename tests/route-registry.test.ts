@@ -127,6 +127,46 @@ describe('readStableCatalog', () => {
       250, 500, 1000, 2000, 4000, 4000, 4000, 4000,
     ])
   })
+
+  /**
+   * ⚠️ **稳定性看内容，不看条数**（2026-10-06，第 2 层的根）。
+   *
+   * 旧判据是「连续两次**计数**一致」—— 但一份**陈旧但条数相同**的目录照样通过：
+   * CPA 换了凭据 / 刚加完号时，目录的**内容**变了而**条数恰好没变**，
+   * 于是「稳定」成立、旧目录被当成新事实推上去。
+   *
+   * 后果与 `CPA · xxx` 同源（两份读对不上）：渠道供给面已经有新凭据的模型，
+   * 而目录还是旧的 → 归属算得出来、目录对不上 → 别名段可能写进
+   * CPA 里当前不存在的模型，或清单里的 id 认不出归属。
+   *
+   * 判据形状：**同一份条数、内容的集合在变**时，必须继续等到内容也稳定。
+   * 这条在旧实现下**必红**（计数相等即返回）。
+   */
+  it('⚠️ 条数相同但内容在变时不算稳定（陈旧目录不许当新事实）', async () => {
+    // 每轮都是 3 条，但**换了一个 id**：m0→x0→y0 —— 内容一直在变
+    const rounds: string[][] = [
+      ['m0', 'm1', 'm2'],
+      ['x0', 'm1', 'm2'],
+      ['y0', 'm1', 'm2'],
+      ['z0', 'm1', 'm2'], // 第 3、4 轮同内容 → 到这里才算稳定
+    ]
+    let i = 0
+    const { deps, clock } = withClock(() => 0)
+    ;(deps.gateway as unknown as { fetch: () => Promise<unknown> }).fetch = async () => {
+      const ids = rounds[Math.min(i, rounds.length - 1)] ?? []
+      i += 1
+      return { data: ids.map((id) => ({ id })) }
+    }
+
+    const result = (await readStableCatalog(deps)) as { data?: unknown[] }
+    const ids = (result.data ?? []).map((m) => (m as { id: string }).id)
+
+    // 必须等到**内容**连续两轮一致 —— 拿到的是最后那份，不是第一份
+    expect(ids).toContain('z0')
+    // 且确实读了三轮以上（计数判据会在第 2 轮就返回，拿到 x0）
+    expect(i).toBeGreaterThanOrEqual(4)
+    expect(clock.now()).toBeGreaterThan(0)
+  })
 })
 
 // ── 重载空窗 ──────────────────────────────────────────────────────────────
