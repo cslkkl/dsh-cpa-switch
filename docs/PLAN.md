@@ -221,7 +221,10 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
 - [ ] **`route-registry.ts` 的两次 map + 两次 filter**：第一组是历史遗留的重复过滤，
       等价于只做一次，可清理（无功能影响）。
 
-### 2.4 发布与供应链（P1）
+### 2.4 供应链（P1）
+
+> 发版本身**不入待办**：推 `v*` 标签即由 [publish.yml](../.github/workflows/publish.yml)
+> 自动发布（OIDC），流程见[发布手册](PUBLISHING.md)。这里只放**发布管线的完整性缺口**。
 
 - [ ] **`cslkkl/CLIProxyAPI` 的 `release-windows.yml` 没有 pin 上游 tag** ——
       `actions/checkout@v6` 编译的是 fork 当前 HEAD，`inputs.version` 只进产物名与

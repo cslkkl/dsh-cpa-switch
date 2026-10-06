@@ -220,7 +220,7 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 
 - **`link:` 到 profile 外的插件，仓库必须自己装好 peer deps**（仓库 `pnpm install` +
   lockfile 的 `autoInstallPeers: true` 会做到）—— 漏了报 `ERR_MODULE_NOT_FOUND`、
-  插件显示「未运行」。机制与判据见[发布手册](docs/PUBLISHING.md) §5。
+  插件显示「未运行」。装法与判据见[发布手册](docs/PUBLISHING.md)。
 - **停 CPA 不能依赖插件 shutdown 清理调度器** —— 会 SIGSEGV；
   走 shutdown 端点 → Ctrl-C → `taskkill /F`。
 - **被限流的号 CPA 仍报 `status: active`**（code 6004）：面板「启用」≠「现在能用」。
@@ -292,11 +292,11 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
   而 npm 那半**一切正常**，发布日志里看不出少了什么（v0.1.2 就这么漏掉了）。
   ⚠️ 建 Release 要 `permissions: contents: write` —— 只读时 npm 仍会成功，
   挂在最后的 `gh release create` 才 403，症状与「没写这一步」一模一样。
-  正文按约定放 `docs/releases/<tag>.md`，流程见[发布手册](docs/PUBLISHING.md) §3.1。
+  正文按约定放 `docs/releases/<tag>.md`，流程见[发布手册](docs/PUBLISHING.md)。
 - **`npm view` 查不到刚发布的版本不等于发布失败** —— npm 侧有传播延迟，
   发布成功后几分钟内它可能仍报旧版本、甚至对新版本报 `E404`。判据是发布日志里的
   `+ dsh-cpa-switch@<版本>`；要权威结果直查 registry，别据此重发（版本号不可撤销）。
-  见[发布手册](docs/PUBLISHING.md) §3.3。
+  复核命令见[发布手册](docs/PUBLISHING.md)。
 - **PR 的正文与评论：链接写绝对 URL、ref 用 `main`、文本走文件** —— 相对路径会被 GitHub
   解析到 `.../compare/<path>` 这个空视图；写功能分支名则更糟：分支合并后会被删，
   链接**永久 404**；正文**内联**进命令行会被 PowerShell 吃掉反引号（**仓库内的文档**照旧用
