@@ -6,11 +6,17 @@
 
 ## 文件
 
-- **`domain.ts`** —— 领域形状：渠道能力、额度、签到、账号、批量动作结果。
-  - 导出：`Capabilities` / `CreditPackage` / `CreditEntry` / `CheckinEntry` /
+- **`domain.ts`** —— 领域形状：渠道能力、额度单位、额度、签到、账号、批量动作结果。
+  - 导出：`Capabilities` / `CreditUnit` / `CreditPackage` / `CreditEntry` / `CheckinEntry` /
     `NormalizedAccount` / `ActionFailure` / `ActionOutcome`
+  - ⚠️ `CreditUnit`（`'credits' | 'tokens'`）**跨两半**：宿主从
+    [channels/spec.ts](../channels/spec.ts) 的 `ChannelSpec.unit` 读出来，
+    经 `/plugins` 与 `/accounts` 两个响应体送到浏览器。原先这个联合类型
+    在两半各写了一遍（客户端那一侧写了四处），加第三个单位时不会一起变、
+    漏掉的地方**没有报错** —— 归到这里之后只有一处
   - 生产方：`src/channels/normalize.ts`（`normalizeAccounts`）、`src/action-outcome.ts`（`normalizeActionOutcome`）
-  - 消费方：`src/client/AccountCard.tsx`、`src/client/PluginPanel.tsx`、`src/client/action-text.ts`
+  - 消费方：`src/client/AccountCard.tsx`、`src/client/PluginPanel.tsx`、`src/client/action-text.ts`、
+    `src/client/credit-text.ts`
   - 改后必测：`pnpm check`（两半各一次 typecheck）+ `tests/channels.test.ts`
     - `tests/action-outcome.test.ts`
 

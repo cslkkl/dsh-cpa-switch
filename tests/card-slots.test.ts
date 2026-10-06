@@ -59,9 +59,15 @@ describe('槽位 2 · tagRow —— 只放状态标签', () => {
     expect(tagRow).not.toContain('plan')
   })
 
-  it('套餐名在说明行（facts）里', () => {
-    const facts = card.slice(card.indexOf('const facts'), card.indexOf('css.tagRow'))
-    expect(facts).toContain('planText')
+  it('说明行只渲染装配好的整串（拼装规则不在卡片里）', () => {
+    const facts = card.slice(card.indexOf('css.facts'), card.indexOf('css.actions'))
+    expect(facts).toContain('view.factsText')
+    // ⚠️ 包数 / 档位 / 「余量未知」的拼装**只有一处**：`credit-text.ts`
+    // （Node 侧测得到，判据 `tests/credit-text.test.ts`）。卡片里再出现
+    // `planText` 或 `packages.length` 就是第二份实现 —— 2026-10-06 的
+    // Trae 说明行正是在「住在 JSX 里、没有判据」的状态下漂的。
+    expect(facts).not.toContain('planText')
+    expect(facts).not.toContain('packages.length')
   })
 
   it('「已禁用」用 neutral（灰底灰字），不是 danger 红 —— 红绿并排会打架', () => {
@@ -92,19 +98,19 @@ describe('槽位 3 · numbers —— 永远两格', () => {
     expect(numbers).not.toMatch(/\{meter\.hasUsed &&/)
   })
 
-  it('上游没给那个数时走 `amountWithUnit(null, …)` → 显示 `—` 且不带单位', () => {
+  it('两格渲染的就是装配好的串 —— `—` 的判定在 `credit-text.ts`，卡片只取结果', () => {
     const numbers = card.slice(card.indexOf('css.numbers'), card.indexOf('css.meterSlot'))
-    // 占位符规则**只有一处实现**（`amountWithUnit`），所以断言「缺数时传 null」，
-    // 而不是断言字面量 `'—'` —— 后者会在规则搬家时变成假红
-    expect(numbers).toContain('amountWithUnit')
-    expect(numbers).toMatch(/credits === null \|\| !meter\.hasUsed \? null/)
+    expect(numbers).toContain('view.remainText')
+    expect(numbers).toContain('view.usedText')
+    // 上游没给那个数 → `—`（且不带单位）的规则只有一处实现，卡片里不许重写
+    expect(numbers).not.toContain('amountWithUnit')
   })
 
-  it('⚠️ 单位跟着每个额度数字走（单位文案由 props 传入，卡片不做映射）', () => {
+  it('⚠️ 卡片不做单位映射（判定唯一处在 credit-text.ts）', () => {
     const numbers = card.slice(card.indexOf('css.numbers'), card.indexOf('css.meterSlot'))
-    expect(numbers.match(/amountWithUnit\(/g)?.length).toBe(2)
-    // 卡片不认得 'credits' | 'tokens' —— 只收已翻好的文案
-    expect(numbers).not.toMatch(/'tokens'|'credits'/)
+    expect(numbers).not.toMatch(/===\s*'tokens'/)
+    // 卡片收的是 `CreditUnit`（原样透传），不认得任何具体的单位名
+    expect(numbers).not.toMatch(/'credits'/)
   })
 
   it('两格等分（`1fr 1fr`），中线固定', () => {
@@ -216,11 +222,13 @@ describe('顶部汇总：三格，单位并入额度池', () => {
     expect(summary.match(/amountParts\(/g)?.length).toBe(3)
   })
 
-  it('单位文案只翻一次（`unitText`），三格共用 —— 避免两处各写一份映射', () => {
+  it('⚠️ 面板不做单位判定：走 `unitTextOf`，三格共用同一个 `unitText`', () => {
     // 只看**代码**（剥掉注释），否则我自己在注释里举的例子会被算进去（实踩）
     const code = panel.replace(/\/\*[\s\S]*?\*\//g, '')
-    const unitMaps = code.match(/meta\.unit === 'tokens'\s*\?/g) ?? []
-    expect(unitMaps.length).toBe(1)
+    // 单位判定**只有一处**（`credit-text.ts`），且由 `credit-text.test.ts` 的
+    // 「全仓只有它判 `=== 'tokens'`」钉住 —— 面板这里再写一遍就又要分家了
+    expect(code).not.toMatch(/===\s*'tokens'/)
+    expect(code).toContain('unitTextOf')
     // 三格 + 卡片都消费同一个 unitText
     expect(code.match(/unitText/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
   })

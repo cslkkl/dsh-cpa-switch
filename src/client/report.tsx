@@ -132,13 +132,13 @@ export { actionText, MAX_FAILURES_SHOWN } from './action-text.ts'
 export type { ActionText } from './action-text.ts'
 
 import { actionText as textOf } from './action-text.ts'
-import type { ActionOutcome } from '../contracts/domain.ts'
+import type { ActionOutcome, CreditUnit } from '../contracts/domain.ts'
 
 /** 把批量动作的归一结果变成一条提示（文案 + 图标 + 停留时长）。 */
 export function actionReport(
   t: Translate,
   outcome: ActionOutcome | undefined,
-  unit: 'credits' | 'tokens',
+  unit: CreditUnit,
 ): Report {
   const { text, ok, holdMs } = textOf(t, outcome, unit)
   return {

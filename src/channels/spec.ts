@@ -10,7 +10,13 @@
  * @module dsh-cpa-switch/channels/spec
  */
 
-import type { Capabilities, CheckinEntry, CreditEntry, CreditPackage } from '../contracts/domain.ts'
+import type {
+  Capabilities,
+  CheckinEntry,
+  CreditEntry,
+  CreditPackage,
+  CreditUnit,
+} from '../contracts/domain.ts'
 
 /** `/accounts` 返回里单个账号的形状（各渠道字段不完全一致）。 */
 export interface AccountPayload {
@@ -81,7 +87,7 @@ export interface ChannelSpec {
   readonly id: string
   readonly label: string
   /** 余额单位。zcode 是 token，**不能与其它渠道混算总额**。 */
-  readonly unit: 'credits' | 'tokens'
+  readonly unit: CreditUnit
   readonly capabilities: Capabilities
   /**
    * 同名模型的别名前缀（`wb/glm-5.3` 里的 `wb`）。

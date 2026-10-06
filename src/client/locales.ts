@@ -194,9 +194,13 @@ export const zh = {
   actionListSep: '、',
   /** 冒号：中文全角、英文半角。**不要在代码里写死** `：`（见 F28）。 */
   colon: '：',
-  /** 额度单位：跟着渠道变（积分 / token），所以是文案不是代码里的词。 */
-  unitLabelCredits: '积分',
-  unitLabelTokens: 'token',
+  /**
+   * ⚠️ 曾经有第二对单位文案 `unitLabelCredits` / `unitLabelTokens`
+   * （动作反馈与卡片各用一套，两对的值**逐字相同**、各自独立，改一处另一处
+   * 静默漂）。2026-10-06 合并成上面那对 `unitCredits` / `unitTokens`，
+   * 「单位 → 文案」只剩 `credit-text.ts` 的 `unitTextOf` 一处判定，
+   * 旧键已列入 `tests/locales.test.ts` 的已删除清单。
+   */
   /** 下载进度：`12.3 / 40.0 MB (31%)` —— 中英共用，数字与单位都无需翻译。 */
   progressBytes: '{received} / {total} MB ({percent}%)',
   setupStepWithLabel: '{step}: {label}',
@@ -315,8 +319,6 @@ export const en: Record<LocaleKey, string> = {
   actionFailureItem: '{name} ({reason})',
   actionListSep: ', ',
   colon: ': ',
-  unitLabelCredits: 'credits',
-  unitLabelTokens: 'tokens',
   progressBytes: '{received} / {total} MB ({percent}%)',
   setupStepWithLabel: '{step}: {label}',
   missingList: '{prefix}: {items}',

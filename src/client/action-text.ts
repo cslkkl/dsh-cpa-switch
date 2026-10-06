@@ -13,7 +13,8 @@
  * 上游数据不改，只做适配 —— 而这里的「上游」是宿主半边的归一结果。
  */
 
-import type { ActionOutcome } from '../contracts/domain.ts'
+import type { ActionOutcome, CreditUnit } from '../contracts/domain.ts'
+import { unitTextOf } from './credit-text.ts'
 import type { Translate } from './locales.ts'
 
 /** 归一结果缺失时的占位原因（上游没给原因时用，不编一个）。 */
@@ -51,14 +52,14 @@ export interface ActionText {
 export function actionText(
   t: Translate,
   outcome: ActionOutcome | undefined,
-  unit: 'credits' | 'tokens',
+  unit: CreditUnit,
 ): ActionText {
   // 没有归一结果（老宿主 / 非批量动作）→ 退回最朴素的「做完了」
   if (outcome === undefined) {
     return { text: t('checkin'), ok: true, holdMs: undefined }
   }
 
-  const unitText = unit === 'tokens' ? t('unitLabelTokens') : t('unitLabelCredits')
+  const unitText = unitTextOf(t, unit)
   const count = String(outcome.succeeded)
   const credits = String(outcome.credits)
 

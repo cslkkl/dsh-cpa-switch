@@ -7,11 +7,9 @@
 import type { ReactNode } from 'react'
 import { useCallback, useState } from 'react'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { creditViewOf } from './credit-text.ts'
 import { act, selectCpaAccount, setAccountEnabled } from './endpoints.ts'
-import { fmt } from './format.ts'
-import { amountWithUnit, meterDecision } from './meter-text.ts'
-import { planText } from './report.tsx'
-import type { Capabilities, NormalizedAccount } from '../contracts/domain.ts'
+import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/domain.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
@@ -20,12 +18,13 @@ export interface AccountCardProps {
   readonly account: NormalizedAccount
   readonly plugin: string
   /**
-   * 渠道额度单位的**文案**（`积分` / `token`），不是 `'credits' | 'tokens'`。
+   * 渠道额度单位 —— 原样的 `'credits' | 'tokens'`，**不是翻好的文案**。
    *
-   * 由 `PluginPanel` 从 `meta.unit` 翻好传进来 —— 卡片**自己不做映射**：
-   * 单位是渠道级属性（写在 `channels/` 的 spec 里），卡片只是展示点之一。
+   * 取值来自渠道级属性（写在 `channels/` 的 spec 里，由 `PluginPanel` 从
+   * `meta.unit` 透传），翻译统一发生在 `credit-text.ts` 的 `unitTextOf` ——
+   * 卡片自己**不做**「哪个单位对应哪个词」的判定。
    */
-  readonly unit: string
+  readonly unit: CreditUnit
   readonly capabilities: Capabilities
   readonly t: Translate
   /** 上报一条操作结果。文案与图标由 `report.ts` 统一组装，这里只给原料。 */
@@ -106,8 +105,14 @@ export function AccountCard(props: AccountCardProps): ReactNode {
   const authIndex = account.authIndex ?? ''
 
   const credits = account.credits
-  /** 进度条判据在 `meter-text.ts` —— 纯函数，Node 侧测得到（那里有「trae 假 0%」的判据）。 */
-  const meter = meterDecision(credits)
+  /**
+   * 额度区的全部文案与判据 —— **组装在 `credit-text.ts`**（纯函数，Node 侧测得到）。
+   *
+   * 这里只渲染。为什么不在卡片里拼：卡片引了 UI 包，Node 侧的测试 import 不到，
+   * 于是「说明行该显示什么」会**一条判据都没有**（2026-10-06 的 Trae 说明行
+   * 就是在这个状态下漂的）。
+   */
+  const view = creditViewOf({ t, unit, credits })
 
   const run = async (kind: string): Promise<void> => {
     setBusy(kind)
@@ -202,14 +207,6 @@ export function AccountCard(props: AccountCardProps): ReactNode {
       setBusy('')
     }
   }
-
-  const facts: string[] = []
-  if (credits !== null && credits.packages.length > 0)
-    facts.push(String(credits.packages.length) + ' ' + t('packs'))
-  const plan = credits === null ? undefined : planText(t, credits.plan)
-  if (plan !== undefined) facts.push(plan)
-  // 「余量未知」与「余量是 0」是两回事，必须显式说清，否则用户会以为号空了
-  if (credits?.known === false) facts.push(t('remain') + ' ?')
 
   const streakDays = account.checkin?.streakDays ?? 0
 
@@ -316,37 +313,23 @@ export function AccountCard(props: AccountCardProps): ReactNode {
        *
        * ⚠️ **单位跟着数字走，但 0 与缺失都不带**（2026-10-05 维护者定案）：
        * 「0 没有单位」—— `0 token` 是废话。拼接规则在 `amountWithUnit`，
-       * 卡片只给原料。
+       * 卡片只取拼好的串。
        *
        * ⚠️ `—` 是**「上游没给这个数」，不是 0**。解析层绝不编 0
        * （见 `contracts/domain.ts` 的 `CreditEntry` 与架构说明 F40）。
        */}
       <div className={css.numbers}>
         <div className={css.number}>
-          <span className={css.label}>{meter.unlimited ? t('unlimited') : t('remain')}</span>
-          <span className={css.value}>
-            {/*
-             * 无限量时「单位」就是 `∞` 本身，不再追单位文案。
-             * 有量时走 `amountWithUnit`（0 自动不带单位）。
-             */}
-            {credits !== null && meter.unlimited
-              ? '∞'
-              : amountWithUnit(
-                  credits === null ? null : credits.remain,
-                  unit,
-                  fmt(credits?.remain),
-                )}
-          </span>
+          <span className={css.label}>{view.meter.unlimited ? t('unlimited') : t('remain')}</span>
+          {/*
+           * 无限量时「单位」就是 `∞` 本身，不再追单位文案 —— 那条判定也在
+           * `credit-text.ts` 里（同一个「额度区」域，不在这里重写一遍）。
+           */}
+          <span className={css.value}>{view.remainText}</span>
         </div>
         <div className={css.number}>
           <span className={css.label}>{t('used')}</span>
-          <span className={css.value}>
-            {amountWithUnit(
-              credits === null || !meter.hasUsed ? null : Number(credits.used),
-              unit,
-              fmt(credits?.used),
-            )}
-          </span>
+          <span className={css.value}>{view.usedText}</span>
         </div>
       </div>
 
@@ -362,9 +345,9 @@ export function AccountCard(props: AccountCardProps): ReactNode {
        * 没有占比的渠道会露出一条**空的灰条**，看着像「进度是 0」或「渲染坏了」。
        */}
       <div className={css.meterSlot}>
-        {meter.show && (
+        {view.meter.show && (
           <div className={css.meter}>
-            <div className={css.meterFill} style={{ width: String(meter.percent) + '%' }} />
+            <div className={css.meterFill} style={{ width: String(view.meter.percent) + '%' }} />
           </div>
         )}
       </div>
@@ -372,11 +355,14 @@ export function AccountCard(props: AccountCardProps): ReactNode {
       {/*
        * 说明行：同为占位槽，空串也占（否则有 facts 的卡会高一行）。
        *
+       * 内容是 `credit-text.ts` 拼好的整串（包数 · 档位 · 余量未知），
+       * 卡片只渲染 —— 「这一行该说什么」有判据了，见 `tests/credit-text.test.ts`。
+       *
        * `title` 给全值 —— 这一行被**夹到两行**（见 CSS），上游认不出的
        * `plan` 原文可能很长（`plan-text.ts` 会原样透传），截断后仍要能看全。
        */}
-      <div className={css.facts} title={facts.join(' · ')}>
-        {facts.length > 0 ? facts.join(' · ') : ' '}
+      <div className={css.facts} title={view.factsText}>
+        {view.factsText === '' ? ' ' : view.factsText}
       </div>
 
       {/*

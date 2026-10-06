@@ -41,6 +41,8 @@
   - ⚠️ 「已禁用」用 `Tag tone="neutral"`（灰底灰字）且**排最后**，不用红色
   - ⚠️ 按钮数量**只看渠道能力**，不看账号数量（与工具栏重叠也接受，换来位置固定）
   - ⚠️ 套餐名在 `facts` 行，**不在 `tagRow`**（产品名 ≠ 状态）
+  - ⚠️ `facts` 与两格数字的**内容**由 [credit-text.ts](credit-text.ts) 组装，
+    卡片只渲染 —— 所以「说明行该说什么」在 Node 侧测得到
   - 开关与「只用这一个」语义**不同**：开关逐个启停，后者一键把同渠道其余全关
   - ⚠️ 高亮判定是 `!disabled`（= 用户的选择），**不做「实际在跑哪个号」的推断**
   - ⚠️ 昵称 `flex: 1 1 auto; min-width: 0` 自行省略，长昵称不许把开关顶出去
@@ -75,6 +77,22 @@
     再拼一个就成了「签到✓」配一个勾（2026-10-04 用户实机指出）
   - ⚠️ **不用 Emoji**：警告三角用 `IconWarningOutlineRegular`，跟随主题色
   - 主机错误码在这里翻成人话；不认识的上游原文原样透传，不猜不吞
+- **`credit-text.ts`** —— 额度区的**唯一组装处**（单位文案 + 两格数字 + 说明行）。
+  **不含 JSX、不引 UI 包**。
+  - 导出：`creditViewOf`（一张卡的额度文案）/ `unitTextOf`（单位 → 文案）/
+    `FACTS_SEP` / 类型 `CreditView` / `CreditViewInput`
+  - ⚠️ **单位到文案的判定只有这一处**。曾经有两份：卡片/汇总用
+    `unitCredits`、动作反馈用 `unitLabelCredits`，两对键的值**逐字相同**却各自独立。
+    现在那对旧键已删（列入 `tests/locales.test.ts` 的已删除清单），
+    面板与卡片都走 `unitTextOf`
+  - ⚠️ **它只组装，判据一律向原料要**：档位名问 `plan-text.ts`、画不画条与
+    「有没有已用数」问 `meter-text.ts`。**不把几个 `*-text.ts` 并成一个文件**——
+    原料各有各的判据（一域一文件），并起来会得到一个什么都管的模块
+  - 为什么单独一个文件：说明行原先在 `AccountCard.tsx` 的 JSX 里拼，而那个文件
+    引了 UI 包、**Node 侧 import 不到** —— 于是「这一行该说什么」一条判据都没有，
+    2026-10-06 Trae 的说明行把上游档位值（`免费`）单独摆了一行也没人拦
+    （见[决策记录](../../.agents/notes/2026-10-06-credit-text-single-entry.md)）
+  - 改动同步 `tests/credit-text.test.ts`（含「全仓只有它判 `'tokens'`」这条护栏）
 - **`plan-text.ts`** —— 上游套餐名的本地化。**不含 JSX、不引 UI 包**。
   - 导出：`planText`（`report.tsx` 转出同一份，两处入口、一处事实）
   - 为什么单独一个文件：放 `report.tsx` 的话 Node 侧测试 import 不到

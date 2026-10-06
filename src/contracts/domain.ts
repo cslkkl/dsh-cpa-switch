@@ -31,6 +31,20 @@
  */
 export type StartupIssue = 'config-version-rejected' | 'config-load-failed' | 'port-in-use'
 
+/**
+ * 余额单位。
+ *
+ * 为什么住在契约层：它是**跨两半的形状** —— 宿主从渠道 spec 读出来
+ * （`channels/spec.ts` 的 `ChannelSpec.unit`），经 `/plugins` 与 `/accounts`
+ * 两个响应体送到浏览器，浏览器据此决定显示「积分」还是「token」。
+ *
+ * ⚠️ 原先这个联合类型**在两半各写了一遍、客户端那一侧写了四处**
+ * （`ChannelSpec` / `PluginMeta` / `AccountsPayload` / hook 入参与 `report`）。
+ * 加第三个单位时它们不会一起变，而漏掉的地方**没有任何报错** ——
+ * 按仓规「跨两半的形状归 `contracts/`」，只在这里写一次。
+ */
+export type CreditUnit = 'credits' | 'tokens'
+
 /** 该渠道支持哪些操作。面板据此决定渲染哪些按钮 —— 不支持的不显示。 */
 export interface Capabilities {
   readonly credits: boolean
