@@ -74,17 +74,36 @@ jobs:
 
       # OIDC 发布：npm 侧凭「本仓库的这条 workflow」授权，无需 token。
       # `--provenance` 让 npm 记录产物来源（由 OIDC 提供），供应链可追溯。
+      #
+      # ⚠️ **「已发布过」不算失败** —— 版本号不能重发，但这条 workflow 还得能被
+      # 重跑（补 Release、补附件）。当成硬失败的话，重跑永远走不到后面那步，
+      # 于是「npm 有、GitHub 没有」这个状态**永远修不回来**（v0.3.0 实踩）。
       - name: Publish
-        run: npm publish --access public --provenance
+        shell: pwsh
+        run: |
+          $out = npm publish --access public --provenance 2>&1
+          $code = $LASTEXITCODE
+          $out | Write-Output
+
+          if ($code -eq 0) { exit 0 }
+
+          if ($out -match 'cannot publish over the previously published versions') {
+            Write-Output "::notice::already published — skipping npm publish, continuing to Release"
+            exit 0
+          }
+          exit $code
 
       # ⚠️ **推 tag 不会自动产生 Release** —— tag 是 git 引用，Release 是挂在它上面的
       # 独立页面对象，必须显式创建。漏了这一步的症状是「标签页有 tag、右边没有
       # Release」，而 npm 那边**一切正常**，所以从发布日志上看不出少了什么
-      # （v0.1.2 就是这么漏掉的；v0.2.0 的 Release 是人类手工补的）。
+      # （v0.1.2 就这么漏掉了；v0.2.0 的 Release 是人类手工补的）。
       #
       # 正文优先取 `docs/releases/<tag>.md`（人工写，质量高）；没有就回落到
       # git log 摘要。**不因缺正文而失败** —— Release 建出来就比没有强，
       # 正文可以事后编辑。
+      #
+      # ⚠️ **必须幂等**：重跑这条 workflow（`workflow_dispatch`）时 Release 可能已存在，
+      # 那就改成更新正文，而不是报错退出 —— 否则「补正文」这个最常见的诉求反而修不了。
       - name: Create GitHub Release
         shell: pwsh
         env:
@@ -109,6 +128,12 @@ jobs:
             "## What's Changed`n`n$($lines -join "`n")" | Set-Content -Path $bodyFile -Encoding utf8
           }
 
-          # `--verify-tag`：标签已被本 workflow 上游的 checkout 确认存在，这里不让
-          # gh 去猜或新建标签。幂等性交给 workflow 本身（tag 只会触发一次）。
-          gh release create $tag --title $tag --notes-file $bodyFile --verify-tag
+          # 先看有没有 —— `gh release view` 对「不存在」返回非零，正好当开关用。
+          gh release view $tag --json tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output "release $tag already exists — updating notes"
+            gh release edit $tag --notes-file $bodyFile
+          } else {
+            # `--verify-tag`：不让 gh 去猜或新建标签，标签必须已存在。
+            gh release create $tag --title $tag --notes-file $bodyFile --verify-tag
+          }
