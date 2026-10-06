@@ -100,6 +100,37 @@ describe('supportsImages', () => {
       expect(capsOf(ch, 'glm-5.3')?.supportsImages).toBeUndefined()
     }
   })
+
+  /**
+   * 「**不确定**」与「**有反证**」必须分开（维护者 2026-10-06 定）。
+   *
+   * 口径是「不确定的填 1M、图片也标 ✅，接受代价」——
+   * ⚠️ **但这条只适用于不确定，不适用于已知不支持**：
+   *
+   * | | 处理 |
+   * | --- | --- |
+   * | 真·不确定（查不到出处） | 填 1M / 标 ✅ |
+   * | 有明确反证（官方说纯文本） | **保持不标** |
+   *
+   * 前者是**猜**，后者是**推翻事实**。图像标错的代价是**会话卡死**（不可逆），
+   * 所以不能用同一条口径处理两者。这一对判据是**成对**的：
+   * 只钉一半（「不确定的标了」）挡不住「顺手把有反证的也标了」。
+   */
+  it('⚠️ 真·不确定的按口径标 ✅（auto 是路由器，本来就说不上准）', () => {
+    expect(capsOf('qoder', 'auto')?.supportsImages).toBe(true)
+    expect(capsOf('qoder', 'auto')?.contextWindow).toBe(1_000_000)
+  })
+
+  it('⚠️ 有反证的**不跟着改**（官方明说纯文本的保持不标）', () => {
+    // Qoder 三条：智谱官方说 GLM-5.3 / GLM-5.2 仅文本；MiniMax 官方说 M2.7 不支持图
+    for (const id of ['gmodel', 'gm51model', 'mmodel']) {
+      const caps = capsOf('qoder', id)
+      expect(caps).toBeDefined()
+      expect(caps?.supportsImages).toBeUndefined()
+      // 但窗口按口径填 1M —— 窗口写大只是压缩晚点，代价可接受
+      expect(caps?.contextWindow).toBe(1_000_000)
+    }
+  })
 })
 
 /**
