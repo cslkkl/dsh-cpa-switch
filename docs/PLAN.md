@@ -266,6 +266,16 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   「只补不覆盖」与「不污染其它账号」两条既有判据原样保留：
   [决策记录](../.agents/notes/2026-10-05-checkin-ledger.md)「修正」一节、
   判据 [tests/checkin-ledger.test.ts](../tests/checkin-ledger.test.ts)。
+- **别名「识别」与「生成」分开**（`model-alias.ts`）—— 先把双重前缀现象钉成判据
+  （「别名在目录里、但已不重名时展示名仍要剥前缀」，改动前是红的），
+  再让 `buildAliasTable` 按**拼形**识别已存在的别名（生成仍看重名）；
+  `route-registry` 的别名表构造因此移到读目录之后：
+  [决策记录](../.agents/notes/2026-10-06-alias-identity-vs-generation.md)、
+  判据 [tests/route-registry.test.ts](../tests/route-registry.test.ts)。
+- **图像能力与模型归属**（`model-caps.ts` / `channels/README.md`）—— 先把
+  「只标确认支持的」与「归属不看 `owned_by`」写成判据与手册规范，再补数据：
+  [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)、
+  判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts)。
 
 ⚠️ 本节**当前没有立项项** —— 新条目照上面的口径办：先补判据，再动结构。
 
