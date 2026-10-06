@@ -36,8 +36,50 @@ export const zh = {
    * 钉住「**每个键都必须有引用**」，加了无引用的键那条就红。
    */
   tab: 'CPA 面板',
-  running: '运行中',
   stopped: '未运行',
+  /**
+   * 状态条那一句：`<状态> · 127.0.0.1:<端口>`。
+   *
+   * 分隔符与 `127.0.0.1:` 都写在文案里，不在代码里拼 —— 与 `colon` 同一个理由
+   * （界面上拼标点，英文下就成了中文标点混排）。
+   *
+   * ⚠️ 曾经有一个单独的 `running: '运行中'` 键，**已删除**：状态条文案改成带端口
+   * 的整句之后它就没有引用了（`stopped` 留着 —— `report.tsx` 的
+   * `cpa-unavailable` 还映射到它）。别因为「与 `stopped` 不对称」把它加回来。
+   */
+  statusRunning: '运行中 · 127.0.0.1:{port}',
+  statusStopped: '未运行 · 127.0.0.1:{port}',
+  /**
+   * 端口被**别人**占着。用 `warning` 而不是 `error`：确实有东西在监听，
+   * 只是那个东西不是本插件的 —— 说成「坏了」是误报。
+   */
+  statusForeign: '端口被其他 CPA 占用 · 127.0.0.1:{port}',
+  /** 提示块主句。状态条已经说了「被谁占」，这里说「那意味着什么」。 */
+  foreignNotice: '这个实例不是本插件启动的',
+  foreignNoticeHint:
+    '插件停不掉它，也用不上它的管理密钥，所以下面的账号列表可能读不出来。要用它，就在插件设置里把 exePath 指过去并填上它的管理密钥；要用插件自带的那份，先停掉它。',
+  /**
+   * 起不来的三种具体原因（宿主从子进程输出里认出来）。
+   *
+   * 从前只有一句「未运行」，用户分不出是配置错了还是端口被占了 ——
+   * 两者的处置完全不同，所以分成三条独立文案。
+   */
+  issueVersionRejected: 'CPA 因配置代际不符拒绝启动',
+  issueVersionRejectedHint:
+    '这份 CPA 要求配置代际 v{expected}，插件生成的是 v{actual}。两者不同代，CPA 会直接拒绝启动。',
+  /** 两个数字缺一个时的退路：不提数字，也不编一个。 */
+  issueVersionRejectedHintBare: '这份 CPA 与插件生成的配置代际不同，它会直接拒绝启动。',
+  issueConfigLoad: 'CPA 因配置错误拒绝启动',
+  issueConfigLoadHint:
+    '它的配置加载失败了。删掉托管目录里的 config.yaml，再点「一键准备环境」，插件会重新生成一份。',
+  issuePortInUse: 'CPA 起不来：端口已被占用',
+  issuePortInUseHint: '127.0.0.1:{port} 上已经有别的服务在监听，CPA 绑不上它。',
+  /**
+   * 装**之前**就能判出来的代际不符（判据见 `src/setup/download.ts` 的
+   * `detectConfigVersionMismatch`）。提前说的意义：用户不必先撞上「起不来」。
+   */
+  setupVersionMismatch:
+    '配置代际不符：这份 CPA 要求 v{expected}，而将要加载的配置是 v{actual}，它会拒绝启动。',
   start: '启动',
   noAdminKey: '未配置管理密钥',
   console: '打开 CPA 控制台',
@@ -170,8 +212,26 @@ export type LocaleKey = keyof typeof zh
 /** 英文文案。`Record<LocaleKey, string>` 保证与中文表键键对齐。 */
 export const en: Record<LocaleKey, string> = {
   tab: 'CPA',
-  running: 'Running',
   stopped: 'Stopped',
+  statusRunning: 'Running · 127.0.0.1:{port}',
+  statusStopped: 'Stopped · 127.0.0.1:{port}',
+  statusForeign: 'Port held by another CPA · 127.0.0.1:{port}',
+  foreignNotice: 'That instance was not started by this plugin',
+  foreignNoticeHint:
+    'The plugin cannot stop it and does not have its admin key, so the account list below may come back empty. To use it, point exePath at it in settings and fill in its admin key; to use the plugin\u2019s own copy, stop it first.',
+  issueVersionRejected: 'CPA refused to start: config generation mismatch',
+  issueVersionRejectedHint:
+    'This CPA expects config generation v{expected}, but the plugin generates v{actual}. They differ, so CPA refuses to start.',
+  issueVersionRejectedHintBare:
+    'This CPA and the config the plugin generates are of different generations, so CPA refuses to start.',
+  issueConfigLoad: 'CPA refused to start: bad config',
+  issueConfigLoadHint:
+    'It failed to load its config. Delete config.yaml in the managed directory, then run Set up again to regenerate it.',
+  issuePortInUse: 'CPA could not start: port already in use',
+  issuePortInUseHint:
+    'Something else is already listening on 127.0.0.1:{port}, so CPA cannot bind it.',
+  setupVersionMismatch:
+    'Config generation mismatch: this CPA expects v{expected} but the config being loaded is v{actual}, so it will refuse to start.',
   start: 'Start',
   noAdminKey: 'No admin key',
   console: 'Open CPA console',
