@@ -65,6 +65,9 @@
 | `cpa`（provider 键）   | 本插件在 DSH 里注册的 provider 名 |
 | `CPA Switch`（展示名） | 上一条的 UI 展示名                |
 
+上表 `cpa` 那行为什么只能声明键与展示名、profile 内容必须运行时算，见
+[决策记录](../.agents/notes/2026-10-06-provider-key-runtime-not-patch.md)。
+
 ---
 
 ## 1. 两半结构

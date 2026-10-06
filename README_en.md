@@ -116,6 +116,7 @@ model picker on their own:
 
 - Models are shown as `channel · model` (e.g. `WorkBuddy · deepseek-v4.1-flash`), so you can see
   at a glance which channel a request will use.
+- This provider appears in DSH as **CPA Switch** — that is what you see in the model picker.
 - When one model is served by several channels, each channel gets its own entry — **picking a
   channel means only that channel's accounts are used**, never round-robined across your other
   accounts.
