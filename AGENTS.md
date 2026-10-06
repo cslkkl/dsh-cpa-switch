@@ -181,10 +181,17 @@ python check-line-endings.py <本仓根> --target lf
       它牵扯模型目录的分组方式，改错会让选择器里出现重复条目。
 - [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
       `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
-- [ ] **`model-caps.ts` 硬编码不可持续** —— 上游不透出 `context_length`，只能靠人工表，
-      每次新模型都要补。曾讨论过的方向：① 上游透出字段后自动读（已确认宿主会认，
-      只等 CPA 给出）；② 探测端点拿真值（成本高、需签名）；③ 不维护表、全部走兜底。
-      未想好，暂按现状。出处分档与取舍见[决策记录](.agents/notes/2026-10-06-model-caps-source-tiers.md)。
+- [ ] **`model-caps.ts` 硬编码不可持续** —— 只能靠人工表，每次新模型都要补。
+      ⚠️ **但「等谁」要说准**：CPA 侧**通路已存在**，缺的是**渠道插件没填值** ——
+      上游 `sdk/pluginapi/types.go` 的 `PluginModel` 有 `ContextLength` /
+      `SupportedInputModalities` 等字段，`internal/registry/model_registry.go` 的
+      `convertModelToMap("openai")` 会在 `ContextLength > 0` 时输出 `context_length`；
+      实测 72 条**0 条带值**（渠道插件注册时没填，`omitempty` 略过）。
+      方向：① **等渠道插件填值**（通路已就绪，宿主也会认）；② 探测端点拿真值
+      （成本高、需签名）；③ 不维护表、全部走兜底（明确更差）。
+      未想好，暂按现状。删表条件是「**实测响应体带上了字段**」，不是「上游源码里有」：
+      理由与判据见[决策记录](.agents/notes/2026-10-06-why-manual-table-remains.md)、
+      出处分档见[决策记录](.agents/notes/2026-10-06-model-caps-source-tiers.md)。
 - [ ] **Trae 侧 12 条既无窗口也无图像能力** —— 11 条平台模型
       （`Doubao-*` / `qwen*` / `custom_model_gemini` …）与 `kimi-k2.7-code`
       都按「渠道侧证据不足」留空、走兜底。等有渠道侧来源再补，

@@ -9,10 +9,23 @@
  *
  * ## 为什么还要自己校准
  *
- * CPA 的 `/v1/models` 只给 `id` / `object` / `owned_by` 三个字段，
- * 渠道插件的能力字段（`ContextLength` / `maxInputTokens`）**只存在于 dll 内部**，
- * 任何一个插件能调到的接口都不透出（2026-10-04 逐渠道实测，全无）。
- * 所以真实值只能从**别处**取。
+ * CPA 的 `/v1/models` 实际只给 `id` / `object` / `owned_by` 三个字段
+ * （2026-10-06 实测 72 条，无一条带容量），所以真实值只能从**别处**取。
+ *
+ * ⚠️ **但「不透出」的原因不是 CPA 不支持，而是渠道插件没填值。** 这条区分很重要
+ * —— 它决定我们在**等谁**（见 `AGENTS.md` 待办区与
+ * [决策记录](../.agents/notes/2026-10-06-why-manual-table-remains.md)）：
+ *
+ * - **通路是通的**：CPA 的 `openai` handler 会输出 `context_length`，条件是
+ *   registry 里该模型的 `ContextLength > 0`
+ *   （上游 `internal/registry/model_registry.go` 的 `convertModelToMap`，`case "openai"` 分支：
+ *   `if model.ContextLength > 0 { result["context_length"] = … }`）。
+ * - **插件总线也带这些字段**：上游 `sdk/pluginapi/types.go` 的 `PluginModel` 有
+ *   `ContextLength` / `InputTokenLimit` / `SupportedInputModalities` 等。
+ * - **实测 72 条 0 条带值** —— 渠道插件注册时没往 registry 填，`> 0` 不成立，
+ *   字段被 `omitempty` 略过。
+ *
+ * 所以人工表在可预见的将来仍然需要，理由从「等 CPA 加功能」改成「**等渠道插件填值**」。
  *
  * ## 出处分三档（`capSources()` 现查，别抄清单）
  *

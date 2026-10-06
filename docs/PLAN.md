@@ -114,8 +114,22 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
 
 - [ ] **Management API v8 迁移**：OAuth 已在 `/v8/management/*`，其余仍是
       `/v0/management/*`（`auth-files`、`routing/strategy`、`plugins/*`）。
-      上游把 v0 定位为 legacy，长期会消失。
-      建议先抽一个 `CpaManagementClient`，业务层不再直接拼路径，再按版本 fallback。
+
+      ⚠️ **上游已明确声明弃用，不只是「长期会消失」** —— 上游仓的 `AGENTS.md` 原话：
+
+      > Endpoints under the `/v0/management` base URL are deprecated and no longer
+      > maintained. For any feature changes, do not modify endpoints under
+      > `/v0/management` unless necessary to fix compilation errors.
+
+      于是本条的定性从「上游把 v0 定位为 legacy」升级为「**上游不再维护它**」：
+      我们**每渠道读模型**（`auth-files/models`）与**选号策略**（`routing/strategy`）
+      都还在这条路上，所以这不是「迟早要动」，而是「动的时候要按新接口写」。
+
+      **但这不改变本条的工作量判断，也不提成现在做** —— 迁移是**独立立项**：
+      先补判据（现有 `/v0` 读写的等价断言），再抽 `CpaManagementClient`
+      （业务层不再直接拼路径），之后才按版本 fallback。理由见
+      [决策记录](../.agents/notes/2026-10-06-why-manual-table-remains.md)「替代方案」最后一条。
+
 - [ ] **`route-registry.ts` 的两次 map + 两次 filter**：第一组是历史遗留的重复过滤，
       等价于只做一次，可清理（无功能影响）。
 
