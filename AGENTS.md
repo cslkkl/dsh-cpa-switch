@@ -68,9 +68,14 @@ pnpm check          # 上面全部串起来（提交前跑这个）
 
 ```powershell
 cd <skill 目录>   # maintenance-flow skill 所在目录
-python check-markdown-links.py <本仓根> --fragments --refs
-python check-line-endings.py <本仓根> --target lf
+python check-markdown-links.py <本仓根> --fragments --refs --exclude reference
+python check-line-endings.py <本仓根> --target lf --exclude reference
 ```
+
+⚠️ **`--exclude` 写目录名本身（`reference`），别写通配符** —— `reference/*` 与
+`reference/**` **静默不生效**（照样扫全仓、照样报那边的错），于是一屏看下来像是
+「本仓有 5 处行尾不一致」，而它们全在 `reference/` 里。那两个目录是 clone 来的上游仓、
+已被 `.gitignore` 排除、且规则上**只读不改**，不属文档网络。
 
 检查选择：文档 → 链接 + 行尾校验，**另加 `pnpm check:doc-paths`**（文档里提到的
 `src` / `tests` / `scripts` 裸路径）；代码 → `pnpm check`；配置 / 契约 → 相邻模块测试。
@@ -132,11 +137,11 @@ python check-line-endings.py <本仓根> --target lf
 > 变模糊的要么补清背景、要么降级到 PLAN.md 的研究方向；新想法**先入 PLAN.md §2.6**，
 > 别直接塞这里 —— 待办混入未立项的想法就不再是「照做即可」的清单了。
 
-- [ ] **发布 0.4.0** —— `package.json` 已是 0.4.0，未发布（`v0.3.0` 已发）。
-      推 `v0.4.0` 标签即由 [publish.yml](.github/workflows/publish.yml) 自动发布；
-      ⚠️ **另需显式建 GitHub Release**（推 tag 不会自动产生它），正文放
-      `docs/releases/v0.4.0.md` —— 见本文件「推 tag 不会自动产生 Release」那条活跃坑，
-      以及[发布手册](docs/PUBLISHING.md)。
+- [ ] **发布 0.4.0** —— `package.json` 已是 0.4.0（`v0.3.0` 已发），
+      正文 `docs/releases/v0.4.0.md` 已备好。
+      推 `v0.4.0` 标签即由 [publish.yml](.github/workflows/publish.yml) 跑全量门禁 →
+      校验 tag 与版本号一致 → `npm publish --provenance` → **建 GitHub Release**
+      （那一步在 workflow 里，不用手工补）。流程见[发布手册](docs/PUBLISHING.md) §3.1。
 
 - [ ] **重启 DSH 复验两条新提示**（提示块只在宿主半端生效，不随页面刷新加载）：
       端口被外部实例占用（应显示**琥珀**点 + 提示块，而不是绿色「运行中」）、
