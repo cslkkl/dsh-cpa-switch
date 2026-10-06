@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildAliasTable } from '../src/model-alias.ts'
-import { looksLikeBcrypt, renderConfig } from '../src/setup/config.ts'
+import {
+  CONFIG_VERSION,
+  looksLikeBcrypt,
+  readConfigVersion,
+  renderConfig,
+} from '../src/setup/config.ts'
 
 /** 生成配置时的启用清单；真机上它来自磁盘上实际存在的 dll。 */
 const PLUGIN_IDS = ['workbuddy', 'trae', 'qoder', 'zcode']
@@ -91,6 +96,62 @@ describe('renderConfig 的 model-alias 段', () => {
       aliases: buildAliasTable({ 'hy4-preview': ['workbuddy'] }),
     })
     expect(empty).not.toContain('model-alias')
+  })
+})
+
+/**
+ * 配置代际（`config-version`）。
+ *
+ * 上游对它做的是**硬校验**：不是 `8` 就
+ * `unsupported config-version (expected 8)` 拒绝启动，没有降级兼容
+ * （`internal/config/config_v8.go`）。所以生成侧与读取侧必须同代 ——
+ * 生成侧写 8、读取侧按别的数判，用户就会看到「CPA 起不来」而没有任何线索。
+ */
+describe('配置代际', () => {
+  /** 生成的那份声明的代际必须就是常量本身（单一事实源，不是抄一遍）。 */
+  it('renderConfig 写出的代际就是 CONFIG_VERSION', () => {
+    const yaml = renderConfig({ port: 8317, secretKey: 'x', pluginIds: PLUGIN_IDS })
+    expect(yaml).toContain(`config-version: ${String(CONFIG_VERSION)}`)
+    expect(readConfigVersion(yaml)).toBe(CONFIG_VERSION)
+  })
+
+  /**
+   * **往返判据**：生成 → 读回，必须是同一个数。
+   *
+   * 这条抓的是「两边各写一份字面量、改了一边」这类漂移 —— 单看任一侧都正常。
+   */
+  it('生成再读回是同一个数', () => {
+    const yaml = renderConfig({ port: 8317, secretKey: 'x', pluginIds: [] })
+    expect(readConfigVersion(yaml)).toBe(CONFIG_VERSION)
+  })
+
+  it('读得出对端声明的代际', () => {
+    expect(readConfigVersion('config-version: 9\nserver:\n  port: 8317\n')).toBe(9)
+    expect(readConfigVersion('# 注释\nconfig-version: 8\n')).toBe(8)
+  })
+
+  /**
+   * 注释里提到 `config-version: 8` 是**真的会发生的** —— 上游随包发布的
+   * `config.example.yaml` 第 7 行就有一句 `# … and config-version: 8 alone do not …`。
+   * 匹配到那句就会把「读不到」误判成「读到 8」。
+   */
+  it('不把注释里的提及当代际', () => {
+    const example = [
+      '# Legacy-only fields still work. GET requests and config-version: 8 alone do not',
+      '# migrate a legacy file.',
+      '',
+      'server:',
+      '  port: 8317',
+    ].join('\n')
+    expect(readConfigVersion(example)).toBeUndefined()
+  })
+
+  /** 读不到或不是整数时返回 `undefined` —— 不猜，界面据此退回「不提数字」。 */
+  it('读不到时不猜', () => {
+    expect(readConfigVersion('')).toBeUndefined()
+    expect(readConfigVersion('server:\n  port: 8317\n')).toBeUndefined()
+    expect(readConfigVersion('config-version: eight\n')).toBeUndefined()
+    expect(readConfigVersion('config-version:\n')).toBeUndefined()
   })
 })
 
