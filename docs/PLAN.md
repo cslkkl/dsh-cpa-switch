@@ -130,6 +130,64 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
       （业务层不再直接拼路径），之后才按版本 fallback。理由见
       [决策记录](../.agents/notes/2026-10-06-why-manual-table-remains.md)「替代方案」最后一条。
 
+      #### 前置调查结论：`/v8` 覆盖不全，**现在就做不了**（2026-10-06 查证）
+
+      逐条比对上游源码（`internal/api/server_management.go` vs `server_management_v8.go`）
+      并对着本机 CPA 实测。**结论：迁移当前被上游阻塞，不是被我们的工作量阻塞。**
+
+      **① 插件自有路由在 `/v8` 根本不存在 —— 这是硬阻塞。**
+
+      渠道侧那些接口（`plugins/<id>/accounts`、`credits`、`checkin`、`models/groups` …）
+      **不是 CPA 的路由**，是渠道插件通过 `management.register` 自己声明的，
+      而 CPA 把它们的挂载点**写死在 `/v0`**：
+
+      ```go
+      // internal/pluginhost/management.go:17-21
+      managementBasePath     = "/v0/management"
+      resourcePluginBasePath = "/v0/resource/plugins"
+      ```
+
+      全仓搜索 `/v8/resource` 与 `v8/management/plugins/<id>`（插件自有，非 `plugins/store`）
+      **零命中**；实测 `GET /v8/management/plugins/workbuddy/accounts` → **404**。
+
+      ⚠️ **这一条无法靠我们努力绕过**：插件注册表是 CPA 宿主按常量拼的，
+      我们既改不了它、也没有配置开关。**渠道插件升到 v8 是上游的事。**
+
+      **② 已覆盖的（路径改名，响应体逐字相同）** —— 因为 v0/v8 **共用同一个 handler 函数**：
+
+      | 我们用的 v0 路径                 | v8 对应                            | 认证 | 响应体 |
+      | -------------------------------- | ---------------------------------- | ---- | ------ |
+      | `GET /auth-files`                | `GET /credentials`                 | 同   | 逐字同 |
+      | `GET /auth-files/models?name=`   | `GET /credentials/models?name=`    | 同   | 逐字同 |
+      | `PATCH /auth-files/status`       | `PATCH /credentials/status`        | 同   | 同     |
+      | `PATCH /auth-files/fields`       | `PATCH /credentials/fields`        | 同   | 同     |
+      | `GET /model-definitions/:channel`| `GET /routing/model-definitions/:channel` | 同 | 逐字同 |
+      | `DELETE /oauth-session`          | `DELETE /oauth/session`            | 同   | 同     |
+
+      「认证同」有源码依据：v0 与 v8 都挂 `s.mgmt.Middleware()`
+      （`server_management.go:29` / `server_management_v8.go:18`），是同一个函数 ——
+      `Authorization: Bearer <key>` 或 `X-Management-Key`，本机判定逻辑一致。
+      「响应体逐字同」有实测依据：`/credentials/models?name=<真实凭据>`
+      两侧返回**完全相同**的 JSON。
+
+      **③ 缺口（除①之外的）**：
+
+      | v0 端点                    | `/v8` 对应 | 影响                     |
+      | -------------------------- | ---------- | ------------------------ |
+      | `routing/strategy`（读写） | **无**     | **选号策略改不了** —— 404 |
+      | `GET /request-error-logs`  | 无         | 未用，无影响             |
+      | `plugins/<id>/config`      | 无         | 影响渠道开关             |
+
+      ①+③ 合起来：我们真正依赖的三条主路 —— **每渠道读模型、写凭据状态、选号策略** ——
+      只有前两条在 v8 有家，**第三条没有**。
+
+      **所以「未到动手时机」是被证实的，且理由比原先更强。**
+      原先的理由是「工作量没排上」（主观、可辩）；现在是「**上游 v8 覆盖不全，
+      半迁移只会把一条路劈成两半**」（客观、有源码与实测双重依据）。
+      触发条件也明确了：**等 `/v8/management/plugins/<id>/...` 出现**、
+      **或 `routing/strategy` 在 v8 落地**，届时重估。在那之前每做一次半迁移，
+      都是在给自己加一条得同时维护两种路径的负担。
+
 - [ ] **`route-registry.ts` 的两次 map + 两次 filter**：第一组是历史遗留的重复过滤，
       等价于只做一次，可清理（无功能影响）。
 
