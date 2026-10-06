@@ -172,10 +172,23 @@ export const zh = {
    * **只放进度条**（2026-10-05 维护者定案：无分母时**完全空白、只保留高度**）。
    * 写字会让同一槽位一会儿是条、一会儿是句子，切换 Tab 时视线踩空。
    */
-  /** 上游返回的套餐名，经 `AccountCard` 的 `PLAN_LABEL` 映射后取这些键。 */
-  planFree: '免费',
+  /**
+   * 上游返回的套餐名，经 `plan-text.ts` 的 `PLAN_LABEL` 映射后取这些键。
+   *
+   * ⚠️ **三个档位名都要一眼看出是「档位名」**：`免费` 曾经与「2 包」同处说明行，
+   * 读起来像在说「这个号是免费的」，而它其实是上游的档位（Free）。带「版」对齐
+   * `基础版` / `专业版`（2026-10-06）。
+   */
+  planFree: '免费版',
   planBasic: '基础版',
   planPro: '专业版',
+  /**
+   * 档位在说明行里的前缀：`套餐：免费版`。
+   *
+   * 为什么需要：说明行同时放「N 包」与档位，光有值分不清哪个是包数、哪个是档位名。
+   * 标点取现成的 `colon`（不在代码里拼 `：`，见 F28）。
+   */
+  planLabel: '套餐',
   panelCrashed: '{panel}这一块无法显示',
   panelRetry: '重试',
   /**
@@ -194,9 +207,13 @@ export const zh = {
   actionListSep: '、',
   /** 冒号：中文全角、英文半角。**不要在代码里写死** `：`（见 F28）。 */
   colon: '：',
-  /** 额度单位：跟着渠道变（积分 / token），所以是文案不是代码里的词。 */
-  unitLabelCredits: '积分',
-  unitLabelTokens: 'token',
+  /**
+   * ⚠️ 曾经有第二对单位文案 `unitLabelCredits` / `unitLabelTokens`
+   * （动作反馈与卡片各用一套，两对的值**逐字相同**、各自独立，改一处另一处
+   * 静默漂）。2026-10-06 合并成上面那对 `unitCredits` / `unitTokens`，
+   * 「单位 → 文案」只剩 `credit-text.ts` 的 `unitTextOf` 一处判定，
+   * 旧键已列入 `tests/locales.test.ts` 的已删除清单。
+   */
   /** 下载进度：`12.3 / 40.0 MB (31%)` —— 中英共用，数字与单位都无需翻译。 */
   progressBytes: '{received} / {total} MB ({percent}%)',
   setupStepWithLabel: '{step}: {label}',
@@ -305,6 +322,7 @@ export const en: Record<LocaleKey, string> = {
   planFree: 'Free',
   planBasic: 'Basic',
   planPro: 'Pro',
+  planLabel: 'Plan',
   panelCrashed: 'The {panel} section could not be displayed',
   panelRetry: 'Retry',
   actionDoneWithCredits: 'Checked in {count} accounts, +{credits} {unit}',
@@ -315,8 +333,6 @@ export const en: Record<LocaleKey, string> = {
   actionFailureItem: '{name} ({reason})',
   actionListSep: ', ',
   colon: ': ',
-  unitLabelCredits: 'credits',
-  unitLabelTokens: 'tokens',
   progressBytes: '{received} / {total} MB ({percent}%)',
   setupStepWithLabel: '{step}: {label}',
   missingList: '{prefix}: {items}',

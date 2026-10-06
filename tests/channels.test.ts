@@ -232,7 +232,9 @@ describe('上游 plan 值的本地化', () => {
 
   it('中文上游值映射得到（这是漏出中文的那个坑）', () => {
     expect(planText(enT, '免费')).toBe('Free')
-    expect(planText(zhT, '免费')).toBe('免费')
+    // 中文侧统一带「版」：上游给的是档位名（`免费` = Free 档），
+    // 单写「免费」与「2 包」同行时读起来像在说「这个号是免费的」（2026-10-06）
+    expect(planText(zhT, '免费')).toBe('免费版')
     expect(planText(enT, '基础版')).toBe('Basic')
     expect(planText(enT, '专业版')).toBe('Pro')
   })

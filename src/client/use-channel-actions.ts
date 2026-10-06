@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ActionOutcome } from '../contracts/domain.ts'
+import type { ActionOutcome, CreditUnit } from '../contracts/domain.ts'
 import { act, setAutoCheckin } from './endpoints.ts'
 import type { Translate } from './locales.ts'
 import { actionReport, reportOf, type Report } from './report.tsx'
@@ -55,7 +55,7 @@ export interface ChannelActions {
 export interface UseChannelActionsOptions {
   readonly plugin: string
   /** 该渠道的额度单位（`actionReport` 要拿它拼「加了多少」）。 */
-  readonly unit: 'credits' | 'tokens'
+  readonly unit: CreditUnit
   /** 后端读到的自动签到开关；还没读到就是 `undefined`。 */
   readonly serverAutoCheckin: boolean | undefined
   readonly t: Translate

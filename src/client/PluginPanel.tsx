@@ -12,8 +12,9 @@
 import type { ReactNode } from 'react'
 import { useCallback } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { Capabilities, NormalizedAccount } from '../contracts/domain.ts'
+import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/domain.ts'
 import { AccountCard } from './AccountCard.tsx'
+import { unitTextOf } from './credit-text.ts'
 import { paths } from './endpoints.ts'
 import { fmt } from './format.ts'
 import { amountWithUnit, sumCredits } from './meter-text.ts'
@@ -28,7 +29,7 @@ import css from './panel.module.css'
 export interface PluginMeta {
   readonly id: string
   readonly label: string
-  readonly unit: 'credits' | 'tokens'
+  readonly unit: CreditUnit
   readonly capabilities: Capabilities
 }
 
@@ -38,7 +39,7 @@ interface AccountsPayload {
   /** 顶层 `checkin_auto` —— 与 `/auto-checkin` 是同一个响应同一个字段。 */
   readonly autoCheckin?: boolean
   readonly capabilities: Capabilities
-  readonly unit: 'credits' | 'tokens'
+  readonly unit: CreditUnit
 }
 
 /** `PluginPanel` 的入参。 */
@@ -161,10 +162,11 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   /**
    * 本渠道额度单位的**文案**（`积分` / `token`）。
    *
-   * 只在这里翻一次，卡片与汇总都用它 —— 避免两处各写一遍
-   * `meta.unit === 'tokens' ? ... : ...`，那种重复迟早会漂。
+   * 面板与卡片都不做 `'credits' | 'tokens'` → 文案的判定 —— 那件事**只有一处**：
+   * `credit-text.ts` 的 `unitTextOf`（改动同步 `tests/credit-text.test.ts` 的
+   * 「单位判定只有一处」）。这里只是把结果取来给汇总三格用。
    */
-  const unitText = meta.unit === 'tokens' ? t('unitTokens') : t('unitCredits')
+  const unitText = unitTextOf(t, meta.unit)
 
   const accounts = overrides.accounts
   const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
@@ -328,11 +330,12 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               account={account}
               plugin={plugin}
               /*
-               * 单位在这里翻好再传 —— 卡片不做 `'credits' | 'tokens'` 到文案的映射：
-               * 单位是**渠道级**属性（写在 `channels/` 的 spec 里），这里已经是渠道面板，
-               * 翻一次给所有卡片用，新增渠道时不用回来改卡片。
+               * 单位**原样**传下去（`'credits' | 'tokens'`）—— 卡片不翻译，
+               * 翻译统一在 `credit-text.ts`：单位是**渠道级**属性
+               * （写在 `channels/` 的 spec 里），这里已经是渠道面板，
+               * 原样透传就不必为新渠道回来改卡片。
                */
-              unit={unitText}
+              unit={meta.unit}
               capabilities={capabilities}
               t={t}
               onReport={actions.report}

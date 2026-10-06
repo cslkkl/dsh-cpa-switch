@@ -55,6 +55,10 @@ const DELETED_KEYS = [
   'noAccounts',
   'noCredits',
   'remainUnknown',
+  // 与 `unitCredits` / `unitTokens` **逐字相同**的第二对单位文案。合并的理由见
+  // `credit-text.ts` 的 `unitTextOf`：单位到文案的判定只许有一处。
+  'unitLabelCredits',
+  'unitLabelTokens',
 ]
 
 describe('文案表：每个键都必须有引用', () => {
