@@ -142,7 +142,7 @@ Adding or removing accounts updates the model list automatically. How it works i
 Every model in the picker can switch its **thinking level** — two options:
 
 - **off**: the model answers directly, with no visible reasoning.
-- **on**: the model thinks first, and the reasoning is **visible** in the conversation.
+- **on** (default): the model thinks first, and the reasoning is **visible** in the conversation.
 
 On by default (`reasoningEfforts: true`). To turn the whole thing off, disable that switch in the
 plugin settings — the Effort row disappears and requests go back to carrying no level.
@@ -155,6 +155,12 @@ two values with certain meaning are exposed: **off** and **on**. Data and reason
 
 ⚠️ If the upstream ever rejects a level value (the whole turn errors out), **switch that setting
 off** to recover.
+
+> **Why there is no `Default` row in the menu**: DSH adds one only when a route declares no
+> default level, and it carries the same "send no level" behaviour as **off** while its name reads
+> like a value. The plugin declares the default level (**on**), so the menu is exactly
+> **off / on**. Mechanism and trade-offs are in the
+> [decision record](.agents/notes/2026-10-06-reasoning-default-row-removed.md).
 
 ## Known limitations
 
