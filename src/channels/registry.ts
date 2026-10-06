@@ -99,6 +99,22 @@ export function aliasPrefixOf(id: string): string {
 }
 
 /**
+ * {@link aliasPrefixOf} 的反查：别名前缀 → 渠道 id，认不出返回 `undefined`。
+ *
+ * 为什么需要它：别名里的前缀是 **`wb` 而不是 `workbuddy`**，所以「剥前缀」这件事
+ * 不能靠前缀字符串等于渠道 id 来判断。目录里那条 `wb/glm-5.3` 要能反查回 workbuddy，
+ * 否则插件会认不出**自己写进 CPA 配置的别名**（2026-10-06 双重前缀的根因）。
+ *
+ * **不做兜底猜测**：前缀不在托管渠道里就返回 `undefined`，让调用方按裸名处理 ——
+ * 第三方自带的 `vendor/xxx` 这类斜杠 id 不该被当成我们的别名。
+ */
+export function channelOfPrefix(prefix: string): string | undefined {
+  const key = prefix.trim().toLowerCase()
+  if (key === '') return undefined
+  return CHANNEL_SPECS.find((channel) => channel.aliasPrefix.toLowerCase() === key)?.id
+}
+
+/**
  * 某渠道的 `/accounts` 路径。
  *
  * 四个渠道**同构**，所以它属于注册表的模板，而不是每个 spec 各写一遍 ——

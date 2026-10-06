@@ -90,6 +90,28 @@ describe('别名 id 与展示名', () => {
     expect(r?.model).toBe('glm-5.3')
     expect(r?.channel).toBe('workbuddy')
   })
+
+  it('⚠️ 别名已存在但**不再重名**时，仍要认得出来（识别与生成分开）', () => {
+    // 实机 bug（2026-10-06）：别名是写进 CPA 配置的持久状态，上游供给面一变
+    // 就不再重名 —— 只看 overlaps 会认不出自己写过的别名，
+    // 兜底分支把 `wb/xxx` 整个当裸名 → 展示名变成「WorkBuddy · wb/xxx」。
+    const table = buildAliasTable(
+      { 'glm-5.2': ['workbuddy'] }, // 只此一家 → 不重名
+      ['wb/glm-5.2'], // 但目录里确实存在这条别名
+    )
+    const r = table.resolve('wb/glm-5.2')
+    expect(r?.model).toBe('glm-5.2')
+    expect(r?.channel).toBe('workbuddy')
+    // 识别归识别：不重名仍然**不该**再生成别名（生成规则没变）
+    expect(table.aliasOf('glm-5.2', 'workbuddy')).toBeUndefined()
+  })
+
+  it('⚠️ 前缀不是已知渠道的斜杠 id 不被当成别名', () => {
+    // 上游自带测试就有 `vendor/gpt-5.6-sol` 这类真含斜杠的第三方 id ——
+    // 「目录即真相」不能退化成「凡斜杠皆别名」。
+    const table = buildAliasTable({}, ['vendor/gpt-5.6-sol'])
+    expect(table.resolve('vendor/gpt-5.6-sol')).toBeUndefined()
+  })
 })
 
 describe('renderAliasYaml', () => {
