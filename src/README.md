@@ -189,14 +189,21 @@
   - 不拆的话 CPA 会在所有供给该模型的渠道之间轮询，面板选了哪个渠道都名不副实
   - ⚠️ 别名表**必须用实时目录现算**：渠道目录随账号增减变动，抄死的清单必然过期，
     而过期意味着「该拆的没拆」—— 静默失效
-  - 改后必测：`tests/model-alias.test.ts`
-- **`model-caps.ts`** —— 模型能力（上下文窗口）校准表。
+  - ⚠️ **「识别别名」与「生成别名」是两条判据**：识别看**拼形**（`<渠道前缀>/…`，
+    别名是写进配置的持久状态），生成看**当前重名**（不重名的不配别名）。
+    混在一起会让插件认不出自己写过的别名 → 展示名出现 `WorkBuddy · wb/xxx`：
+    [决策记录](../.agents/notes/2026-10-06-alias-identity-vs-generation.md)
+  - 改后必测：`tests/model-alias.test.ts`、`tests/route-registry.test.ts`
+- **`model-caps.ts`** —— 模型能力（上下文窗口 + 图像输入）校准表。
   - 导出：`capsOf` / `calibratedChannels` / `capSources` / 类型 `ModelCaps` / `CapSources`
   - ⚠️ **262144 是宿主 `dsh-llm-pi-ai` 的兜底值，不是模型真实能力**；
     CPA 的 `/v1/models` 不报容量，渠道插件的能力字段只存在于 dll 内部
   - 校准值按**渠道**存 —— 同一模型名在不同渠道上限可能不同；查不到就留兜底
   - **出处分三档**（官方 / 第三方 / 无来源），第三方档的值**未官方确认**：
     分档由 `capSources()` 现查，理由见[决策记录](../.agents/notes/2026-10-06-model-caps-source-tiers.md)
+  - ⚠️ **`supportsImages` 只在确认支持时写 `true`，没有 `false`** ——
+    判定方向与窗口**相反**（不写＝保守），理由见
+    [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)
   - 改后必测：`tests/model-caps.test.ts`
 
 ## 子目录
