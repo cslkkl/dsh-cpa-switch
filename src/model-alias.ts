@@ -30,7 +30,7 @@
  * @module dsh-cpa-switch/model-alias
  */
 
-import { aliasPrefixOf } from './channels/registry.ts'
+import { aliasPrefixOf, channelOfPrefix } from './channels/registry.ts'
 
 /** 别名表：`模型名 -> 渠道 -> 别名`。只收录**同名**模型。 */
 export interface AliasTable {
@@ -66,9 +66,26 @@ export function aliasFor(model: string, channel: string): string {
  * 抄一份写死的清单必然过期，而过期意味着**该拆的没拆**（缓存继续对半），
  * 属于静默失效。
  *
+ * ## 两条判定必须分开（2026-10-06 修双重前缀）
+ *
+ * | 问题 | 依据 | 为什么 |
+ * | ---- | ---- | ------ |
+ * | 「这条 id 是不是别名」 | **拼形**（`<渠道前缀>/…`） | 别名一旦写进 CPA 配置就是**持久**的，而重名关系会随供给面变 —— 按重名判会**认不出自己写过的别名** |
+ * | 「要不要给它生成别名」 | **当前是否重名** | 不重名的模型配别名会让用户用原名调不到（见头文件末注） |
+ *
+ * 混在一起的后果（实机踩到）：`wb/deepseek-v4.1-flash` 曾经重名、别名已落盘，
+ * 后来 trae 不再供给它 → `overlaps` 不再收录 → `resolve()` 失配 → 兜底分支把它
+ * 整个当裸名，展示名变成「WorkBuddy · wb/deepseek-v4.1-flash」。
+ *
  * @param catalog `模型名 -> 渠道数组`，来自 `auth-files/models` 逐个凭据现查。
+ * @param knownIds 目录里**实际出现**的 id（可选）。
+ *   给了它就把「已存在的别名」并入识别范围 —— 别名是写进配置的持久状态，
+ *   不能只靠现在重不重名来认。不给则退化成「只按重叠算」。
  */
-export function buildAliasTable(catalog: Readonly<Record<string, readonly string[]>>): AliasTable {
+export function buildAliasTable(
+  catalog: Readonly<Record<string, readonly string[]>>,
+  knownIds: readonly string[] = [],
+): AliasTable {
   const overlaps: Record<string, readonly string[]> = {}
   for (const [model, channels] of Object.entries(catalog)) {
     const unique = [...new Set(channels.map((c) => c.trim().toLowerCase()).filter((c) => c !== ''))]
@@ -81,6 +98,23 @@ export function buildAliasTable(catalog: Readonly<Record<string, readonly string
     for (const channel of channels) {
       reverse.set(aliasFor(model, channel).toLowerCase(), { model, channel })
     }
+  }
+
+  /**
+   * 再按**目录实况**补一遍识别：凡 id 形如 `<已知渠道>/<裸名>` 就认得出来。
+   *
+   * 只看「前缀是不是一个渠道 id」，不猜别的 —— 前缀不是已知渠道的斜杠 id
+   * （如第三方自带的 `vendor/xxx`）原样留着，交给下层按裸名处理。
+   */
+  for (const id of knownIds) {
+    const slash = id.indexOf('/')
+    if (slash <= 0) continue
+    const prefix = id.slice(0, slash)
+    const channel = channelOfPrefix(prefix)
+    if (channel === undefined) continue
+    const key = id.toLowerCase()
+    if (reverse.has(key)) continue
+    reverse.set(key, { model: id.slice(slash + 1), channel })
   }
 
   return {
