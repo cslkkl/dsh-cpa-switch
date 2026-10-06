@@ -165,6 +165,41 @@ export interface ModelCaps {
 export const REASONING_EFFORTS = { off: 'off', high: 'high' } as const
 
 /**
+ * 路由的默认档位 —— 声明它**为了去掉选择器里的「Default」那一行**。
+ *
+ * ## 「Default」不是我们给的档位，是宿主补的一行
+ *
+ * 用户看到的三个选项里，`Off` / `High` 来自 {@link REASONING_EFFORTS}，
+ * 而 **`Default` 是宿主自己插的**，判据在实装宿主包里：
+ *
+ * - `dsh-llm-pi-ai` 的 `modelInfo`（`lib/index.js:1816`）组装模型元数据时，
+ *   `defaultEffort` **只在路由级 `reasoning` 设了值时才出现**
+ *   （`describableReasoningLevel(resolvedModel, profile.reasoning)`）；
+ * - `dsh-client-ui-model-selection` 的 `effortChoices`（`lib/client.js:565`）
+ *   在 `reasoning.defaultEffort === undefined` 时补一行 `effort.providerDefault`，
+ *   文案就是 **`Default`**（同文件 `:1101`）。
+ *
+ * 所以「去掉 Default」**不能靠删 `off`**：删了 `defaultEffort` 仍是 `undefined`，
+ * 那一行照旧在，而且 `Off` 会消失 —— 用户看到的是 `Default | High`，
+ * 比现在还少一个真档位（`Default` 不发任何档位 = 旧行为，名字却在暗示「默认值」）。
+ *
+ * ## 值为什么是 `high` 而不是 `off`
+ *
+ * 声明它同时**决定了新会话的初始档位**。取 `high` 与面板的默认口径一致
+ * （{@link reasoningEffortsOf} 默认开 = 默认想），且**与现状等价**：
+ * 现在用户在 `Default` 上拿到的就是不带档位的默认行为，而 `high` 是本仓认定的「开」。
+ * 取 `off` 则把默认变成「不思考」，那是**改默认行为**，不是修界面。
+ *
+ * ## ⚠️ 值必须落在 {@link REASONING_EFFORTS} 里
+ *
+ * 宿主对**声明**的档位是宽容的：值不在支持列表里就当没设 → `Default` 又回来，
+ * 而且**零报错**（`describableReasoningLevel` 的注释明说「描述能力不该因为配置
+ * 降级而失败」）。这条约束**没有宿主兜底**，只能我们自己钉 ——
+ * 判据见 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)。
+ */
+export const REASONING_DEFAULT = 'high' as const
+
+/**
  * 按总开关给出宿主要的 `reasoningEfforts` 声明；关掉时返回 `undefined`（不声明）。
  *
  * ⚠️ **返回形状由宿主规定**（`dsh-llm-pi-ai` 的 `resolveModelReasoning`），
@@ -182,6 +217,20 @@ export const REASONING_EFFORTS = { off: 'off', high: 'high' } as const
 export function reasoningEffortsOf(enabled: boolean): Readonly<Record<string, string>> | undefined {
   if (!enabled) return undefined
   return { ...REASONING_EFFORTS }
+}
+
+/**
+ * 路由级的默认档位；**总开关关掉时返回 `undefined`**（不声明）。
+ *
+ * 开关关掉必须连着默认一起撤：没有 `reasoningEfforts` 却留着 `reasoning`
+ * 是个**半截状态** —— 选择器里没有 Effort 行，而每个请求仍被钉在 `high` 上。
+ * 那正是这个开关要逃开的东西（见 `AGENTS.md` 的「上游会对推理档位返硬错误」），
+ * 留着它等于逃生通道漏了一半。
+ *
+ * @param enabled 面板上的总开关（「允许切换思考档位」）。
+ */
+export function reasoningDefaultOf(enabled: boolean): string | undefined {
+  return enabled ? REASONING_DEFAULT : undefined
 }
 
 /**

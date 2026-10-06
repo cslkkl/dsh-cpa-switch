@@ -33,7 +33,7 @@ import type { CpaGateway } from './gateway.ts'
 import type { CpaRuntime } from './runtime.ts'
 import { ROUTE_PREFIXES, channelLabel, channelOfPrefix, channelOrder } from './channels/registry.ts'
 import { buildAliasTable, type AliasTable } from './model-alias.ts'
-import { capsOf, reasoningEffortsOf } from './model-caps.ts'
+import { capsOf, reasoningDefaultOf, reasoningEffortsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
 import { readCachedRoutes, writeCachedRoutes } from './state.ts'
 import { CPA_API_KEY_REF, type LoggerLike } from './credentials.ts'
@@ -106,6 +106,14 @@ interface RouteProfile {
   readonly api: 'openai-completions'
   readonly baseURL: string
   readonly apiKeyEnv: typeof CPA_API_KEY_REF
+  /**
+   * 路由级默认思考档位。
+   *
+   * **它的作用不是选档位，是去掉选择器里的 `Default` 那一行** ——
+   * 那行是宿主在「路由没声明默认」时补的。取值与理由见 `REASONING_DEFAULT`。
+   * 总开关关掉时整个省略（连默认一起撤）。
+   */
+  readonly reasoning?: string
   readonly models: readonly RouteModel[]
 }
 
@@ -472,11 +480,20 @@ function buildCpaRouteProfile(
    * 且「某个模型没带上」这种不一致从此无人能发现。
    */
   const reasoningEfforts = reasoningEffortsOf(deps.reasoningEffortsEnabled?.() ?? false)
+  /**
+   * 路由默认档位：**与声明同源同开关**。
+   *
+   * 它承担的是「去掉选择器里的 `Default` 行」这件界面事，取值理由见
+   * `model-caps.ts` 的 `REASONING_DEFAULT`。两个值都从同一个开关读出来，
+   * 所以不会出现「声明撤了、默认还在」的半截状态。
+   */
+  const reasoning = reasoningDefaultOf(deps.reasoningEffortsEnabled?.() ?? false)
   return {
     displayName: 'CPA Switch',
     api: 'openai-completions',
     baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
     apiKeyEnv: CPA_API_KEY_REF,
+    ...(reasoning === undefined ? {} : { reasoning }),
     models: rows.map((row) => {
       // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
       const caps = capsOf(row.channel, row.bare)
