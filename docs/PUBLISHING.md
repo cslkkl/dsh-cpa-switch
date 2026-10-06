@@ -7,12 +7,10 @@
 
 ## 0. 现状
 
-**自动发布 workflow 已入库**：[.github/workflows/publish.yml](../.github/workflows/publish.yml)
+**自动发布 workflow 已入库并经真机跑通**：[.github/workflows/publish.yml](../.github/workflows/publish.yml)
 —— 推 `v*` 标签即发到 npm，认证走 **Trusted Publishing（OIDC）**，仓库里不存 token。
-
-⚠️ **但 npm 侧的 Trusted Publisher 还没配** —— 配置完成前，推标签会在
-`npm publish` 那一步以「未授权」失败。配置步骤见根 [AGENTS.md](../AGENTS.md) 的待办区。
-在那之前仍可本机手工 `npm publish`（见 §3）。
+npm 侧的 Trusted Publisher 已配好（2026-10-06 以 `v0.3.0` 首次跑通，带 SLSA provenance）。
+本机手工 `npm publish` 仍可用（见 §3.2），但日常走标签触发。
 
 `publish.yml` 与 `ci.yml` **跑同一份门禁**（`pnpm check`），并额外挡两件事：
 
@@ -78,7 +76,7 @@ git commit -m "chore: <版本>"
 
 ## 3. 发布
 
-### 3.1 自动（推荐，需先配好 Trusted Publisher）
+### 3.1 自动（日常走这条）
 
 ```powershell
 git push origin main
@@ -95,18 +93,33 @@ git push origin v0.3.0
 ⚠️ **已发布的版本号不能重发**。发布失败要重来，若 npm 上已有该版本，
 先 bump 到下一个 patch 再打新标签，别反复推同一个标签。
 
-### 3.2 手工（Trusted Publisher 配好之前）
+### 3.2 手工（备用）
 
 ```powershell
 pnpm pack                    # 先看打包清单（dry-run 语义）
 npm publish --access public
 ```
 
+⚠️ 需要本机 `npm login` 且账号是包所有者（`npm view dsh-cpa-switch maintainers` 现查）。
+
 `pnpm pack` 的清单必须含：`lib/index.js`、`lib/client.js`、`lib/index.d.ts`、
 `cordis.patch.yml`、`icon.svg`、`locale/*.json`、`README.md`、`LICENSE`。
 **不含** `src/`、`tests/`、`scripts/` —— 那是开发面，进包只会让体积翻倍。
 
 ### 3.3 发布后复核
+
+⚠️ **`npm view` 有缓存，且 npm 侧有传播延迟** —— 发布成功后头几分钟内它可能仍报
+**旧版本号**，甚至对新版本报 `E404`。这不是发布失败：workflow 日志里出现
+`+ dsh-cpa-switch@<版本>` 就说明已经发出去了（npm 自己也会打一句
+`being processed and may take a few minutes`）。**别据此重发、别据此改 workflow。**
+
+要绕开缓存拿权威结果，直查 registry：
+
+```powershell
+(Invoke-RestMethod https://registry.npmjs.org/dsh-cpa-switch).'dist-tags'.latest
+```
+
+发布后复核：
 
 ```powershell
 npm view dsh-cpa-switch version dist-tags

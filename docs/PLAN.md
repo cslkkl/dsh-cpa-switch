@@ -25,11 +25,12 @@
 
 ## 1. 当前状态
 
-**已发布可用，但仓库领先 npm 一个版本。** 面板功能经真实用户路径验收：装完插件
+**已发布可用，发布已自动化。** 面板功能经真实用户路径验收：装完插件
 自动下载 CPA、生成密钥、拉起服务，面板显示「运行中」，各渠道页签齐全。
 
-⚠️ **`package.json` 已是 0.3.0，npm latest 仍是 0.2.0** —— 已 bump 未发布（见 §2.4）。
-这个窗口期内，照文档安装拿到的是旧代码。版本号现查
+推 `v*` 标签即由 [publish.yml](../.github/workflows/publish.yml) 自动发布，
+认证走 Trusted Publishing（OIDC），仓库不存 token —— 2026-10-06 以 `v0.3.0`
+首次跑通（带 SLSA provenance 证明）。版本号现查
 [package.json](../package.json) 与 [npm](https://www.npmjs.com/package/dsh-cpa-switch)，
 不要抄本文件的数字。
 
@@ -222,9 +223,6 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
 
 ### 2.4 发布与供应链（P1）
 
-- [ ] **发布 0.3.0** —— `package.json` 已是 0.3.0，npm latest 仍是 0.2.0（已 bump 未发布）。
-      **卡权限**：本机登录用户不是 npm 所有者，发布需 `cslkkl` 操作。
-      步骤与 Trusted Publishing 配置见根 [AGENTS.md](../AGENTS.md) 待办区（不在此重复）。
 - [ ] **`cslkkl/CLIProxyAPI` 的 `release-windows.yml` 没有 pin 上游 tag** ——
       `actions/checkout@v6` 编译的是 fork 当前 HEAD，`inputs.version` 只进产物名与
       ldflags，**不能证明二进制对应上游该 tag 的源码**。

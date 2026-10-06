@@ -130,41 +130,6 @@ python check-line-endings.py <本仓根> --target lf
 > 变模糊的要么补清背景、要么降级到 PLAN.md 的研究方向；新想法**先入 PLAN.md §2.6**，
 > 别直接塞这里 —— 待办混入未立项的想法就不再是「照做即可」的清单了。
 
-- [ ] **发布 0.3.0（卡权限：需 npm 所有者 `cslkkl` 操作）**
-
-      ⚠️ **`package.json` 已是 0.3.0，npm latest 仍是 0.2.0** —— 版本已 bump 但从未发布。
-      这个窗口期是有风险的：照文档装的人拿到的仍是旧代码。核对时间 2026-10-04，
-      现查以 [npm](https://www.npmjs.com/package/dsh-cpa-switch) 为准。
-
-      发布者不是本机登录用户（`npm whoami` 401、GitHub 仓库 `admin: false`），故阻塞。
-      步骤：所有者本机 `pnpm check` 全绿 → 推 `v0.3.0` 标签（**需先配好 Trusted
-      Publishing**，见下一条）或本机手工 `npm publish`。发布后核对 npm 页面的 files 清单。
-
-- [ ] **配置 npm Trusted Publishing（需维护者手动操作）**
-
-      ⚠️ **workflow 已入库**（[.github/workflows/publish.yml](.github/workflows/publish.yml)），
-      推 `v*` 标签即自动发布。**剩下的只有 npm 侧的配置** —— 配好之前推标签会在
-      `npm publish` 那一步以「未授权」失败。
-
-      **前提**：npm CLI ≥ 11.5.1、Node ≥ 22.14.0（本机 Node 与 `.node-version` 满足）。
-
-      **步骤**：
-
-      1. 登录 npmjs.com → 本包页面 → **Settings** → **Trusted Publisher**
-      2. 选 **GitHub Actions**，填：
-         - Organization or user：`cslkkl`
-         - Repository：`dsh-cpa-switch`
-         - Workflow filename：`publish.yml`
-         - Environment name：**留空**（本仓没用 GitHub Environments）
-         - Allowed actions：勾 **`npm publish`**
-      3. 保存后 npm 会显示配置成功
-
-      ⚠️ **不要配 `NPM_TOKEN` secret** —— OIDC 已替代它。
-
-      **验证**：推一个 patch tag（如 `v0.3.1`），确认 Actions 自动发布成功。
-      验证通过后，从 npm 移除手工 token、从 GitHub Secrets 删掉相关的项。
-      流程细节见 [docs/PUBLISHING.md](docs/PUBLISHING.md) §3.1。
-
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
 - [ ] **`providerId` 粒度裁决** —— 现在是按**渠道**（四个），要考虑是否该细化到
