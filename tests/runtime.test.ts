@@ -4,27 +4,51 @@
  * 守的是一个静默后果：在「只想知道在不在跑」的地方写 `ensure`，会**悄悄拉起
  * 一个子进程** —— 没有报错，用户只是发现端口上多了个服务。反过来漏掉拉起，
  * 表现是「面板永远报 CPA 不可用」。两条都不抛错，所以必须写成判据。
+ *
+ * 另一条也在这层守：**端口归属与失败原因必须原样透传**。它们到了界面上就是
+ * 「绿点还是琥珀点」和「说配置还是说端口」，在这一层被覆盖掉就没有第二次机会。
  */
 
 import { describe, expect, it, vi } from 'vitest'
 import { CpaRuntime } from '../src/runtime.ts'
 import type { CpaProcess, EnsureResult, ProcessOptions } from '../src/process.ts'
+import type { StartupIssue } from '../src/contracts/domain.ts'
 
-/** 造一份只记账、不做实事的假进程。 */
+/**
+ * 造一份只记账、不做实事的假进程。
+ *
+ * `owned` / `lastIssue` / `lastExpectedConfigVersion` 按**取值器**给：
+ * 生产实现里它们都是 getter，假对象照同一个形状，否则「现读」这类判据会失真。
+ */
 function makeProcess(
   listening = false,
   owned = false,
   ensured: EnsureResult = { running: false, owned: false, reason: 'exe-not-found' },
+  extra: {
+    readonly foreign?: boolean
+    readonly issue?: StartupIssue | undefined
+    readonly expected?: number | undefined
+  } = {},
 ): {
   process: CpaProcess
-  isListening: ReturnType<typeof vi.fn>
+  portState: ReturnType<typeof vi.fn>
   ensure: ReturnType<typeof vi.fn>
 } {
-  const isListening = vi.fn(async (_options: ProcessOptions) => listening)
+  const portState = vi.fn(async (_options: ProcessOptions) => ({
+    running: listening,
+    owned,
+    foreign: extra.foreign ?? false,
+  }))
   const ensure = vi.fn(async (_options: ProcessOptions) => ensured)
   return {
-    process: { isListening, ensure, owned } as unknown as CpaProcess,
-    isListening,
+    process: {
+      portState,
+      ensure,
+      owned,
+      lastIssue: extra.issue,
+      lastExpectedConfigVersion: extra.expected,
+    } as unknown as CpaProcess,
+    portState,
     ensure,
   }
 }
@@ -47,11 +71,11 @@ describe('CpaRuntime.status', () => {
    * 在结果上完全一样，只有调用次数能区分。
    */
   it('只探活，绝不拉起进程', async () => {
-    const { process, isListening, ensure } = makeProcess(true)
+    const { process, portState, ensure } = makeProcess(true)
     const runtime = new CpaRuntime({ process, processOptions: () => makeOptions(8317) })
 
-    expect(await runtime.status()).toEqual({ running: true, owned: false })
-    expect(isListening).toHaveBeenCalledTimes(1)
+    expect(await runtime.status()).toEqual({ running: true, owned: false, foreign: false })
+    expect(portState).toHaveBeenCalledTimes(1)
     expect(ensure).not.toHaveBeenCalled()
   })
 
@@ -59,7 +83,7 @@ describe('CpaRuntime.status', () => {
     const { process } = makeProcess(false)
     const runtime = new CpaRuntime({ process, processOptions: () => makeOptions(8317) })
 
-    expect(await runtime.status()).toEqual({ running: false, owned: false })
+    expect(await runtime.status()).toEqual({ running: false, owned: false, foreign: false })
   })
 
   /** 本插件启的才算自己的 —— 只有自己启的会被自己停，报错了会误停别人的服务。 */
@@ -67,7 +91,45 @@ describe('CpaRuntime.status', () => {
     const { process } = makeProcess(true, true)
     const runtime = new CpaRuntime({ process, processOptions: () => makeOptions(8317) })
 
-    expect(await runtime.status()).toEqual({ running: true, owned: true })
+    expect(await runtime.status()).toEqual({ running: true, owned: true, foreign: false })
+  })
+
+  /**
+   * 端口被外部实例占用：面板要靠这个字段把「运行中」从绿改成琥珀。
+   * 它必须**原样透传**，不许在这一层被 `running` 覆盖掉。
+   */
+  it('外部实例占用照实透传', async () => {
+    const { process } = makeProcess(true, false, undefined, { foreign: true })
+    const runtime = new CpaRuntime({ process, processOptions: () => makeOptions(8317) })
+
+    expect(await runtime.status()).toMatchObject({ running: true, owned: false, foreign: true })
+  })
+
+  /**
+   * 启动失败的具体原因也要透传 —— 它是「配置代际被拒」与「端口被占」
+   * 在界面上唯一的分辨依据。
+   */
+  it('启动失败的原因与它要求的代际一起透传', async () => {
+    const { process } = makeProcess(false, true, undefined, {
+      issue: 'config-version-rejected',
+      expected: 9,
+    })
+    const runtime = new CpaRuntime({ process, processOptions: () => makeOptions(8317) })
+
+    expect(await runtime.status()).toMatchObject({
+      issue: 'config-version-rejected',
+      issueExpectedConfigVersion: 9,
+    })
+  })
+
+  /** 没有原因时**不许出现这两个键**：界面按 `undefined` 判「不知道」。 */
+  it('没有失败原因时不带那两个字段', async () => {
+    const { process } = makeProcess(false)
+    const runtime = new CpaRuntime({ process, processOptions: () => makeOptions(8317) })
+
+    const status = await runtime.status()
+    expect('issue' in status).toBe(false)
+    expect('issueExpectedConfigVersion' in status).toBe(false)
   })
 })
 
@@ -97,7 +159,7 @@ describe('CpaRuntime.ensure', () => {
  */
 describe('CpaRuntime 的配置现读', () => {
   it('每次调用都重新求值（改了端口立刻生效）', async () => {
-    const { process, isListening, ensure } = makeProcess()
+    const { process, portState, ensure } = makeProcess()
     let port = 8317
     const runtime = new CpaRuntime({ process, processOptions: () => makeOptions(port) })
 
@@ -106,8 +168,8 @@ describe('CpaRuntime 的配置现读', () => {
     await runtime.status()
     await runtime.ensure()
 
-    expect(isListening.mock.calls[0]?.[0]).toMatchObject({ port: 8317 })
-    expect(isListening.mock.calls[1]?.[0]).toMatchObject({ port: 9000 })
+    expect(portState.mock.calls[0]?.[0]).toMatchObject({ port: 8317 })
+    expect(portState.mock.calls[1]?.[0]).toMatchObject({ port: 9000 })
     expect(ensure.mock.calls[0]?.[0]).toMatchObject({ port: 9000 })
   })
 })
