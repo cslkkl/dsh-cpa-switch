@@ -112,6 +112,11 @@ dsh --version
 
 本机维护者的 profile 走 `link:` 形态：`node_modules/dsh-cpa-switch` 是指向本仓的 symlink。
 
+**前提**：`link:` 到 profile 外的插件按 **realpath** 解析 `@deepseek-ai/*` —— realpath 在仓库里，
+向上走碰不到 `$DSH_HOME/profiles/node_modules` 那个兜底目录（它只对**装在 profile 里**的插件可用）。
+所以**被链接的仓库必须自己装好 peer deps**（仓库 `pnpm install` + lockfile 的
+`autoInstallPeers: true` 会做到），否则报 `ERR_MODULE_NOT_FOUND`、插件显示「未运行」。
+
 **代价**：仓库的 `lib/` 必须**先构建过** —— link 直接读它，没 build 就是缺失或旧产物。
 它不入库，所以 clone 之后第一件事是 `pnpm install && pnpm build`。
 

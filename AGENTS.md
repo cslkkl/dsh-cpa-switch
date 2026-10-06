@@ -250,8 +250,9 @@ python check-line-endings.py <本仓根> --target lf
 
 **环境与运行**
 
-- DSH 插件必须是 profile `node_modules/` 下的**真实目录**，不能 `link:` 到 profile 外 ——
-  否则 `@deepseek-ai/*` 解析失败，插件显示「未运行」。
+- **`link:` 到 profile 外的插件，仓库必须自己装好 peer deps**（仓库 `pnpm install` +
+  lockfile 的 `autoInstallPeers: true` 会做到）—— 漏了报 `ERR_MODULE_NOT_FOUND`、
+  插件显示「未运行」。机制与判据见[发布手册](docs/PUBLISHING.md) §5。
 - **停 CPA 不能依赖插件 shutdown 清理调度器** —— 会 SIGSEGV；
   走 shutdown 端点 → Ctrl-C → `taskkill /F`。
 - **被限流的号 CPA 仍报 `status: active`**（code 6004）：面板「启用」≠「现在能用」。
