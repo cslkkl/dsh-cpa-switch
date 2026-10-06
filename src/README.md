@@ -171,6 +171,11 @@
     别名与清单**共用同一次渠道读**。判据在 `tests/route-registry.test.ts`，
     见[决策记录](../.agents/notes/2026-10-05-route-reload-blank-window.md)
   - 同名模型按渠道拆行：每渠道一项，id 用该渠道别名、展示名仍是「渠道 · 模型名」
+  - ⚠️ **算「同名」前必须剥掉渠道前缀**：`auth-files/models` 返回的是**别名形态**
+    （`wb/glm-4.6`），原样收键会让同模型的两条别名变成两个键 → `overlaps` 恒为空 →
+    别名不再生成（**静默**退回跨渠道轮询）。剥前缀只认已知渠道前缀，
+    第三方自带的 `vendor/xxx` 不参与同名判定；
+    判据在 `tests/route-registry.test.ts`（「同名的识别要剥掉前缀」两组）
   - 目录稳定检测用**指数退避**（250ms 起、翻倍、4s 封顶），不许固定间隔 ——
     冷启动等凭据分批加载，已稳定场景两次快读即收敛；
     判据在 `tests/route-registry.test.ts`
