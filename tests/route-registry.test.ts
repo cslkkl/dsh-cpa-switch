@@ -147,12 +147,17 @@ const BASELINE = {
 interface PushRecord {
   readonly ids: readonly string[]
   readonly names: readonly string[]
+  readonly rows: { id?: unknown; name?: unknown; input?: unknown; contextWindow?: unknown }[]
 }
 
 /** 从条目 config 里取出 `providers.cpa.models`（模型选择器读的就是它）。 */
-function modelsOf(config: unknown): { id?: unknown; name?: unknown }[] {
+function modelsOf(
+  config: unknown,
+): { id?: unknown; name?: unknown; input?: unknown; contextWindow?: unknown }[] {
   const providers = (config as { providers?: Record<string, unknown> } | null)?.providers
-  const cpa = providers?.['cpa'] as { models?: { id?: unknown; name?: unknown }[] } | undefined
+  const cpa = providers?.['cpa'] as
+    | { models?: { id?: unknown; name?: unknown; input?: unknown; contextWindow?: unknown }[] }
+    | undefined
   return cpa?.models ?? []
 }
 
@@ -176,6 +181,7 @@ function fakeEntry(baseline: unknown): {
       pushed.push({
         ids: rows.map((row) => String(row.id)),
         names: rows.map((row) => String(row.name)),
+        rows: rows.map((row) => ({ ...row })),
       })
     },
   }
@@ -494,5 +500,74 @@ describe('重载空窗', () => {
       expect(fake.total()).toBeGreaterThanOrEqual(10_000) // 等满了 10 秒的预算
       expect(fake.total()).toBeLessThan(11_000) // 也没有超出预算乱等
     })
+  })
+})
+
+// ── 推给宿主的行：模态与双重前缀 ──────────────────────────────────────────
+//
+// 两件事都在 `buildProfile` 的行构造里，且都只能在**推送后**的 config 上观察：
+// - `input` 只在确认支持图像时写；不写 → 宿主落 `["text"]`（保守）
+// - 展示名必须是「渠道 · 裸名」，**裸名里不许再带渠道前缀**
+
+describe('推送行的模态与展示名', () => {
+  let home: string
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-models-'))
+    process.env.DSH_HOME = home
+  })
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  const FILES = [{ name: 'w1', provider: 'workbuddy' }]
+
+  it('确认支持图像的模型写 input: [text, image]', async () => {
+    // glm-4.6v 在校准表里带 supportsImages
+    const cpa = fakeCpa({
+      files: FILES,
+      models: { w1: ['glm-4.6v', 'wb/glm-4.6v'] },
+      catalog: ['wb/glm-4.6v'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const row = pushed[0]?.rows.find((r) => r.id === 'wb/glm-4.6v')
+    expect(row?.input).toEqual(['text', 'image'])
+  })
+
+  it('⚠️ 未确认的模型不写 input（落宿主默认 text，别替它猜）', async () => {
+    // glm-4.6 确认不支持图像 → 表里不标 → 这里也不该写 input
+    const cpa = fakeCpa({
+      files: FILES,
+      models: { w1: ['glm-4.6', 'wb/glm-4.6'] },
+      catalog: ['wb/glm-4.6'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const row = pushed[0]?.rows.find((r) => r.id === 'wb/glm-4.6')
+    expect(row?.input).toBeUndefined()
+  })
+
+  it('⚠️ 别名在目录里、但该模型已不重名时，展示名仍要剥掉前缀', async () => {
+    // 实机 bug（2026-10-06）：别名是**持久**写进 CPA 配置的，而别名表按**当前重名**
+    // 现算 —— 上游供给面一变（某模型不再重名），resolve 就失配，兜底分支把整个
+    // `wb/xxx` 当裸名，展示名变成「WorkBuddy · wb/xxx」。
+    // 展示名的契约就一条：**渠道 · 裸名**，与「现在还重不重名」无关。
+    const cpa = fakeCpa({
+      files: FILES,
+      // 只此一家供给 → 别名表不会收录它 → 旧写法在此失配
+      models: { w1: ['glm-5.2', 'wb/glm-5.2'] },
+      catalog: ['wb/glm-5.2'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    expect(pushed[0]?.names).toContain('WorkBuddy · glm-5.2')
+    expect(pushed[0]?.names.some((n) => n.includes('wb/'))).toBe(false)
   })
 })

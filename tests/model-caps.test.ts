@@ -65,6 +65,44 @@ describe('calibratedChannels', () => {
 })
 
 /**
+ * 图像输入的判定与窗口**方向相反**：窗口写大了只是压缩晚点，图像写错了代价大得多。
+ *
+ * 宿主 `DEFAULT_INPUT = ["text"]`，注释写明了为什么：少标 → 附加图片**之前**就被拒，
+ * 界面点名说是哪个模型；多标 → 图片发出去、消息**已落库**，provider 中途拒绝，
+ * 会话卡在反复重试一个不可能成功的请求。
+ *
+ * 所以：**只在有出处说「支持」时写 `true`**，不确定一律不写（＝落宿主的 text）。
+ */
+describe('supportsImages', () => {
+  it('确认支持图像的模型带 true', () => {
+    expect(capsOf('workbuddy', 'glm-4.6v')?.supportsImages).toBe(true)
+    expect(capsOf('qoder', 'qmodel')?.supportsImages).toBe(true)
+  })
+
+  it('⚠️ 确认「不支持」的模型也不写字段（不写 false）', () => {
+    // 不写 == false == 不确定，三者在宿主侧效果相同（都落 ["text"]）。
+    // 表里只出现 true 一种标记，就没有「false 是确认不支持还是没查」的歧义。
+    const caps = capsOf('workbuddy', 'glm-4.6')
+    expect(caps).toBeDefined()
+    expect(caps?.supportsImages).toBeUndefined()
+  })
+
+  it('⚠️ 无来源的模型不标（不猜）', () => {
+    // zcode 的 glm-4.5-air 维护者明确「未知，暂不标记」
+    expect(capsOf('zcode', 'glm-4.5-air')?.supportsImages).toBeUndefined()
+    // trae 那 11 条平台模型没有渠道侧证据
+    expect(capsOf('trae', 'custom_model_gemini')).toBeUndefined()
+  })
+
+  it('⚠️ 官方说「仅文本」的模型不标', () => {
+    // glm-5.3 三处供给，官方明确仅文本
+    for (const ch of ['workbuddy', 'trae', 'zcode']) {
+      expect(capsOf(ch, 'glm-5.3')?.supportsImages).toBeUndefined()
+    }
+  })
+})
+
+/**
  * 三档出处分级（2026-10-06 定）：官方 / 第三方 / 无来源填 1M。
  * 分级只在 [model-caps.ts](../src/model-caps.ts) 的表里维护，判据只钉**结构性质**：
  * 每一档各自可查、且分档本身不会被静默抹平成一张大表。

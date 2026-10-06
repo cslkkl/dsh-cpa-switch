@@ -243,9 +243,15 @@ function invertByChannel(
  * 前提是调用方拿到的 `channels.complete === true` —— 这张表会被整段替换进 CPA 配置，
  * 半截等于**删别名**。别名段与路由清单**共用同一次渠道读**：各读一次必然互相打架
  * （一处看到 5 个渠道、另一处 4 个，写出自相矛盾的配置）。
+ *
+ * `knownIds` 传**已存在于 CPA 配置里的别名**（`aliases` 段）—— 别名是持久状态，
+ * 上游供给面一变就可能不再重名，只看重叠会认不出自己写过的别名（双重前缀 bug）。
  */
-function aliasTableOf(channels: ChannelModels): AliasTable {
-  return buildAliasTable(invertByChannel(channels.byChannel))
+function aliasTableOf(
+  byChannel: Readonly<Record<string, readonly string[]>>,
+  existing: readonly string[],
+): AliasTable {
+  return buildAliasTable(invertByChannel(byChannel), existing)
 }
 
 /** 判断模型 id 归属哪个渠道：显式前缀优先，否则按凭据目录反查。 */
@@ -266,6 +272,18 @@ function routeOwnerOf(
 }
 
 /**
+ * 从目录里取出 id 列表（条目可能是字符串或 `{ id }`）。
+ *
+ * 单独抽出来是因为**两处**要用：构造路由行、以及给别名表提供「实际存在哪些 id」
+ * （别名是持久状态，识别不能只靠当前重名 —— 见 {@link aliasTableOf}）。
+ */
+function catalogIds(catalog: { data?: unknown[] }): string[] {
+  return (catalog.data ?? [])
+    .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
+    .filter((id): id is string => typeof id === 'string' && id !== '')
+}
+
+/**
  * 从 CPA 实时目录构造 `providers.cpa` 的 profile。
  *
  * **同名模型按渠道拆行**：一个模型名被多个渠道供给时，每个渠道各注册一行，
@@ -281,9 +299,7 @@ function buildCpaRouteProfile(
   aliases: AliasTable,
   deps: RouteRegistryDeps,
 ): RouteProfile {
-  const ids = (catalog.data ?? [])
-    .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
-    .filter((id): id is string => typeof id === 'string' && id !== '')
+  const ids = catalogIds(catalog)
   if (ids.length === 0) {
     throw new Error('catalog is empty — caller must treat empty as "no route" before building')
   }
@@ -343,6 +359,15 @@ function buildCpaRouteProfile(
         id: row.id,
         name: `${row.label} · ${row.bare}`,
         ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
+        /**
+         * 模态走 `input`（pi-ai 的字段名；直连 DeepSeek 适配器才用 `inputModalities`）。
+         *
+         * ⚠️ **只在 `supportsImages === true` 时写** —— 省略时宿主落
+         * `DEFAULT_INPUT = ["text"]`（`dsh-llm-pi-ai/lib/index.js:940`）。
+         * 少标＝附加图片前就被拒；多标＝图片已发出去、消息已落库，
+         * provider 中途拒绝，会话卡在反复重试。所以不写才是保守。
+         */
+        ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
       }
     }),
   }
@@ -505,12 +530,16 @@ export function attachRouteRegistry(
   /**
    * 读目录并算一份清单。拿不到就带回**原因**（不抛）：
    * `idle` = CPA 没跑（本来就该是空的），`catalog-unavailable` = 读了但没读稳。
+   *
+   * ⚠️ **别名表在这里才建**（不在 `refresh` 里）：识别别名要用**目录里的实际 id**
+   * —— 别名是写进 CPA 配置的持久状态，上游供给面一变就不再重名，
+   * 只看重叠会认不出自己写过的别名（2026-10-06 双重前缀）。
+   * 所以顺序必须是「先读目录 → 再建表」。
    */
   const readProfile = async (
     trigger: string,
     channels: Readonly<Record<string, readonly string[]>>,
-    aliases: AliasTable,
-  ): Promise<{ profile: RouteProfile } | { reason: string }> => {
+  ): Promise<{ profile: RouteProfile; aliases: AliasTable } | { reason: string }> => {
     try {
       /**
        * ⚠️ 用 {@link CpaRuntime.status}（只读探活），**不是** `ensure()`：
@@ -521,7 +550,9 @@ export function attachRouteRegistry(
       if (!(await deps.runtime.status()).running) return { reason: 'idle' }
       const catalog = await readStableCatalog(deps)
       if (catalog === undefined) return { reason: 'catalog-unavailable' }
-      return { profile: buildCpaRouteProfile(catalog, channels, aliases, deps) }
+      const ids = catalogIds(catalog)
+      const aliases = aliasTableOf(channels, ids)
+      return { profile: buildCpaRouteProfile(catalog, channels, aliases, deps), aliases }
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: build model routes failed (%s): %o', trigger, error)
       return { reason: 'catalog-unavailable' }
@@ -542,25 +573,27 @@ export function attachRouteRegistry(
     })
     if (channels === undefined) return degrade(trigger, 'channel-read-failed')
     if (!channels.complete) return degrade(trigger, 'channel-read-incomplete')
-    const aliases = aliasTableOf(channels)
+
+    const outcome = await readProfile(trigger, channels.byChannel)
+    if (!('profile' in outcome)) return degrade(trigger, outcome.reason)
 
     /**
-     * 先把别名段补进托管配置。骨架虽已在 bundle patch 里，但同名模型清单
+     * 把别名段补进托管配置。骨架虽已在 bundle patch 里，但同名模型清单
      * 只有实算得出，而 CPA 重启后目录会变 —— 这一步让**下次**重载仍有别名。
+     *
+     * 顺序在 `readProfile` 之后：别名表要用目录里的实际 id 才能认出**已存在**的别名。
      */
     try {
-      if (Object.keys(aliases.overlaps).length > 0 && patchModelAlias(aliases)) {
+      if (Object.keys(outcome.aliases.overlaps).length > 0 && patchModelAlias(outcome.aliases)) {
         deps.logger?.info?.(
           'cpa-panel: model aliases written (%s models)',
-          Object.keys(aliases.overlaps).length,
+          Object.keys(outcome.aliases.overlaps).length,
         )
       }
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: model alias write failed: %o', error)
     }
 
-    const outcome = await readProfile(trigger, channels.byChannel, aliases)
-    if (!('profile' in outcome)) return degrade(trigger, outcome.reason)
     return pushProfile(outcome.profile, seq, trigger)
   }
 

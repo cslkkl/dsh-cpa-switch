@@ -55,6 +55,25 @@
  * 表按**渠道**分开存，查不到就留兜底 —— **宁可显示 262K 这个明确的兜底，
  * 也不要给别的渠道编一个 WorkBuddy 的值**。
  *
+ * ## `supportsImages` 的出处与方向
+ *
+ * 来自**逐个模型的公开文档核实**（2026-10-06，维护者整理），分两档：
+ *
+ * - **一档（官方文档明确）**：Qoder 的 `qmodel*`/`dmodel`/`kmodel*` 等、
+ *   WorkBuddy 的 `hy3`/`glm-5v-turbo`/`kimi-k2.*`/`deepseek-v4.1-flash` 等、
+ *   ZCode 的 `glm-5.x`/`glm-4.6v`/`glm-5v-turbo`。
+ * - **二档（第三方社区验证）**：Qoder 的 `dmodel`/`dfmodel`（第三方仓库标注）。
+ *
+ * ⚠️ **它比窗口更需要保守**：窗口写大只是压缩晚点，图像写错是**会话卡死**
+ * （见 {@link ModelCaps.supportsImages}）。所以第三档之外还砍掉了三类：
+ *
+ * - 官方**明说纯文本**的（Qoder `gmodel`/`gm51model`/`mmodel`、WorkBuddy `glm-4.6` 等）
+ * - **有矛盾信息**的（WorkBuddy `hunyuan-2.0-thinking` —— 官方给的是混元 2.0，
+ *   未单独确认 thinking 变体；ZCode `glm-4.5-air` —— 维护者明确「未知，暂不标记」）
+ * - 维护者标的「⚠️ 保留意见」（Qoder `auto`）
+ *
+ * Trae 的 11 条平台模型**整条不填**（渠道侧证据不足），走宿主兜底。
+ *
  * @module dsh-cpa-switch/model-caps
  */
 
@@ -64,6 +83,21 @@ export interface ModelCaps {
   readonly contextWindow: number
   /** 可选窗口；默认取 `contextWindow`，有更大值时说明「能开但默认没开」。 */
   readonly supportedContextWindows?: readonly number[]
+  /**
+   * 确认支持**图像输入**？**只在有出处说「支持」时写 `true`**，否则不写。
+   *
+   * ⚠️ **判定方向与 `contextWindow` 相反 —— 这里不写才是保守。**
+   *
+   * 宿主 `DEFAULT_INPUT = ["text"]`（`dsh-llm-pi-ai/lib/index.js:940`），
+   * 它的注释就是这条取舍的判据：少标 → 附加图片**之前**就被拒，界面点名是哪个模型；
+   * 多标 → 图片发出去、消息**已落库**，provider 中途拒绝，
+   * 会话卡在反复重试一个不可能成功的请求。
+   *
+   * 所以**没有 `false` 这个值**：不写 == 不支持 == 没查，三者在宿主侧效果相同
+   * （都落 `["text"]`）。表里只出现 `true` 一种标记，就不会有
+   * 「`false` 是确认不支持还是没查」的歧义。
+   */
+  readonly supportsImages?: boolean
 }
 
 /**
@@ -88,31 +122,34 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     'deepseek-v4.1-flash': {
       contextWindow: 1_000_000,
       supportedContextWindows: [300_000, 1_000_000],
+      supportsImages: true,
     },
     'deepseek-v4-pro': { contextWindow: 1_000_000 },
-    'deepseek-v4-flash': { contextWindow: 1_000_000 },
+    'deepseek-v4-flash': { contextWindow: 1_000_000, supportsImages: true },
     'deepseek-v3-2-volc': { contextWindow: 1_000_000 },
-    'glm-5.2': { contextWindow: 1_000_000 },
+    'glm-5.2': { contextWindow: 1_000_000, supportsImages: true },
     'glm-5.3': { contextWindow: 1_000_000 },
     'glm-5.3-flash': { contextWindow: 1_000_000 },
-    'glm-5.1': { contextWindow: 200_000 },
-    'glm-5.0': { contextWindow: 1_000_000 },
-    'glm-5v-turbo': { contextWindow: 200_000 },
+    'glm-5.1': { contextWindow: 200_000, supportsImages: true },
+    'glm-5.0': { contextWindow: 1_000_000, supportsImages: true },
+    'glm-5v-turbo': { contextWindow: 200_000, supportsImages: true },
     'glm-4.6': { contextWindow: 200_000 },
-    'glm-4.6v': { contextWindow: 128_000 },
+    'glm-4.6v': { contextWindow: 128_000, supportsImages: true },
     'glm-4.7': { contextWindow: 200_000 },
-    'kimi-k2.6': { contextWindow: 256_000 },
-    'kimi-k2.7': { contextWindow: 256_000 },
-    'kimi-k2.5': { contextWindow: 262_144 },
-    'kimi-k2-thinking': { contextWindow: 256_000 },
+    'kimi-k2.6': { contextWindow: 256_000, supportsImages: true },
+    'kimi-k2.7': { contextWindow: 256_000, supportsImages: true },
+    'kimi-k2.5': { contextWindow: 262_144, supportsImages: true },
+    'kimi-k2-thinking': { contextWindow: 256_000, supportsImages: true },
     'kimi-k2.8-preview': { contextWindow: 1_000_000 },
     'kimi-k3-1': { contextWindow: 1_000_000 },
-    'minimax-m3': { contextWindow: 512_000 },
+    'minimax-m3': { contextWindow: 512_000, supportsImages: true },
     'minimax-m2.7': { contextWindow: 200_000 },
     'minimax-m2.5': { contextWindow: 204_800 },
+    // ⚠️ 混元 2.0 的 Thinking 变体可能有差异 —— 官方文档给的是混元 2.0，
+    // 未单独确认 thinking 变体，按「不确定不标」处理（维护者 2026-10-06 判定）。
     'hunyuan-2.0-thinking': { contextWindow: 256_000 },
-    hy3: { contextWindow: 192_000 },
-    'hy3-x': { contextWindow: 192_000 },
+    hy3: { contextWindow: 192_000, supportsImages: true },
+    'hy3-x': { contextWindow: 192_000, supportsImages: true },
     'hy4-preview': { contextWindow: 1_000_000 },
     // 国际端点清单（`FALLBACK_WORKBUDDY_AI_MODELS`）的值：默认 300K、可开到 1M。
     'hy4-preview-f': {
@@ -121,22 +158,23 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     },
     'hy4-preview-x': { contextWindow: 1_000_000 },
     // ── 以下无来源，按口径填 1M（见头注「无来源为什么填 1M」）──
-    auto: { contextWindow: 1_000_000 },
+    auto: { contextWindow: 1_000_000, supportsImages: true },
     default: { contextWindow: 1_000_000 },
     'hunyuan-chat': { contextWindow: 1_000_000 },
-    'space-bunny': { contextWindow: 1_000_000 },
+    'space-bunny': { contextWindow: 1_000_000, supportsImages: true },
   },
   zcode: {
-    'glm-5.2': { contextWindow: 1_000_000 },
+    'glm-5.2': { contextWindow: 1_000_000, supportsImages: true },
     'glm-5.3': { contextWindow: 1_000_000 },
-    'glm-5.3-flash': { contextWindow: 1_000_000 },
+    'glm-5.3-flash': { contextWindow: 1_000_000, supportsImages: true },
     'glm-5': { contextWindow: 200_000 },
     'glm-5-turbo': { contextWindow: 200_000 },
     'glm-4.6': { contextWindow: 200_000 },
-    'glm-4.6v': { contextWindow: 131_072 },
+    'glm-4.6v': { contextWindow: 131_072, supportsImages: true },
     'glm-4.7': { contextWindow: 200_000 },
-    'glm-5.1': { contextWindow: 200_000 },
-    'glm-5v-turbo': { contextWindow: 200_000 },
+    'glm-5.1': { contextWindow: 200_000, supportsImages: true },
+    'glm-5v-turbo': { contextWindow: 200_000, supportsImages: true },
+    // glm-4.5-air：维护者明确「未知，暂不标记」→ 不标（落宿主 text）
     'glm-4.5-air': { contextWindow: 131_072 },
   },
   /**
@@ -144,29 +182,43 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
    * 仓库的发布说明。注释里不重复清单（会漂），逐条看下面的表体。
    */
   qoder: {
-    qmodel_38max: { contextWindow: 1_000_000 },
-    qfmodel: { contextWindow: 1_000_000 },
-    qmodel_latest: { contextWindow: 1_000_000 },
-    qmodel: { contextWindow: 1_000_000 },
-    q37fmodel: { contextWindow: 1_000_000 },
-    dmodel: { contextWindow: 1_000_000 },
-    dfmodel: { contextWindow: 1_000_000 },
+    qmodel_38max: { contextWindow: 1_000_000, supportsImages: true },
+    qfmodel: { contextWindow: 1_000_000, supportsImages: true },
+    qmodel_latest: { contextWindow: 1_000_000, supportsImages: true },
+    qmodel: { contextWindow: 1_000_000, supportsImages: true },
+    q37fmodel: { contextWindow: 1_000_000, supportsImages: true },
+    dmodel: { contextWindow: 1_000_000, supportsImages: true },
+    dfmodel: { contextWindow: 1_000_000, supportsImages: true },
+    // 智谱官方：GLM-5.3 仅文本 → 不标
     gmodel: { contextWindow: 1_000_000 },
-    gfmodel: { contextWindow: 1_000_000 },
+    gfmodel: { contextWindow: 1_000_000, supportsImages: true },
+    // GLM-5.2 纯文本 → 不标
     gm51model: { contextWindow: 1_000_000 },
-    kmodel: { contextWindow: 256_000 },
+    kmodel: { contextWindow: 256_000, supportsImages: true },
+    // M2.7 不支持图片 → 不标
     mmodel: { contextWindow: 204_800 },
+    // ⚠️ 维护者标的是「⚠️」（官方文档有，但保留意见）→ 按「不确定不标」处理
     auto: { contextWindow: 180_000 },
     // 无来源，按口径填 1M（见头注）。
-    kmodel_latest: { contextWindow: 1_000_000 },
+    kmodel_latest: { contextWindow: 1_000_000, supportsImages: true },
   },
-  /** ⚠️ **第三方档，未官方确认**：Trae 的 5 条来自第三方仓库。 */
+  /**
+   * ⚠️ **第三方档，未官方确认**：Trae 的 5 条来自第三方仓库。
+   *
+   * **其余 11 条裸名不在此表** —— 它们是 Trae 平台模型（`Doubao-*` / `qwen*` /
+   * `custom_model_gemini` …），渠道侧真实窗口可能不同，按维护者口径**不填、走兜底**，
+   * 等有渠道侧证据再补。归属见 [channels/README.md](channels/README.md) 的事实源一节。
+   *
+   * ⚠️ **`kimi-k2.7-code` 也在那 11 条里**（同一个模型 WorkBuddy 侧叫 `kimi-k2.7`，
+   * 那边标了 256K）。Trae 侧的窗口没有渠道证据，所以这里**不填** ——
+   * 别把 WorkBuddy 的值搬过来：同一模型在不同渠道上限本就可能不同。
+   */
   trae: {
-    'deepseek-v4.1-flash': { contextWindow: 1_000_000 },
-    'glm-5.2': { contextWindow: 1_000_000 },
+    'deepseek-v4.1-flash': { contextWindow: 1_000_000, supportsImages: true },
+    'glm-5.2': { contextWindow: 1_000_000, supportsImages: true },
     'glm-5.3': { contextWindow: 1_000_000 },
-    'kimi-k2.6': { contextWindow: 256_000 },
-    'minimax-m3': { contextWindow: 1_000_000 },
+    'kimi-k2.6': { contextWindow: 256_000, supportsImages: true },
+    'minimax-m3': { contextWindow: 1_000_000, supportsImages: true },
   },
 }
 
