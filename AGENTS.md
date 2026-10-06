@@ -275,6 +275,16 @@ python check-line-endings.py <本仓根> --target lf
 - **`.gitignore` 只对未追踪的文件生效** —— 加了忽略规则还要 `git rm -r --cached`
   才真的生效；验收走 `gh api`，⚠️ **别用 PowerShell 查中文路径**（引用与编码不一致
   会让 `git ls-tree` / `cat-file` 给出自相矛盾的结果）。
+- **推 tag 不会自动产生 Release** —— tag 是 git 引用，Release 是挂在它上面的独立页面
+  对象，**必须显式创建**。漏了的症状是「标签页有 tag、右边没有 Release」，
+  而 npm 那半**一切正常**，发布日志里看不出少了什么（v0.1.2 就这么漏掉了）。
+  ⚠️ 建 Release 要 `permissions: contents: write` —— 只读时 npm 仍会成功，
+  挂在最后的 `gh release create` 才 403，症状与「没写这一步」一模一样。
+  正文按约定放 `docs/releases/<tag>.md`，流程见[发布手册](docs/PUBLISHING.md) §3.1。
+- **`npm view` 查不到刚发布的版本不等于发布失败** —— npm 侧有传播延迟，
+  发布成功后几分钟内它可能仍报旧版本、甚至对新版本报 `E404`。判据是发布日志里的
+  `+ dsh-cpa-switch@<版本>`；要权威结果直查 registry，别据此重发（版本号不可撤销）。
+  见[发布手册](docs/PUBLISHING.md) §3.3。
 - **PR 的正文与评论：链接写绝对 URL、ref 用 `main`、文本走文件** —— 相对路径会被 GitHub
   解析到 `.../compare/<path>` 这个空视图；写功能分支名则更糟：分支合并后会被删，
   链接**永久 404**；正文**内联**进命令行会被 PowerShell 吃掉反引号（**仓库内的文档**照旧用

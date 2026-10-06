@@ -85,13 +85,27 @@ git push origin v0.3.0
 ```
 
 标签推上去触发 [publish.yml](../.github/workflows/publish.yml)：跑全量门禁 →
-核对 tag 与 `package.json` 一致 → `npm publish --provenance`。
+核对 tag 与 `package.json` 一致 → `npm publish --provenance` → 建 GitHub Release。
 
 ⚠️ **版本号必须在打标签之前就 bump 且 build 过**（见 §1 的 ③）—— workflow 不改版本号。
 标签名只是触发条件与校验依据，**决定发哪个版本的是 `package.json`**。
 
 ⚠️ **已发布的版本号不能重发**。发布失败要重来，若 npm 上已有该版本，
 先 bump 到下一个 patch 再打新标签，别反复推同一个标签。
+
+#### Release 正文
+
+**tag 与 Release 是两回事** —— tag 是 git 引用，Release 是挂在它上面的独立页面对象。
+`git push origin v0.3.0` **只会**产生 tag；Release 由 workflow 显式创建。
+
+正文按约定取 **`docs/releases/<tag>.md`**（例：`docs/releases/v0.3.0.md`）——
+**发版前先写好这个文件并提交**，与 bump 版本号同批。没有该文件时回落到 git log 摘要，
+**不会失败**（建出来就比没有强，正文可事后编辑），但那种正文可读性差，
+所以正常流程应当有。
+
+写法参考 §2 的版本号语义：**先说使用者能观察到什么**（新增 / 修复 / 升级方式），
+机制作为子条目，内部重构只留一段概括。判据同 PR 正文 ——
+一段如果只是把 commit 列表复述一遍，就不该存在。
 
 ### 3.2 手工（备用）
 

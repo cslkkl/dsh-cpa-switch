@@ -23,7 +23,10 @@ on:
 
 permissions:
   id-token: write # OIDC 换发布权，必需
-  contents: read
+  # ⚠️ **必须是 write** —— 建 Release 要写仓库内容。
+  # 只读时 npm 那半仍会成功，挂在最后的 `gh release create` 才 403 ——
+  # 症状与「推 tag 不建 Release」一模一样，看不出是权限问题。
+  contents: write
 
 jobs:
   publish:
@@ -73,3 +76,39 @@ jobs:
       # `--provenance` 让 npm 记录产物来源（由 OIDC 提供），供应链可追溯。
       - name: Publish
         run: npm publish --access public --provenance
+
+      # ⚠️ **推 tag 不会自动产生 Release** —— tag 是 git 引用，Release 是挂在它上面的
+      # 独立页面对象，必须显式创建。漏了这一步的症状是「标签页有 tag、右边没有
+      # Release」，而 npm 那边**一切正常**，所以从发布日志上看不出少了什么
+      # （v0.1.2 就是这么漏掉的；v0.2.0 的 Release 是人类手工补的）。
+      #
+      # 正文优先取 `docs/releases/<tag>.md`（人工写，质量高）；没有就回落到
+      # git log 摘要。**不因缺正文而失败** —— Release 建出来就比没有强，
+      # 正文可以事后编辑。
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = "docs/releases/$tag.md"
+
+          if (Test-Path $notes) {
+            Write-Output "using release notes from $notes"
+            $bodyFile = $notes
+          } else {
+            Write-Output "no $notes — falling back to git log"
+            $prev = (git describe --tags --abbrev=0 "$tag^" 2>$null)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($prev)) {
+              $range = $tag
+            } else {
+              $range = "$prev..$tag"
+            }
+            $lines = git log --pretty=format:'- %s' $range
+            $bodyFile = Join-Path $env:RUNNER_TEMP 'release-body.md'
+            "## What's Changed`n`n$($lines -join "`n")" | Set-Content -Path $bodyFile -Encoding utf8
+          }
+
+          # `--verify-tag`：标签已被本 workflow 上游的 checkout 确认存在，这里不让
+          # gh 去猜或新建标签。幂等性交给 workflow 本身（tag 只会触发一次）。
+          gh release create $tag --title $tag --notes-file $bodyFile --verify-tag
