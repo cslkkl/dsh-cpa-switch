@@ -157,6 +157,9 @@ larger than the difference between levels — so offering them would set a false
 two values with certain meaning are exposed: **off** and **on**. Data and reasoning are in the
 [decision record](.agents/notes/2026-10-06-reasoning-effort-two-levels.md).
 
+⚠️ **The word sent for "off" adapts to the channel** (zcode only accepts `none`, not `off`), so
+choosing **off** works on all four channels without being rejected over wording.
+
 ⚠️ If the upstream ever rejects a level value (the whole turn errors out), **switch that setting
 off** to recover.
 
