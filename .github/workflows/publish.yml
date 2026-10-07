@@ -145,11 +145,17 @@ jobs:
             Write-Output "::notice::release notes come from $notes (hand-written override)"
             Copy-Item $notes $bodyFile
           } else {
-            $draft = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" `
-              --jq '[.[] | select(.draft) | select(.tag_name == "next") | .body][0] // ""' 2>$null
+            # ⚠️ **必须 `-join` 成「一个字符串」**：PowerShell 会把多行输出存成**字符串数组**，
+            # 那时 `.Length` 是**元素个数**（实测报 8，而正文 161 字符）—— 而日志里那句
+            # 「来自草稿（N chars）」正是用来确认来源的，数字错会误导。
+            $draft = (gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" `
+              --jq '[.[] | select(.draft) | select(.tag_name == "next") | .body][0] // ""' 2>$null) -join "`n"
 
             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($draft)) {
-              Write-Output "::notice::no $notes — release notes come from the Release Drafter draft ($($draft.Length) chars)"
+              # 带上首行当**指纹**：草稿首行是 `## 修复` 这类分类标题，
+              # 而 git log 回落的首行是 `## What's Changed` —— 一眼分得出走了哪条路。
+              $preview = ($draft -split "`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -First 1)
+              Write-Output "::notice::no $notes — release notes come from the Release Drafter draft ($($draft.Length) chars, starts with: $preview)"
               Set-Content -Path $bodyFile -Value $draft -Encoding utf8
             } else {
               Write-Output "::notice::no $notes and no draft — falling back to git log"
