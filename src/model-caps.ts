@@ -156,13 +156,76 @@ export interface ModelCaps {
  *
  * ## 值的选择
  *
- * - 关 → `off`：实测让上游产出 0 个思考 token（与 `none` 等效）。
+ * - 关 → `off`（**zcode 例外：`none`**，见 {@link OFF_SPELLING}）。
  * - 开 → `high`：档位名用最熟悉的一个，**不承诺深浅**。
  *
- * 两档都不是「模型能力」而是「请求参数」—— 所以**不分渠道、不逐模型标注**，
- * 由 {@link reasoningEffortsOf} 按总开关统一给出。
+ * 两档都不是「模型能力」而是「请求参数」—— 所以**不逐模型标注**，
+ * 由 {@link reasoningEffortsOf} 按总开关 + 渠道给出。
  */
 export const REASONING_EFFORTS = { off: 'off', high: 'high' } as const
+
+/** 档位**名**（宿主与界面认的那个键）—— 从 {@link REASONING_EFFORTS} 推导，不手写。 */
+const OFF_KEY = 'off' as const
+const HIGH_KEY = 'high' as const
+
+/**
+ * 「关」发出去的值 —— **按渠道给**，因为上游认的词不同。
+ *
+ * ## 为什么不能只有一个 `off`
+ *
+ * `zcode` 的合法词汇表里**没有 `off`**，只有 `none`（实测 2026-10-06）：
+ *
+ * ```
+ * model=zcode/glm-5.2  reasoning_effort=off
+ * → 400 upstream 400: {"error":{"code":"1210","message":
+ *     "reasoning_effort must be one of: none, minimal, low, medium, high, xhigh, max"}}
+ * ```
+ *
+ * 即**在 zcode 上选「关」会让整轮对话失败** —— 那是**硬错误**，不是「档位不生效」。
+ * 这与 `AGENTS.md` 记的 `11150` 是同一类症状（上游对推理档位返硬错误），
+ * 但成因不同：那次是上游抽风，这次是**我们的值本来就写错了**。
+ *
+ * 证据（`zcode/glm-5.2`，每档 3 次）：`off` **3/3 被 `1210` 拒**；
+ * `none` 3/3 通过参数校验（随后落到 `3006 model not allowed` —— 那是模型不可用，
+ * **与档位无关**，别混为一谈）。`zcode/glm-5.3` 九个档位全部 200，也接受 `none`。
+ *
+ * ## 为什么按渠道就能表达
+ *
+ * `reasoningEfforts` 是 **provider 级**声明，而**渠道与 provider 一一对应**
+ * （见 `route-registry.ts` 的 `providerId` 粒度）—— 所以「按渠道换拼写」在现有结构下
+ * 就做得到，**不必拆 provider**。
+ *
+ * ## 为什么不是 `none` 一刀切
+ *
+ * 其余三个渠道实测接受 `off` 且与 `none` 等效（都是 0 个思考 token）。
+ * 为一个渠道去改另外三个渠道的请求参数，收益为零而风险非零。
+ *
+ * ⚠️ **超集安全、缺项不安全**：宿主只校验声明**形状**（非空、除 `off` 外至少一个、
+ * 值非空串），**不校验值是否为上游认的词** —— 写错只会到请求时才炸，且炸掉整轮对话。
+ * 所以这里的每个值都必须有实测出处，**别猜**。
+ *
+ * ⚠️ **每个渠道都要有一个值**：漏了就会退回 `REASONING_EFFORTS.off`，
+ * 而在只认 `none` 的渠道上那正是崩的那个值。判据钉住这条。
+ *
+ * 理由与替代方案见[决策记录](../.agents/notes/2026-10-06-reasoning-off-spelling-per-channel.md)。
+ */
+const OFF_SPELLING: Readonly<Record<string, string>> = { zcode: 'none' }
+
+/** 「开」发出去的值 —— 四个渠道实测都认 `high`，暂无按渠道差异。 */
+const HIGH_SPELLING = REASONING_EFFORTS.high
+
+/**
+ * 某渠道「关」发出去的值（查不到就是 `off`）。
+ *
+ * 供判据逐渠道枚举用 —— **每个渠道都得能取到一个值**，落空即退回 `off`，
+ * 而在只认 `none` 的渠道上那正是崩的那个值。
+ */
+export function offSpellingOf(channel: string): string {
+  const key = String(channel ?? '')
+    .trim()
+    .toLowerCase()
+  return OFF_SPELLING[key] ?? REASONING_EFFORTS.off
+}
 
 /**
  * 路由的默认档位 —— 声明它**为了去掉选择器里的「Default」那一行**。
@@ -200,7 +263,7 @@ export const REASONING_EFFORTS = { off: 'off', high: 'high' } as const
 export const REASONING_DEFAULT = 'high' as const
 
 /**
- * 按总开关给出宿主要的 `reasoningEfforts` 声明；关掉时返回 `undefined`（不声明）。
+ * 按总开关 + 渠道给出宿主要的 `reasoningEfforts` 声明；关掉开关时返回 `undefined`（不声明）。
  *
  * ⚠️ **返回形状由宿主规定**（`dsh-llm-pi-ai` 的 `resolveModelReasoning`），
  * 违约的后果**不是「这个模型没档位」而是整个 provider 注册失败、所有模型一起消失**：
@@ -209,14 +272,22 @@ export const REASONING_DEFAULT = 'high' as const
  * - 除 `off` 外没有别的档位 → `offers no level beyond "off"`；
  * - 除 `off` 外的档位值为空串 → `must not be an empty string`。
  *
- * 所以这里**返回常量而非拼装**：形状在源码里一眼看全，改不动就编译不过。
+ * 形状由本函数保证（键固定两枚、值取自常量表），**调用方别自己拼**。
  * 判据见 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)。
  *
+ * ⚠️ **档位名与发出去的值是两回事**：名字（键）永远是 `off` / `high`，
+ * 宿主与界面只认这个；值（`'off'` / `'none'`）才是给上游的词，按渠道给。
+ * 所以界面文案不受本函数影响 —— 用户看到的仍是「关」与「开」。
+ *
  * @param enabled 面板上的总开关（「允许切换思考档位」）。
+ * @param channel 渠道 id；决定「关」发哪个词（见 {@link OFF_SPELLING}）。
  */
-export function reasoningEffortsOf(enabled: boolean): Readonly<Record<string, string>> | undefined {
+export function reasoningEffortsOf(
+  enabled: boolean,
+  channel = '',
+): Readonly<Record<string, string>> | undefined {
   if (!enabled) return undefined
-  return { ...REASONING_EFFORTS }
+  return { [OFF_KEY]: offSpellingOf(channel), [HIGH_KEY]: HIGH_SPELLING }
 }
 
 /**
