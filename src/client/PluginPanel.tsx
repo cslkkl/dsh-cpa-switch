@@ -60,55 +60,6 @@ export interface PluginPanelProps {
   readonly onAccountDisabled: (authIndex: string, disabled: boolean) => void
 }
 
-/**
- * 把宿主上报的安装进度渲染成一行话。
- *
- * 宿主 `onStep` 的 `phase` 取值见宿主的 `setup/prepare()`：
- * `query` / `download` / `progress` / `verify` / `extract` / `done`。
- * 这里**只做展示，不做状态判断** —— 进度缺失（`undefined`）时返回空串，
- * 让调用方退回显示通用文案，而不是显示 `undefined`。
- */
-export function progressLine(progress: unknown, t: Translate): string {
-  if (progress === null || typeof progress !== 'object') return ''
-  const record = progress as Record<string, unknown>
-  const label = typeof record.label === 'string' && record.label !== '' ? record.label : ''
-
-  /** 有子项名就拼在后面；分隔与标点都在文案里，不在代码里。 */
-  const withLabel = (step: string): string =>
-    label === '' ? step : t('setupStepWithLabel', { step, label })
-
-  const sizes = (received: unknown, total: unknown): string => {
-    const r = Number(received)
-    const tt = Number(total)
-    if (!Number.isFinite(r) || !Number.isFinite(tt) || tt <= 0) return ''
-    const mb = (n: number): string => (n / (1024 * 1024)).toFixed(1)
-    return t('progressBytes', {
-      received: mb(r),
-      total: mb(tt),
-      percent: String(Math.min(100, Math.round((r / tt) * 100))),
-    })
-  }
-
-  switch (record.phase) {
-    case 'query':
-      return withLabel(t('setupStepQuery'))
-    case 'download':
-      return withLabel(t('setupStepDownload'))
-    case 'progress': {
-      const size = sizes(record.received, record.total)
-      return size === ''
-        ? withLabel(t('setupStepProgress'))
-        : `${withLabel(t('setupStepProgress'))} ${size}`
-    }
-    case 'verify':
-      return withLabel(t('setupStepVerify'))
-    case 'extract':
-      return withLabel(t('setupStepExtract'))
-    default:
-      return ''
-  }
-}
-
 /** 一个渠道的面板。 */
 export function PluginPanel(props: PluginPanelProps): ReactNode {
   const { plugin, meta, t, onAccountDisabled } = props
@@ -391,11 +342,10 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
           <>
             <div className={css.hint}>{t('loginHint')}</div>
             <a
-              className={css.hint}
+              className={`${css.hint} ${css.loginUrl}`}
               href={accountLogin.login.url}
               target="_blank"
               rel="noreferrer noopener"
-              style={{ wordBreak: 'break-all' }}
             >
               {accountLogin.login.url}
             </a>
