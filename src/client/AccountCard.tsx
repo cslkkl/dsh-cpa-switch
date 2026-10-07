@@ -347,7 +347,10 @@ export function AccountCard(props: AccountCardProps): ReactNode {
       <div className={css.meterSlot}>
         {view.meter.show && (
           <div className={css.meter}>
-            <div className={css.meterFill} style={{ width: String(view.meter.percent) + '%' }} />
+            <div
+              className={css.meterFill}
+              style={{ '--cpa-meter-percent': String(view.meter.percent) + '%' }}
+            />
           </div>
         )}
       </div>

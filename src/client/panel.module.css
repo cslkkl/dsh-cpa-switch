@@ -466,8 +466,21 @@
   overflow: hidden;
 }
 
+/* 进度条的填充宽度。
+ *
+ * ⚠️ **宽度必须在这里声明，值由 TS 提供**（`--cpa-meter-percent`）。
+ * 早先宽度只写在内联样式上，于是**值一旦不合法，`width` 回落成 `auto`** ——
+ * 填充铺满整条轨道，读起来就是「还剩 100%」的满格绿条，而没有任何报错。
+ *
+ * ⚠️ 那个 `0%` 兜底**不是装饰**：变量缺失时（换了调用方、忘了给值）
+ * `var()` 没有兜底就是 IACVT，`width` 照样回落成 `auto`。兜底把「没给值」
+ * 变成「空条」—— 少显示比**假报满格**安全得多。
+ *
+ * ⚠️ 变量带 `--cpa-` 前缀：自定义属性**不会被 CSS Modules 改名**（只有类名与
+ * `@keyframes` 会），不带前缀就可能与宿主同名相撞，而相撞不报错。 */
 .meterFill {
   height: 100%;
+  width: var(--cpa-meter-percent, 0%);
   background: var(--dsw-alias-state-success-primary);
 }
 
@@ -527,6 +540,14 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* 登录链接。URL 可能很长（带一长串查询参数），要允许在任意字符处折行，
+   否则它会把弹窗顶宽。
+   ⚠️ 这条原先写在 JSX 的 `style={{ wordBreak: 'break-all' }}` 里 —— 静态样式
+   归样式表（见 [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §4.10）。 */
+.loginUrl {
+  word-break: break-all;
 }
 
 .error {
