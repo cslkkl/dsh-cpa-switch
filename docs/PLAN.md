@@ -380,7 +380,22 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
 ### 2.9 结构改动（**先补判据再动结构**）
 
 改行为或签名的改动都走这个口径：**判据先到位，才允许动结构**。
-两件已立项的都在 2026-10-06 收口了：
+
+**立项中**：
+
+- **按模型声明思考档位（需要先把 `providerId` 拆细）** ——
+  维护者口径是「**关不掉的就把档位列删掉**，不留一个假的『关』」，而全量实测显示
+  99 个模型里只有 10 个是真开关、23 个方向相反、9 个关不掉
+  （[实测报告](../docs/audits/2026-10-06-reasoning-effort-off-vs-high.md)）。
+  当前做不到的原因是结构性的：`reasoningEfforts` 是 **provider 级**（按渠道）声明，
+  条件是按模型分的；且宿主的硬校验要求「除 `off` 外至少一个档位」，
+  删成空对象或只剩 `off` **不是「这个模型没档位」，是整个 provider 注册失败、
+  该渠道所有模型一起消失**（判据 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)）。
+  动之前要先补的判据：**拆细后模型选择器的分组不出现重复条目**、
+  **每个 provider 的 `reasoningEfforts` 都满足宿主三条硬约束**。
+  与根 [AGENTS.md](../AGENTS.md) 待办区那条「`providerId` 粒度裁决」是同一件事。
+
+**已完成**：
 
 - **状态文件写入**（`state.ts`）—— 判据先证明旧写法真的会吞记录（两条用例当时是红的），
   再改成单入口读改写：[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)、
@@ -419,7 +434,7 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)、
   判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts)。
 
-⚠️ 本节**当前没有立项项** —— 新条目照上面的口径办：先补判据，再动结构。
+⚠️ 除上面那条立项项外，本节没有别的在办条目 —— 新条目照上面的口径办：先补判据，再动结构。
 
 ---
 

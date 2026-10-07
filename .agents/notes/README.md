@@ -4,7 +4,7 @@
 
 ## 命名
 
-`<主题>-<日期>.md`，主题用 kebab-case，日期 `YYYY-MM-DD`。例：`2026-10-04-panel-slot-move.md`。
+`<日期>-<主题>.md`，日期 `YYYY-MM-DD` 在前，主题用 kebab-case。例：`2026-10-04-panel-slot-move.md`。
 
 ## 每篇的结构
 
