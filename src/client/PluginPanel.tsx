@@ -10,7 +10,7 @@
  */
 
 import type { ReactNode } from 'react'
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/domain.ts'
 import { AccountCard } from './AccountCard.tsx'
@@ -18,6 +18,8 @@ import { unitTextOf } from './credit-text.ts'
 import { paths } from './endpoints.ts'
 import { fmt } from './format.ts'
 import { amountWithUnit, sumCredits } from './meter-text.ts'
+import { rememberAccountCount } from './skeleton-hint.ts'
+import { SkeletonCards, SkeletonStatus, SkeletonSummary } from './Skeleton.tsx'
 import { useAccountLogin } from './use-account-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
@@ -172,6 +174,18 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
 
   /**
+   * 记下本渠道读到几个账号 —— 供**下一次首屏**决定摆几张占位卡。
+   *
+   * ⚠️ 只影响「摆几张骨架」，不参与任何显示或判断；存不进去就静默退化。
+   * 为什么不做成「首屏从缓存数账号」：骨架出现时缓存必然是空的（有值就不进
+   * `loading`），所以只有跨页面加载的记忆能帮上忙。见 `skeleton-hint.ts`。
+   */
+  useEffect(() => {
+    if (accountsResource.loading) return
+    rememberAccountCount(plugin, accounts.length)
+  }, [plugin, accounts.length, accountsResource.loading])
+
+  /**
    * 合计。判据在 `sumCredits`（纯函数）—— **缺的字段不参与累加**，
    * 而每格各配一个「有几个账号真的贡献了这个数」，为 0 时界面填 `—` 而不是 0。
    */
@@ -215,7 +229,13 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        * 一个词、**没有任何数字** —— 三格有数、一格光有词，看着头重脚轻。
        * 现在单位并进额度池那格（`13,683 积分`），三格都有数字
        * （2026-10-05 维护者定案）。
+       *
+       * ⚠️ 加载期这一块要**占位**：它和下面的卡片网格是同一份数据、一起出现，
+       * 只占位卡片的话，汇总行插进来会把下面整块顶下去（见 `Skeleton.tsx`）。
+       * 加载期 `showSummary` 本来就是 false（账号列表还空），所以两段不会同屏。
        */}
+      {accountsResource.loading && <SkeletonSummary />}
+
       {showSummary && (
         <div className={css.summary}>
           <div className={css.summaryCell}>
@@ -317,14 +337,22 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       {/*
        * 账号网格 + 「+ 添加账号」卡片。
        *
-       * 添加卡片**始终**渲染（空列表时它是唯一入口），所以不用「有账号才画网格」
-       * 的分支 —— 空列表也画网格，里面只有添加卡片。
+       * ⚠️ **网格始终渲染**，「添加账号」是**真实按钮**、任何时候都在 ——
+       * 它是空列表时的唯一入口，加载期也没有理由把它换成占位。
+       * 于是这个分支里只有「账号卡」这一部分会在骨架与真卡之间切换：
+       *   加载中 → `SkeletonCards`（几张与真实卡同几何的骨架卡）
+       *   读完   → `accounts.map(...)`
+       * 这正是「只有真实存在的账号才用骨架」的落点。
        */}
-      {accountsResource.loading ? (
-        <div className={css.blank}>{t('loading')}</div>
-      ) : (
-        <div className={css.grid}>
-          {accounts.map((account) => (
+      <div className={css.grid}>
+        {accountsResource.loading ? (
+          <>
+            {/* 读屏文案：骨架卡是装饰，这里说一次「正在读取」。 */}
+            <SkeletonStatus label={t('loading')} />
+            <SkeletonCards plugin={plugin} />
+          </>
+        ) : (
+          accounts.map((account) => (
             <AccountCard
               key={account.authIndex ?? account.authId}
               account={account}
@@ -348,16 +376,16 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               locked={actions.busy}
               onReload={() => reload({ force: true })}
             />
-          ))}
-          <button type="button" className={css.addCard} onClick={openLogin}>
-            <span className={css.addPlus}>+</span>
-            <span>{t('addAccount')}</span>
-          </button>
-        </div>
-      )}
+          ))
+        )}
+        <button type="button" className={css.addCard} onClick={openLogin}>
+          <span className={css.addPlus}>+</span>
+          <span>{t('addAccount')}</span>
+        </button>
+      </div>
 
       {accountsResource.error !== undefined && (
-        <div className={css.blank}>{t('loadFailedWith', { reason: accountsResource.error })}</div>
+        <div className={css.failed}>{t('loadFailedWith', { reason: accountsResource.error })}</div>
       )}
 
       {/*

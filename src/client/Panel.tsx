@@ -12,6 +12,7 @@ import { prefetch } from './read-cache.ts'
 import { PluginPanel, progressLine } from './PluginPanel.tsx'
 import type { PluginMeta } from './PluginPanel.tsx'
 import { RoutingSection } from './RoutingSection.tsx'
+import { SkeletonPanel } from './Skeleton.tsx'
 import { statusView } from './status-text.ts'
 import type { StatusInput, StatusView } from './status-text.ts'
 import { useResource } from './use-resource.ts'
@@ -378,11 +379,16 @@ export function Panel(props: PanelProps): ReactNode {
         />
       )}
 
-      {pluginsResource.loading && <div className={css.blank}>{t('loading')}</div>}
-
-      {activeMeta === undefined && !pluginsResource.loading && (
-        <div className={css.blank}>{t('loading')}</div>
-      )}
+      {/*
+       * 还没有渠道面板可渲染的那一段（渠道清单未到 / 页签尚未校正）—— 用骨架占位。
+       *
+       * ⚠️ 原来是**两条分支**各渲染同一句「读取中…」：`pluginsResource.loading`
+       * 一条、`activeMeta === undefined && !loading` 再一条。而 `plugins` 是
+       * `?? []`，清单没到时 `activeMeta` 必然是 `undefined`，所以两条的并集就是
+       * `activeMeta === undefined`。合成一条既少一处重复，也不会让同一句文案
+       * 分居两地、将来各改一半。
+       */}
+      {activeMeta === undefined && <SkeletonPanel plugin={active} label={t('loading')} />}
 
       {/*
        * ⚠️ **这里刻意没有 `key={activeMeta.id}`。**

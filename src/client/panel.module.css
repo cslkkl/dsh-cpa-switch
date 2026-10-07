@@ -535,13 +535,225 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
-/* Loading and empty share one block: both are "nothing to show yet", and
-   centring them at the same height keeps the panel from jumping when data
-   arrives. */
-.blank {
+/* The read-failed sentence. **Failure only** — "nothing to show yet" moved to the
+   skeleton below (2026-10-07), so the two no longer share a name. Sharing one made
+   the same position read as "loading" on one channel and "broken" on another. */
+.failed {
   padding: 24px;
   text-align: center;
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* ---- Skeleton ---------------------------------------------------------- */
+
+/* The first frame of the panel: bones shaped like the content that is coming.
+ *
+ * Why not the old one-line "读取中…": the summary row and the card grid appear
+ * **together**, and a sentence is far shorter than what replaces it — the whole
+ * block jumped down on arrival. The skeleton is what removes that jump.
+ *
+ * ⚠️ **The geometry is the real one.** Every container here is the genuine
+ * `.summaryCell` / `.card` / slot class, so 222px card height, 260px columns and
+ * 12px gaps keep exactly one definition. What is new is only the bone and one
+ * sweep carrier (`.skeletonBlock`). */
+
+/* A bone: a painted placeholder. Shape and colour only.
+ *
+ * ⚠️ **`display: block` is not decoration** — width/height do nothing on an
+ * inline box, and the bones would collapse to zero height. */
+.bone {
+  display: block;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-bg-skeleton);
+}
+
+/* ---- The sweep, and why it hangs on the block and not on a bone ---------- */
+
+/* One light pass per **block** (a card, a summary cell, the ghost toolbar row),
+ * not one per bone.
+ *
+ * ⚠️ **Why this is not on `.bone`** (2026-10-07, maintainer's report「同一张卡片里
+ * 两种截然不同的动效同时播放」): a bone clipped its own band, so the band's width
+ * relative to that bone decided the *kind* of motion —
+ *   1. a bone narrower than the band (the 36px switch vs a 160px band with a
+ *      48px opaque core) never escapes the band at all: it **breathes** (整块亮起
+ *      再暗下) instead of being swept;
+ *   2. a bone wider than the band (the 248px meter) lets the band enter and leave
+ *      fully — a **slide**;
+ *   3. and the travel is `band + bone width` (the layer is bone-wide, so
+ *      `translateX(100%)` means one bone width), so equal periods gave the switch
+ *      a 1.7× slower band than the card — same phase, different speed.
+ * On the block, one card has **one band, one speed, one beat**: the bones are
+ * merely painted underneath and get swept in turn.
+ *
+ * ⚠️ Applied to the **skeleton** container, never to the real `.card`:
+ * `overflow: hidden` there would clip the focus rings of the switch and buttons
+ * inside it (outlines are painted outside the box and clipped by an ancestor).
+ * The skeleton card holds no interactive element, so clipping it is free. */
+.skeletonBlock {
+  /* The band width. **Absolute pixels, defined once** — the sweep start below
+     reads the same variable. A percentage here is the one thing this must never
+     be: on a narrow block it collapses into a thin line.
+     ⚠️ Custom properties are **not** renamed by CSS Modules (only class names and
+     `@keyframes` are), so this name is global to the page and carries the plugin
+     prefix to stay out of the host's way. */
+  --cpa-sweep-width: 160px;
+
+  position: relative;
+  overflow: hidden;
+}
+
+/* The sweep.
+ *
+ * The layer is **as wide as the block** (`inset: 0`) and the band is one
+ * no-repeat background of a fixed pixel size inside it. That is what makes
+ * `translateX(100%)` mean "one whole block further right": with the layer sized
+ * to the band itself, `100%` would only travel the band's own width and could
+ * never leave a wide block on the right. That detail is the whole trick.
+ *
+ * ⚠️ The peak is `color-mix(… 65%, transparent)`, **not** the raw token: a
+ * 100%-opaque background-coloured band reads as a hard-edged stripe. At 65% it
+ * still lifts a bone clearly while its feathered ends stay soft.
+ *
+ * ⚠️ Only `transform` animates — the band moves by moving the layer, not by
+ * animating `background-position`. */
+.skeletonBlock::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--dsw-alias-bg-base) 65%, transparent) 35%,
+    color-mix(in srgb, var(--dsw-alias-bg-base) 65%, transparent) 65%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: var(--cpa-sweep-width) 100%;
+  transform: translateX(calc(-1 * var(--cpa-sweep-width)));
+  animation: cpa-skeleton-sweep 2.4s linear infinite;
+}
+
+/* Only `to` is written: `from` is the element's own value (the `transform`
+   above), so **the band width has exactly one home** and cannot drift apart
+   between the start position and the gradient.
+   Every block shares this one animation and there is **no `animation-delay`** —
+   same phase everywhere, so nothing is staggered. */
+@keyframes cpa-skeleton-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Reduced motion: stop the animation, keep the bones.
+   The band rests at its off-block start position, so nothing is left showing. */
+@media (prefers-reduced-motion: reduce) {
+  .skeletonBlock::after {
+    animation: none;
+  }
+}
+
+/* Skeleton card = the real card plus the sweep carrier.
+   Two classes, two jobs: `.card` owns the 222px and the six slots, this one owns
+   nothing but "this card is a skeleton" (and it keeps the two apart so the sweep
+   never touches the real `.card`). */
+.skeletonCard {
+  border-color: transparent;
+}
+
+/* Bone shapes, keyed by the shape the component declares. TS says *which* slot a
+   bone stands in; the width and height of that slot are declared here.
+   ⚠️ The attribute is a **string-valued** flag on purpose: `data-x={false}` still
+   renders `data-x="false"` and would keep matching `[data-x]`, so boolean
+   attributes are not usable for this. */
+.bone[data-shape='nickname'] {
+  width: 55%;
+  height: 14px;
+  /* 头行是「昵称靠左 … 开关靠右」。真实卡片靠 `.nickname` 的 `flex: 1 1 auto`
+     把开关顶到右边；骨头只占 55%，所以用 auto 外边距吃掉剩下的空档，
+     让开关落在与真实卡片**同一个位置**（不动 `.headSwitch` 那半边）。 */
+  margin-right: auto;
+}
+
+.bone[data-shape='switch'] {
+  width: 36px;
+  height: 20px;
+}
+
+.bone[data-shape='tag'] {
+  width: 64px;
+  height: 17px;
+}
+
+/* The two figures and the facts line live in **fixed-height** slots, so how tall
+   these bones are cannot change the card's height — `.card` owns that. */
+.bone[data-shape='number-label'] {
+  width: 40%;
+  height: 12px;
+}
+
+.bone[data-shape='number-value'] {
+  width: 70%;
+  height: 18px;
+  margin-top: 4px;
+}
+
+.bone[data-shape='meter'] {
+  width: 100%;
+  height: 4px;
+}
+
+/* 说明行是**一行**（常态）。它在 CSS 里留了 36px 的夹断容量（两行）——
+   那是给「上游档位名长得离谱」准备的兜底，不是常态：`factsOf()` 最多拼三项
+   （`N 包` · `套餐：X` · `剩余 ?`），而且每项都只在真有值时才出现，
+   所以正常就是「37 包 · 套餐：免费版」这种长度。
+   骨架照**常态**摆一条、宽度也照真实文案 —— 真实那行在 236px 的卡里约占一半，
+   所以这里取 52%；摆两条 88% 的骨头等于暗示「这里有两行长文」，那是在骗人。 */
+.bone[data-shape='facts'] {
+  width: 52%;
+  height: 12px;
+}
+
+.bone[data-shape='action'] {
+  width: 56px;
+  height: 28px;
+}
+
+/* The toolbar's own buttons are wider than a card's — this keeps the ghost row
+   the same width as the row of real buttons that replaces it. */
+.bone[data-shape='button'] {
+  width: 64px;
+  height: 28px;
+}
+
+/* The summary cells are **the exception**: they carry no fixed height, their
+   height *is* text line boxes + padding + border. So these two bones stand in
+   for the two real line boxes (12px × 1.5 = 18, 19px × 1.5 = 28.5) exactly —
+   otherwise the reserved row would be taller or shorter than the real one and
+   the panel would still shift when the numbers arrive. */
+.bone[data-shape='summary-label'] {
+  width: 40%;
+  height: 18px;
+}
+
+.bone[data-shape='summary-value'] {
+  width: 62%;
+  height: 28.5px;
+}
+
+/* Screen-reader only. The skeleton itself is decoration (`aria-hidden`), so the
+   "loading" sentence is carried by one element like this one — that is also why
+   the `loading` text stays referenced in the dictionaries. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
 }
 
 /* ---- Read-only sections ------------------------------------------------ */
