@@ -159,11 +159,18 @@
 - **`endpoints.ts`** —— `/api/v1/cpa/*` 的**端点与解码**：`paths` 与逐个读 / 写函数。
   - 导出：`paths`（路径的**唯一来源**，别处不许再写字面量）/ `fetchSetup` / `runSetup` /
     `fetchStatus` / `startCpa` / `act` / `selectCpaAccount` / `setAccountEnabled` /
-    `setAutoCheckin` / `startAuth` / `authStatus` / `authCancel`
+    `setAutoCheckin` / `autoCheckinOf` / `startAuth` / `authStatus` / `authCancel`
   - ⚠️ **写函数自己失效缓存**（不是让调用方记得）：`act` / `selectCpaAccount` /
-    `setAccountEnabled` → `accounts:` 前缀，`setAutoCheckin` → `autockin:` 前缀。
-    **前缀必须与宿主 `cacheKeys` 造出的键一致**（键即失效前缀）—— 对不上不报错，
-    只是界面永远显示写之前的值
+    `setAccountEnabled` / `setAutoCheckin` → 都是 `accounts:` 前缀。
+    ⚠️ **前缀必须对上「本半边真的有读者」的那个读键**，不是宿主 `cacheKeys` 的名字 ——
+    两侧是**两套独立的缓存**（宿主那套在进程里、这套在页面里），同名纯属巧合。
+    `setAutoCheckin` 曾抄了宿主的 `autockin:`：本侧没有这个读键（开关的值跟着
+    `/accounts` 回来），于是那次作废匹配不到任何条目、**等于空操作**，
+    界面切完开关又弹回旧值（2026-10-07 实机，判据 `tests/client-cache-keys.test.ts`）
+  - ⚠️ **写成功后界面值取回读**（F33）：作废缓存只让**下一次**读不命中，
+    界面要拿到新值还得有人真去读一次。`autoCheckinOf` 取的就是宿主写完自己回读出来的
+    那个值（宿主 `ops/scheduling.ts` 的 `setAutoCheckin` 特意回读一次再回），
+    不是我们请求的那个值
 - **`format.ts`** —— 千分位格式化（`fmt`）。与传输 / 缓存 / 端点**都不沾边**，
   所以分开：`amountWithUnit` 那类判据只想要一个格式化函数，不该被迫认识 HTTP
 - **`locales.ts`** —— 中英文案 + 插值。

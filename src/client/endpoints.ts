@@ -116,12 +116,39 @@ export function setAccountEnabled(
   })
 }
 
-/** 切换某渠道的「自动签到」。 */
+/**
+ * 切完自动签到后，作废**哪个**读。
+ *
+ * ⚠️ 是 `accounts:`，**不是** `autockin:`。开关的值（上游 `checkin_auto`）是跟着
+ * `/accounts` 一起回来的，浏览器半边**没有** `autockin:` 这个读键 ——
+ * 那个前缀是从**宿主**的 `gateway.cacheKeys.autoCheckin()` 抄来的，而宿主有它自己
+ * 一套读缓存，两套同名纯属巧合。
+ *
+ * 抄错的代价**不是报错**：那次作废匹配不到任何缓存条目、等于空操作，
+ * 于是界面继续拿缓存里的旧值（实测最长 30 秒，正是新鲜窗口）——
+ * 用户看到「切了开关又自己弹回去」（2026-10-07 实机）。
+ */
 export function setAutoCheckin(plugin: string, enabled: boolean): Promise<ApiResult> {
   return post(paths.autoCheckin(plugin), { enabled }).then((result) => {
-    if (result.ok) invalidateReads('autockin:' + plugin)
+    if (result.ok) invalidateReads('accounts:' + plugin)
     return result
   })
+}
+
+/**
+ * 取**宿主回读**到的开关值。
+ *
+ * 写接口回什么不算数 —— 宿主自己写完会再读一次、把**读到的**那个值回给我们
+ * （见 [`src/ops/scheduling.ts`](../../ops/scheduling.ts) 的 `setAutoCheckin`：
+ * 「写接口回的不一定可靠，回读一次更稳」）。所以这里是 F33「界面值取回读」的落点：
+ * 拿它，而不是拿我们**请求**的那个值。
+ *
+ * @param result - 写请求的返回。
+ * @returns 回读值；宿主没带这个字段时是 `undefined`（调用方退回「等下次读确认」）。
+ */
+export function autoCheckinOf(result: ApiResult): boolean | undefined {
+  const data = result.data as { enabled?: unknown } | undefined
+  return typeof data?.enabled === 'boolean' ? data.enabled : undefined
 }
 
 /** 起一次渠道登录，返回 `{ok, state, url}`。 */
