@@ -26,7 +26,7 @@
 > - 渠道知识 → [src/channels/README.md](src/channels/README.md)
 > - 脚本与门禁 → [scripts/README.md](scripts/README.md)
 > - 用例覆盖 → [tests/README.md](tests/README.md)
-> - 发布链路 → [.github/README.md](.github/README.md)
+> - 发布链路 → [docs/PUBLISHING.md](docs/PUBLISHING.md)
 >
 > ⚠️ **本表与那些表都要活跃**：新增模块时，行写进**最近的那个**子树 README；
 > 只有当它真的跨子树时才回填到这里。
@@ -36,7 +36,7 @@
 | `src/index.ts` 装配          | 只挂线：造对象、挂 effect、注册路由；**流程与表都不在这里**（[决策记录](.agents/notes/2026-10-05-assembly-layer.md)）                                                                                                                                                                               |
 | 搬文件 / 改名 / 删模块       | **同批改掉文档里的旧路径** —— 代码里的旧路径当场编译报错，文档里的**零信号**；`pnpm check:doc-paths` 只扫 `src` / `tests` / `scripts` 三类裸路径（**扫不到 `docs/` 内的断链**），白名单只收历史提法且上限 10 条（[决策记录](.agents/notes/2026-10-05-doc-path-gate.md)、[手册](scripts/README.md)） |
 | `scripts/check-layering.cjs` | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                                                                                                                 |
-| `.github/workflows/**`       | 发布链路的唯一事实源：`publish.yml` 推 `v*` 标签触发；`release-drafter.yml` 维护草稿正文；`ci.yml` 只读。改任一都要同步[发布手册](docs/PUBLISHING.md)；⚠️ 逐 workflow **显式声明 `permissions`**（默认值读不到，漏了声明的症状是 403）                                                              |
+| `.github/workflows/**`       | 发布链路的唯一事实源：`publish.yml` 推 `v*` 标签触发；`release-drafter.yml` 维护草稿正文；`ci.yml` 只读。改任一都要同步[发布手册](docs/PUBLISHING.md)（现含三个 workflow 的索引）；⚠️ 逐 workflow **显式声明 `permissions`**（默认值读不到，漏了声明的症状是 403）                                  |
 | **契约 / 对外行为**          | `package.json` 版本号 + 根 [README.md](README.md)（双语同改）+ [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 的设计节                                                                                                                                                                                |
 | **新增可维护目录**           | 双件（`AGENTS.md` 规则层 + `README.md` 文档层）**缺一不可**，并回填本文档地图；否则那棵树不进文档网络                                                                                                                                                                                               |
 
@@ -73,19 +73,19 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 
 ## 文档地图
 
-| 想知道                       | 去哪                                                                                                                                     |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)）                                                                            |
-| **辅助文档区有什么、改哪**   | [docs/README.md](docs/README.md)（规则 → [docs/AGENTS.md](docs/AGENTS.md)）                                                              |
-| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                                                                                             |
-| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                                                                                             |
-| 宿主半端各模块               | [src/README.md](src/README.md)                                                                                                           |
-| 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                                                                                             |
-| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                                                                                               |
-| 测试覆盖与运行               | [tests/README.md](tests/README.md)                                                                                                       |
-| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)（规则 → [.github/AGENTS.md](.github/AGENTS.md)、索引 → [.github/README.md](.github/README.md)） |
-| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                                                                                                         |
-| 上游源码参考（只读，本机）   | [reference/README.md](reference/README.md)（本机目录，不入库）                                                                           |
+| 想知道                       | 去哪                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)）                  |
+| **辅助文档区有什么、改哪**   | [docs/README.md](docs/README.md)（规则 → [docs/AGENTS.md](docs/AGENTS.md)）    |
+| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                                   |
+| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                                   |
+| 宿主半端各模块               | [src/README.md](src/README.md)                                                 |
+| 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                                   |
+| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                                     |
+| 测试覆盖与运行               | [tests/README.md](tests/README.md)                                             |
+| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)（含 `.github/` 三个 workflow 的索引） |
+| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                                               |
+| 上游源码参考（只读，本机）   | [reference/README.md](reference/README.md)（本机目录，不入库）                 |
 
 ## 事实来源（只查不抄）
 
@@ -247,6 +247,16 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
   **标签最多 3 个 = 批次标签 + 主类型**；**子类型（`test` / `docs` / `chore`）写进正文、
   不进标签**（它们与主类型同轴，并列打会让按类型筛选失效）。
   见[决策记录](.agents/notes/2026-10-06-pr-body-four-sections.md)。
+- **PR 的标签纪律：打标签前先 `gh label list`** —— 分类映射由
+  [release-drafter.yml](.github/release-drafter.yml) 决定，新建标签要同批补映射，
+  否则那条 PR 落进「其它改动」。
 - **发布链路的坑**（tag 不自动建 Release、`gh release edit` 不会把草稿变成已发布、
-  npm 传播延迟、`link:` 装法）→ [.github/AGENTS.md](.github/AGENTS.md) 与
-  [发布手册](docs/PUBLISHING.md)。
+  npm 传播延迟、`link:` 装法）→ [发布手册](docs/PUBLISHING.md)（含 `.github/`
+  三个 workflow 的索引）。
+- **`release-drafter` 必须用 Linux runner** —— action 用 `path.join()` 拼配置路径，
+  Windows runner 上拼出反斜杠，GitHub API 只认正斜杠 ⇒ 404。
+  ⚠️ 别照抄另外两个 workflow 的 `windows-latest`（那两个是要构建 Windows 产物）。
+- ⚠️ **`.github/` 下不许放 `README.md`** —— GitHub 渲染仓库首页的查找顺序是
+  `.github/README.md` → 根 `README.md` → `docs/README.md`，**前者优先**。
+  放一份内部手册进去，仓库门面就换成了维护者文档，而**首页 / CI / 本地门禁全都不报错**。
+  运行手册归 [docs/PUBLISHING.md](docs/PUBLISHING.md)，规则归本文件。
