@@ -1,0 +1,38 @@
+# 草稿 Release：每次有 PR 合并进 `main`，重算一份**草稿**正文（按 PR 标签分类）。
+#
+# ⚠️ 它**只**维护草稿，三件事一律不碰：
+#   - 不改版本号（`package.json` 由维护者 bump）
+#   - 不自动打标签（`git tag` 由维护者推，推了才触发 [publish.yml](publish.yml)）
+#   - 不自动发布（`publish: true` **不要加**）
+#
+# 发布决策权仍在维护者手里：打标签时由 [publish.yml](publish.yml) 把这份草稿的正文
+# 复制进正式 Release。正文从哪来、为什么草稿 tag 是 `next`，
+# 见 [.github/release-drafter.yml](release-drafter.yml) 的文件头与
+# [docs/PUBLISHING.md](../docs/PUBLISHING.md)。
+name: release-drafter
+
+on:
+  # 只需要「已合并」这件事 —— 合并进 main 就是一次 push。
+  # 不用 `pull_request`：本仓不启用 Autolabeler（理由见 PUBLISHING.md）。
+  push:
+    branches: [main]
+
+# ⚠️ 逐 workflow 显式声明，**不依赖仓库默认值**（本仓既有做法，见 publish.yml）：
+# 默认值读不到（`gh api .../actions/permissions` 对维护者 token 返 403），
+# 而漏了声明的症状是 403 —— 草稿一直不更新，却没有任何别的迹象。
+permissions:
+  # 建 / 更新草稿 Release 要写权限。
+  contents: write
+  # v7 需要读 PR 列表与标签来做分类。
+  pull-requests: read
+
+jobs:
+  update_release_draft:
+    # 与 ci.yml / publish.yml 同一个 runner，不另开一种。
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      # 不需要 checkout：action 通过 GitHub API 读配置（`config-name` 相对 `.github`）。
+      - uses: release-drafter/release-drafter@v7
+        with:
+          config-name: release-drafter.yml

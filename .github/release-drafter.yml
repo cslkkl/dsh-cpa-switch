@@ -1,0 +1,81 @@
+# Release Drafter 配置：按已合并 PR 的标签维护一份**草稿** Release 正文。
+#
+# ⚠️ 三个关键取舍，改之前先读：
+#
+# 1. **草稿 tag 固定为 `next`，不用版本号。**
+#    Release Drafter 的草稿是有 tag 的。若草稿 tag 是 `v$RESOLVED_VERSION`，
+#    而发布时打的标签正好同名，`publish.yml` 里 `gh release view <tag>` 会命中
+#    那个**草稿**，走 `gh release edit` 分支 —— 而 `edit` 不会把草稿变成已发布。
+#    症状：npm 发成功、Release 页上查不到，**没有任何报错**。
+#    固定成 `next` 就永远不与 `v*` 撞车。
+#
+# 2. **正文（`template`）里不许出现「草稿」「请勿发布」这类说明。**
+#    `publish.yml` 把这份 body **原样复制**进正式 Release。
+#    所以解释性的话只能放 `name-template`（name 不会被复制，发布时用的是 tag）。
+#
+# 3. **版本号只是「建议」。**
+#    `$RESOLVED_VERSION` 按标签推导（`feat` → minor、其余 → patch），
+#    但版本号由维护者按 [docs/PUBLISHING.md](../docs/PUBLISHING.md) 的语义表决定。
+#    Release Drafter 不碰版本号、不自动打标签、不自动发布。
+
+name-template: '草稿 · 建议 v$RESOLVED_VERSION'
+tag-template: 'next'
+
+# 逐条改动的样子。`$AUTHORS` 故意不带：本仓是单人维护，加了只是噪音。
+change-template: '- $TITLE (#$NUMBER)'
+# 转义 Markdown 元字符，免得标题里的 `*` / `_` 把整行变成斜体、或 `@` 触发提及。
+change-title-escapes: '\<*_&'
+no-changes-template: '- （还没有已合并的改动）'
+sort-direction: 'ascending'
+
+# 正文只有 `$CHANGES` —— 见取舍 2。
+template: |
+  $CHANGES
+
+# 分类顺序 = 匹配优先级，配合 `exclusive: true`：一个 PR 只进一个分类。
+#
+# 标签口径见 [.agents/notes/2026-10-06-pr-body-four-sections.md](../.agents/notes/2026-10-06-pr-body-four-sections.md)：
+# **子类型（`test` / `docs` / `chore`）不进标签**，所以这里不给它们建分类 ——
+# 它们要么落进「其它改动」，要么由维护者打 `skip-changelog` 排除（纯文档 / 纯测试）。
+categories:
+  - title: '修复'
+    semver-increment: 'patch'
+    exclusive: true
+    when:
+      labels:
+        - 'bug'
+
+  - title: '新功能'
+    semver-increment: 'minor'
+    exclusive: true
+    when:
+      labels:
+        - 'feat'
+
+  # `boundary-refactor` 是**批次标签**（与主类型并列的那条轴），
+  # 不是第三种类型 —— 所以并进「重构」，不单开一节，否则同一批改动会出现两次。
+  - title: '重构与内部改动'
+    semver-increment: 'patch'
+    exclusive: true
+    when:
+      labels:
+        - 'refactor'
+        - 'boundary-refactor'
+
+  # 兜底：没有命中上面任何一条的改动。**只有一个 changelog 分类可以省略 `when`**，
+  # 省略即「收下其余全部」。
+  - title: '其它改动'
+
+  # 排除：打了 `skip-changelog` 的 PR 不进正文。
+  # 用途是纯文档 / 纯测试 / 纯 chore —— 它们按标签口径本来就不带类型标签，
+  # 不打这个标签就会落进「其它改动」，而使用者观察不到它们。
+  - type: 'pre-exclude'
+    when:
+      label: 'skip-changelog'
+
+  # 破坏性变更建议 major。本仓还在 0.x（PUBLISHING 里写「0.x 阶段从宽」），
+  # 暂时没有对应标签，留着不启用 —— 真要发 major 时先建 `breaking` 标签。
+  - type: 'version-resolver'
+    semver-increment: 'major'
+    when:
+      label: 'breaking'
