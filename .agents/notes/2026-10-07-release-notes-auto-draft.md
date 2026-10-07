@@ -91,6 +91,27 @@ Release Drafter 的草稿**是有 tag 的**。若草稿 tag 是 `v$RESOLVED_VERS
 - **收益**：发版时不再从 `git log` 考古；正文随 PR 合并持续累积，分类由标签保证一致。
 - **代价**：正文质量取决于 PR 标题质量（`- $TITLE (#$NUMBER)` 直接取标题）；
   草稿是 GitHub 上一个长期存在的 draft（只有有写权限的人看得到）。
+
+### ⚠️ 实踩：Windows runner 上配置路径是反斜杠（首次跑就挂）
+
+workflow 首次跑（`windows-latest`）**整个失败**：
+
+```
+Config not found in cslkkl/dsh-cpa-switch, falling back to cslkkl/.github
+##[error]Repo load failed. Config file not found with error 404.
+(target: cslkkl/.github:.github\release-drafter.yml)
+```
+
+根因：action 通过 GitHub API 读配置，而它用 `path.join()` 拼路径 ——
+Windows runner 上拼出 `.github\release-drafter.yml`（**反斜杠**），API 只认正斜杠。
+实测同一个文件：正斜杠取得到（3549 字节）、反斜杠 404。
+
+所以 **runner 必须是 Linux**（`ubuntu-latest`）。⚠️ 别照抄本仓其他 workflow 的
+`windows-latest` —— 那三个是因为要构建 Windows 产物，这个不需要。
+
+症状是**整个 workflow 失败**（不是静默），所以只是白跑一次；但反过来说，
+如果哪天有人「统一 runner」把它改回 Windows，就会再挂一次。
+
 - **判据**：`publish.yml` 的 `::notice::` —— **下次发版时核这一条**，
   确认正文来自草稿而不是回落。配置本身无单测（YAML + 云端 action），
   只能靠真实发版验证，已在 [docs/PUBLISHING.md](../../docs/PUBLISHING.md) 写明。
