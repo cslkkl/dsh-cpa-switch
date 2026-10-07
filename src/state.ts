@@ -132,6 +132,10 @@ function cachedRoutesPath(): string {
  * 改 `RouteProfile` 形状时**必须**同时 bump 它 —— 老文件会因为版本不符被丢弃，
  * 而不是被当成新形状误读。这是缓存这类「跨版本存活」的数据**唯一**的安全网：
  * 形状变了而版本没变，读回来的就是一份字段对不上、却**看起来能用**的对象。
+ *
+ * ⚠️ **加了 `channels` 而没 bump**（2026-10-07）：那是**旁证**不是清单形状 ——
+ * 老文件缺它时解析成空表，护栏对那份基线走保守路径，语义仍然正确。
+ * 判别标准是「老文件会不会被**误读**」，不是「字段多了没有」。
  */
 const CACHED_ROUTES_VERSION = 1
 
@@ -143,6 +147,15 @@ interface CachedRoutesFile {
   /** 写盘时刻（ISO 串），**仅供诊断展示**，不参与失效判断。 */
   savedAt?: unknown
   profile?: unknown
+  /**
+   * **行归属**：模型 id → 它所属的托管渠道。
+   *
+   * ⚠️ 它**不是**清单的一部分（`RouteProfile` 里没有这个字段、宿主也不认），
+   * 只是**目录护栏按渠道放行**要用的旁证 —— 见 `route-registry.ts` 的 `shrunkRows`。
+   * 不存它的话，启动时从磁盘恢复的基线**认不出任何一行的归属**，
+   * 于是「删号 / 禁用账号」这类**合法缩水**会被护栏一律拦下（要等重试用完才放行）。
+   */
+  channels?: unknown
 }
 
 /** 缓存里那份清单的最小形状（只验「够不够安全地用」，不复制 provider schema）。 */
@@ -159,6 +172,22 @@ export interface CachedRoutes {
   readonly profile: CachedProfile
   readonly port: number
   readonly savedAt: string
+  /**
+   * 行归属（模型 id → 托管渠道）；**老缓存 / 形状不对时是空表**。
+   *
+   * 空表 = 「认不出」，不是「没有渠道」—— 护栏据此走保守路径（按缩水处理）。
+   */
+  readonly channelOf: ReadonlyMap<string, string>
+}
+
+/** 解析行归属表；坏格子直接丢（它是**旁证**，坏一个不该让整份缓存作废）。 */
+function channelsFrom(raw: unknown): Map<string, string> {
+  const out = new Map<string, string>()
+  if (typeof raw !== 'object' || raw === null) return out
+  for (const [id, channel] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof channel === 'string' && channel !== '') out.set(id, channel)
+  }
+  return out
 }
 
 /**
@@ -237,6 +266,7 @@ export function readCachedRoutes(currentPort?: number): CachedRoutes | undefined
     profile,
     port,
     savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : '',
+    channelOf: channelsFrom(parsed.channels),
   }
 }
 
@@ -248,8 +278,16 @@ export function readCachedRoutes(currentPort?: number): CachedRoutes | undefined
  *
  * 这里**再校验一次**，不指望调用方自觉：形状不对的直接不写 ——
  * 宁可没有缓存（退回原路径），也不要一份坏缓存。
+ *
+ * @param channelOf - 行归属（模型 id → 托管渠道），供下次启动的护栏按渠道放行。
+ *   不传 / 空表 ⇒ 下次启动对这份基线走保守路径（认不出归属 = 按缩水处理），
+ *   语义仍然安全，只是「删号」那类合法缩水要多等一轮重试。
  */
-export function writeCachedRoutes(profile: unknown, port: number): void {
+export function writeCachedRoutes(
+  profile: unknown,
+  port: number,
+  channelOf?: ReadonlyMap<string, string>,
+): void {
   const checked = parseCachedProfile(profile)
   if (checked === undefined) return
   writeJson(cachedRoutesPath(), {
@@ -257,6 +295,9 @@ export function writeCachedRoutes(profile: unknown, port: number): void {
     port,
     savedAt: new Date().toISOString(),
     profile: checked,
+    ...(channelOf === undefined || channelOf.size === 0
+      ? {}
+      : { channels: Object.fromEntries(channelOf) }),
   })
 }
 

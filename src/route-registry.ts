@@ -232,6 +232,27 @@ interface ChannelModels {
    * 所以失败要记下**是谁**、**什么性质**，由调用方决定等还是跳过。
    */
   readonly failures: readonly ChannelFailure[]
+  /**
+   * 本轮被挡掉的**托管**凭据（禁用 / 已报错 / 当前不可用）。
+   *
+   * 它是**目录护栏的逃生口信号**（见 `refresh` 的 `allowedChannels`）：
+   * 这个号名下的模型从清单里消失是**合法**的 —— 用户主动禁用、或上游标它不可用。
+   * 不记它的话，护栏会把这次合法的缩水当成「这轮读残了」拦下来，
+   * 于是**删号 / 禁用会把清单永久卡在旧值上**。
+   *
+   * ⚠️ 只记**托管**渠道的号：非托管渠道（kimi / mimo）本来就不供给模型，
+   * 它们被挡掉不该放行任何缩水。
+   * ⚠️ 它与 `failures` **不是一回事**：那个是「读不出来」（要等，或跳过），
+   * 这个是「读得出来但不该用」（合法缩水）。
+   */
+  readonly dropped: readonly DroppedCredential[]
+}
+
+/** 一条被挡掉的托管凭据（护栏的逃生口信号，见 {@link ChannelModels.dropped}）。 */
+export interface DroppedCredential {
+  /** 凭据名（`auth-files` 里的 `name`）。 */
+  readonly name: string
+  readonly provider: string
 }
 
 /** 一条凭据读失败的原因分类。 */
@@ -282,6 +303,7 @@ export function credentialUsable(file: AuthFileRef): boolean {
 async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels> {
   const byChannel: Record<string, string[]> = {}
   const failures: ChannelFailure[] = []
+  const dropped: DroppedCredential[] = []
   let files: AuthFileRef[]
   try {
     const list = (await deps.gateway.fetch('/v0/management/auth-files')) as {
@@ -304,6 +326,7 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
       byChannel,
       complete: false,
       failures: [{ name: '', provider: '', kind: 'transient' }],
+      dropped,
     }
   }
   await Promise.all(
@@ -327,7 +350,20 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
        * （见 {@link ChannelFailure}）。
        */
       if (channelOf(provider) === undefined) return
-      if (!credentialUsable(file)) return
+      if (!credentialUsable(file)) {
+        /**
+         * ⚠️ **这里必须记下来，不能只是 `return`**（2026-10-07）。
+         *
+         * 被挡掉有两种后果完全不同的读法：
+         * - 当成「这个渠道没供模型」→ 清单少一块，看起来与「读残了」一模一样；
+         * - 记成「这个号**合法地**不供了」→ 上层才知道这次缩水是对的。
+         *
+         * 护栏（见 `refresh`）需要后者：不记的话，用户一禁用账号，
+         * 那份少了模型的清单就会被护栏判成「读残」而**永久卡在旧值上**。
+         */
+        dropped.push({ name: String(file.name), provider })
+        return
+      }
       try {
         const data = (await deps.gateway.fetch(
           `/v0/management/auth-files/models?name=${encodeURIComponent(String(file.name))}`,
@@ -346,7 +382,7 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
       }
     }),
   )
-  return { byChannel, complete: failures.length === 0, failures }
+  return { byChannel, complete: failures.length === 0, failures, dropped }
 }
 
 /**
@@ -465,6 +501,18 @@ function catalogIds(catalog: { data?: unknown[] }): string[] {
 }
 
 /**
+ * 算好的清单 + **每行 id 属于哪个托管渠道**。
+ *
+ * 那张表只服务一件事：目录护栏**按渠道放行**（见 `refresh`）——
+ * 「被跳过 / 凭据不可用」的渠道名下模型消失是合法的，别的渠道不是。
+ * 所以它**不进** {@link RouteProfile}（那是推给宿主的形状），只在进程内流传。
+ */
+interface BuiltProfile {
+  readonly profile: RouteProfile
+  readonly channelOf: ReadonlyMap<string, string>
+}
+
+/**
  * 从 CPA 实时目录构造 `providers.cpa` 的 profile。
  *
  * **同名模型按渠道拆行**：一个模型名被多个渠道供给时，每个渠道各注册一行，
@@ -479,7 +527,7 @@ function buildCpaRouteProfile(
   channels: Readonly<Record<string, readonly string[]>>,
   aliases: AliasTable,
   deps: RouteRegistryDeps,
-): RouteProfile {
+): BuiltProfile {
   const ids = catalogIds(catalog)
   if (ids.length === 0) {
     throw new Error('catalog is empty — caller must treat empty as "no route" before building')
@@ -565,41 +613,45 @@ function buildCpaRouteProfile(
    */
   const reasoning = reasoningDefaultOf(effortsEnabled)
   return {
-    displayName: 'CPA Switch',
-    api: 'openai-completions',
-    baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
-    apiKeyEnv: CPA_API_KEY_REF,
-    ...(reasoning === undefined ? {} : { reasoning }),
-    models: rows.map((row) => {
-      // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
-      const caps = capsOf(row.channel, row.bare)
-      const reasoningEfforts = reasoningEffortsOf(effortsEnabled, row.channel)
-      return {
-        id: row.id,
-        name: `${row.label} · ${row.bare}`,
-        ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
-        /**
-         * 模态走 `input`（pi-ai 的字段名；直连 DeepSeek 适配器才用 `inputModalities`）。
-         *
-         * ⚠️ **只在 `supportsImages === true` 时写** —— 省略时宿主落
-         * `DEFAULT_INPUT = ["text"]`（`dsh-llm-pi-ai/lib/index.js:940`）。
-         * 少标＝附加图片前就被拒；多标＝图片已发出去、消息已落库，
-         * provider 中途拒绝，会话卡在反复重试。所以不写才是保守。
-         */
-        ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
-        /**
-         * 思考档位：**逐模型带上、值按该行的渠道给**（开关打开时）。
-         *
-         * ⚠️ **这是「乐观默认」，不是逐模型实测过的**：有些模型可能压根不产思考，
-         * 标了也只表现为「开了开关却看不到思考」，不会崩。这与
-         * `supportsImages`（多标会卡死会话）的方向**相反**，所以这里可以宽。
-         *
-         * ⚠️ 但**「关」的拼写不能宽** —— 写错是硬错误、炸整轮对话（实测 `1210`）。
-         * 逃生通道仍是面板上的总开关。
-         */
-        ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
-      }
-    }),
+    profile: {
+      displayName: 'CPA Switch',
+      api: 'openai-completions',
+      baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
+      apiKeyEnv: CPA_API_KEY_REF,
+      ...(reasoning === undefined ? {} : { reasoning }),
+      models: rows.map((row) => {
+        // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
+        const caps = capsOf(row.channel, row.bare)
+        const reasoningEfforts = reasoningEffortsOf(effortsEnabled, row.channel)
+        return {
+          id: row.id,
+          name: `${row.label} · ${row.bare}`,
+          ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
+          /**
+           * 模态走 `input`（pi-ai 的字段名；直连 DeepSeek 适配器才用 `inputModalities`）。
+           *
+           * ⚠️ **只在 `supportsImages === true` 时写** —— 省略时宿主落
+           * `DEFAULT_INPUT = ["text"]`（`dsh-llm-pi-ai/lib/index.js:940`）。
+           * 少标＝附加图片前就被拒；多标＝图片已发出去、消息已落库，
+           * provider 中途拒绝，会话卡在反复重试。所以不写才是保守。
+           */
+          ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
+          /**
+           * 思考档位：**逐模型带上、值按该行的渠道给**（开关打开时）。
+           *
+           * ⚠️ **这是「乐观默认」，不是逐模型实测过的**：有些模型可能压根不产思考，
+           * 标了也只表现为「开了开关却看不到思考」，不会崩。这与
+           * `supportsImages`（多标会卡死会话）的方向**相反**，所以这里可以宽。
+           *
+           * ⚠️ 但**「关」的拼写不能宽** —— 写错是硬错误、炸整轮对话（实测 `1210`）。
+           * 逃生通道仍是面板上的总开关。
+           */
+          ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
+        }
+      }),
+    },
+    /** 护栏按渠道放行要用（见 `refresh`）—— 它是这一份清单的行归属，不推给宿主。 */
+    channelOf: new Map(rows.map((row) => [row.id, row.channel])),
   }
 }
 
@@ -685,6 +737,14 @@ export interface ReadySnapshot {
    * 调用方据此决定要不要写别名段（见 `refresh`）。
    */
   readonly skipped: readonly ChannelFailure[]
+  /**
+   * 被**挡掉**的托管凭据（禁用 / 不可用）。
+   *
+   * 与 {@link ReadySnapshot.skipped} 并列，但性质相反：那个是「读不出来」，
+   * 这个是「读得出来、但不该供给」。两者都让清单**合法地**变小 ——
+   * 目录护栏因此把这两个来源的渠道一并放行（见 `refresh`）。
+   */
+  readonly dropped: readonly DroppedCredential[]
 }
 
 /** 读取快照失败的原因（供 `degrade` 与日志用）。 */
@@ -807,7 +867,10 @@ export async function readReadySnapshot(
     if (catalog === undefined) return { ok: false, reason: 'catalog-unavailable' }
 
     if (agreeOnOwnership(catalog, read.byChannel)) {
-      return { ok: true, snapshot: { catalog, channels: read.byChannel, skipped } }
+      return {
+        ok: true,
+        snapshot: { catalog, channels: read.byChannel, skipped, dropped: read.dropped },
+      }
     }
 
     // 不同步 = 慢半拍：退避后再读一轮
@@ -816,6 +879,145 @@ export async function readReadySnapshot(
     delayMs = Math.min(delayMs * 2, 4000)
   }
 }
+
+/**
+ * 护栏的比较单位：**（渠道，模型裸名）** —— **不是行 id**。
+ *
+ * ⚠️ 用行 id 比会误判（2026-10-07 设计判据时发现）：同名模型被多渠道供给时
+ * 行 id 是渠道别名（`wb/glm-5.3`），而**一个渠道消失后别名本身就不再生成了** ——
+ * 剩下的那个渠道的行会从 `qoder/glm-5.3` 变回裸名 `glm-5.3`。
+ * 拿行 id 比，就会把这次**合法**的改名当成「qoder 少了 glm-5.3」而拦下，
+ * 于是「跳过坏渠道」这条逃生口**根本走不通**。
+ *
+ * 用「渠道 + 裸名」比则不受别名形态影响：那个模型**还由那个渠道供着**，
+ * 只是它现在不需要别名了。
+ */
+function guardKeyOf(id: string, channel: string): string {
+  return `${channel}\u0000${stripChannelPrefix(id)}`
+}
+
+/**
+ * **目录护栏**：这一轮的新清单比上一份**少了**哪些行。
+ *
+ * ## 为什么问「比上一份差吗」，不问「齐了吗」
+ *
+ * 「还在长」与「永远长不出来」在时间上不可区分 —— 前五轮都卡在这个阈值上
+ * （调松推出半成品、调严一个坏渠道把门卡死，见
+ * [决策记录](../.agents/notes/2026-10-06-startup-does-not-wait.md)）。
+ * 而「**比上一份差吗**」答得了：CPA 的模型目录只会因加号增长
+ * （加号、加渠道、重启加载），不会自己缩小。
+ *
+ * ## 为什么比集合、不比数量
+ *
+ * 数量持平不算安全：「少一个、多一个」条数一样，却**换了内容**，
+ * 而换掉的那个可能正是用户选中的那条。只有集合能分开「读残了」与「内容变了」。
+ *
+ * ## 为什么按渠道放行
+ *
+ * 缩水有两种：**读残了**（该拦）与**合法地少了**（不该拦）。
+ * 后者的信号是「某个渠道本轮被跳过 / 凭据不可用」—— 它名下模型消失
+ * 是用户自己要的结果（删号、禁用），拦下来就是**把删号卡死**。
+ *
+ * ⚠️ 放行必须**只覆盖那个渠道**：整体放行的话，用户只要有一个长期禁用的号，
+ * 护栏就永久失效 —— 那正好把本批要治的病放回来。
+ *
+ * ⚠️ **认不出渠道的行按缩水处理**（保守）：从**老**磁盘缓存恢复的基线没有
+ * 行归属表，那时宁可多跑一轮重读，也不要放过一次真的读残。
+ *
+ * @param previous - 上一份成功快照（行 id + 行归属）。
+ * @param next - 这一轮算出来的行 id。
+ * @param nextChannelOf - 这一轮的行归属（认不出归属的行不参与比较）。
+ * @param allowedChannels - 允许合法缩水的渠道（本轮被跳过 / 凭据不可用）。
+ * @returns 被拦下的行 id；**空数组 = 放行**。
+ */
+export function shrunkRows(
+  previous: { readonly ids: readonly string[]; readonly channelOf: ReadonlyMap<string, string> },
+  next: readonly string[],
+  nextChannelOf: ReadonlyMap<string, string>,
+  allowedChannels: ReadonlySet<string>,
+): string[] {
+  const have = new Set<string>()
+  for (const id of next) {
+    const channel = nextChannelOf.get(id)
+    if (channel !== undefined) have.add(guardKeyOf(id, channel))
+  }
+  /**
+   * 认不出归属的旧行（老缓存）只能用**行 id 本身**比。
+   *
+   * ⚠️ 这里必须先判「还在不在」：`dfmodel` 这类裸名行没变，只是基线认不出它的
+   * 渠道 —— 一律当缩水会把**每一次启动**都拦下（而它其实一个字都没少）。
+   */
+  const nextIds = new Set(next)
+  const blocked: string[] = []
+  for (const id of previous.ids) {
+    const channel = previous.channelOf.get(id)
+    if (channel === undefined) {
+      if (!nextIds.has(id)) blocked.push(id)
+      continue
+    }
+    if (have.has(guardKeyOf(id, channel))) continue
+    if (allowedChannels.has(channel)) continue
+    blocked.push(id)
+  }
+  return blocked
+}
+
+/**
+ * `attachRouteRegistry` 交出来的刷新函数。
+ *
+ * 它是一个**可调用对象**（不是裸函数）：多出来的 {@link RouteRefresher.settled}
+ * 让调用方能在需要时等后台重读链收场。
+ */
+export interface RouteRefresher {
+  (trigger?: string): Promise<SyncResult>
+  /**
+   * 等**当前**正在跑的重读链收场；没有链在跑时立刻返回。
+   *
+   * 为什么需要这个口子：重读链是**后台**跑的（不许把调用方卡在 52 秒上），
+   * 于是「重读之后到底推了哪一份」没法只 `await refresh()` 就断言 ——
+   * 判据只能靠 `tick()` 猜时间，那就是**不稳定的判据**。
+   */
+  settled(): Promise<void>
+}
+
+/**
+ * 「上一份成功推上去的清单」+ **每行属于哪个渠道**。
+ *
+ * 行归属只服务目录护栏的**按渠道放行**（见 {@link shrunkRows}），
+ * 不推给宿主、也不写盘（从磁盘缓存恢复的那一份没有它，见 `attachRouteRegistry`）。
+ */
+interface GoodSnapshot {
+  readonly profile: RouteProfile
+  readonly channelOf: ReadonlyMap<string, string>
+}
+
+/**
+ * 重读退避序列（毫秒）：`2s → 5s → 15s → 30s`，**四次封顶**。
+ *
+ * 长度是按实测取的：供给面一轮只要 ~140ms，而**凭据注册是秒级的**
+ * （DSH → CPA 进程差 7.6 秒，见[决策记录](../.agents/notes/2026-10-06-startup-does-not-wait.md)），
+ * 所以前两档覆盖「刚起还没加载完」，后两档覆盖「加载得特别慢」。
+ *
+ * ⚠️ **不许改成无上限轮询**：那会把仓库既有的「恢复逻辑挂事件、不挂时机」
+ * 这条口径反过来。这里能成立，是因为它**由迹象触发**（本轮读到了残缺）、
+ * **次数有上限**、且**不常驻** —— 三条缺一不可。
+ */
+const RETRY_DELAYS_MS = [2000, 5000, 15000, 30000] as const
+
+/**
+ * 只有**会改 CPA 模型注册表**的时机才排重读。
+ *
+ * | 时机 | 排不排 | 为什么 |
+ * | ---- | ------ | ------ |
+ * | `boot` | 排 | 首次装 / CPA 刚起，凭据还在分批加载 |
+ * | `setup` | 排 | 刚重新生成配置、拉起 CPA —— 就是它引起的 |
+ * | `oauth` | 排 | 加号 / 删号，会改注册表 |
+ * | `config-reload` | **不排** | 只改 DSH 自己的配置（切语言等），CPA 一个字都不会变 |
+ *
+ * ⚠️ 别把 `config-reload` 加进来：它**每次设置写入**都会到，
+ * 挂上它就是无脑轮询 —— 与「由迹象触发」直接矛盾。
+ */
+const RETRYABLE_TRIGGERS = new Set(['boot', 'setup', 'oauth'])
 
 /**
  * 挂载路由注册表：注入 loader、订阅宿主重载事件，返回一个幂等的刷新函数。
@@ -827,7 +1029,7 @@ export async function readReadySnapshot(
 export function attachRouteRegistry(
   host: RouteRegistryHost,
   deps: RouteRegistryDeps,
-): (trigger?: string) => Promise<SyncResult> {
+): RouteRefresher {
   const clock = deps.clock ?? systemClock
   let loaderRef: LoaderLike | undefined
   host.inject(['loader'], (scope) => {
@@ -855,11 +1057,36 @@ export function attachRouteRegistry(
    * ⚠️ 于是 `lastGood` 与磁盘缓存**只在完整快照时更新** —— 一处赋值管住两件事：
    * 「重载空窗回推什么」与「下次启动用什么」。半成品进不来，
    * 也就不会出现「兜底把坏数据永久化」。
+   *
+   * ⚠️ 从 0.8.0 起它多带一张**行归属表**（见 {@link GoodSnapshot}），
+   * 目录护栏靠它按渠道放行。那张表**不写盘**：从磁盘缓存恢复的这一份没有它，
+   * 于是护栏对恢复来的基线走保守路径（认不出归属 = 按缩水处理）。
    */
-  let lastGood: RouteProfile | undefined
+  let lastGood: GoodSnapshot | undefined
   let lastGoodSeq = 0
   let pushedSeq = 0
   let computeSeq = 0
+
+  /**
+   * 被护栏拦下的那一份 + 它的序号 —— **等重试用完就放行它**。
+   *
+   * 为什么必须留一份：「重试用完就放行」是**不许永久卡死**的落点。
+   * 没有它的话，一份真的（非暂时）缩水过的清单会让护栏永远拦住，
+   * 用户看到的是**已经删掉的模型**一直在选择器里 —— 比少显示更糟。
+   *
+   * ⚠️ 每一轮重读都会覆盖它（留**最新**那份），所以放行的是最后一次读到的，
+   * 不是第一次的。
+   */
+  let pendingShrink: { snapshot: GoodSnapshot; seq: number; writeCache: boolean } | undefined
+
+  /**
+   * 正在跑的重读链。`undefined` = 没有链。
+   *
+   * 它同时承担「**不叠加两条链**」这条判据：重读期间来了新触发时，
+   * 那个触发照常读一轮（它的结果仍然参与裁决），但**不许再排一条链** ——
+   * 否则每次设置写入都会叠一条 52 秒的链。
+   */
+  let chainPromise: Promise<void> | undefined
 
   /**
    * 启动时**预填** `lastGood`：从磁盘缓存读一份完整清单。
@@ -873,10 +1100,21 @@ export function attachRouteRegistry(
    */
   const restored = readCachedRoutes(deps.gateway.port)
   if (restored !== undefined) {
-    lastGood = restored.profile as RouteProfile
+    /**
+     * ⚠️ `channelOf` **从缓存里读回**（2026-10-07）。它决定护栏对这份基线
+     * 按不按渠道放行：没有它时「删号 / 禁用账号」这类**合法缩水**会被
+     * 一律拦下（要等重试用完才放行，约 52 秒）。
+     *
+     * 老缓存没有这个字段 ⇒ 解析成空表 ⇒ 退化成保守路径，
+     * 语义仍然安全（宁可多跑一轮重读，也不放过一次真的读残）。
+     */
+    lastGood = {
+      profile: restored.profile as RouteProfile,
+      channelOf: restored.channelOf,
+    }
     deps.logger?.info?.(
       'cpa-panel: 启动用磁盘缓存清单（%d models，存于 %s）',
-      lastGood.models.length,
+      lastGood.profile.models.length,
       restored.savedAt,
     )
   }
@@ -901,10 +1139,11 @@ export function attachRouteRegistry(
    * 代价只是一次 update 往返。所以「先把旧清单推回去」不该有任何犹豫。
    */
   const pushProfile = async (
-    profile: RouteProfile,
+    snapshot: GoodSnapshot,
     seq: number,
     trigger: string,
   ): Promise<SyncResult> => {
+    const profile = snapshot.profile
     if (seq < pushedSeq) {
       deps.logger?.info?.(
         'cpa-panel: 旧清单不覆盖新清单（%s: seq %d < %d）',
@@ -928,7 +1167,7 @@ export function attachRouteRegistry(
       deps.logger?.warn?.('cpa-panel: push model routes failed (%s): %o', trigger, error)
       return { ok: false, reason: 'push-failed' }
     }
-    lastGood = profile
+    lastGood = snapshot
     lastGoodSeq = seq
     pushedSeq = seq
     deps.logger?.info?.('cpa-panel: model routes %s: %d models', trigger, profile.models.length)
@@ -962,12 +1201,12 @@ export function attachRouteRegistry(
       'cpa-panel: model routes %s: 未取到完整清单（%s），回推上一份（%d models）',
       trigger,
       reason,
-      cached.models.length,
+      cached.profile.models.length,
     )
     const pushed = await pushProfile(cached, lastGoodSeq, `${trigger}:stale`)
     return {
       ok: pushed.ok,
-      models: cached.models.length,
+      models: cached.profile.models.length,
       reason: pushed.ok ? reason : (pushed.reason ?? reason),
       stale: true,
     }
@@ -987,19 +1226,33 @@ export function attachRouteRegistry(
   const buildProfileFrom = (
     trigger: string,
     snapshot: ReadySnapshot,
-  ): { profile: RouteProfile; aliases: AliasTable } | { reason: string } => {
+  ):
+    | { profile: RouteProfile; channelOf: ReadonlyMap<string, string>; aliases: AliasTable }
+    | { reason: string } => {
     try {
       const { catalog, channels } = snapshot
       const ids = catalogIds(catalog)
       const aliases = aliasTableOf(channels, ids)
-      return { profile: buildCpaRouteProfile(catalog, channels, aliases, deps), aliases }
+      const built = buildCpaRouteProfile(catalog, channels, aliases, deps)
+      return { profile: built.profile, channelOf: built.channelOf, aliases }
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: build model routes failed (%s): %o', trigger, error)
       return { reason: 'catalog-unavailable' }
     }
   }
 
-  const refresh = async (trigger = 'manual'): Promise<SyncResult> => {
+  /**
+   * **一轮**：快路径 → 读 → 算 → 目录护栏 → 写别名 / 写盘 → 推。
+   *
+   * 抽出来是为了让**重读链**与触发那一轮走**逐字相同**的裁决 ——
+   * `verdict` 让链知道该继续还是收场，而「怎么算一份清单」只有一处实现。
+   */
+  const runRound = async (
+    trigger: string,
+  ): Promise<{
+    result: SyncResult
+    verdict: 'accepted' | 'blocked' | 'unavailable'
+  }> => {
     /** 序号在**读之前**取：慢读算出来的清单不许盖掉后来的新清单。 */
     const seq = ++computeSeq
 
@@ -1015,8 +1268,9 @@ export function attachRouteRegistry(
      * 标记成「最新」，随后慢路径算出来的清单反而被序号挡掉。
      */
     if (lastGood !== undefined) {
+      const previous = lastGood
       void (async () => {
-        const quick = await pushProfile(lastGood as RouteProfile, lastGoodSeq, `${trigger}:fast`)
+        const quick = await pushProfile(previous, lastGoodSeq, `${trigger}:fast`)
         deps.logger?.info?.(
           'cpa-panel: 快路径推回（%s）：%s',
           trigger,
@@ -1036,10 +1290,82 @@ export function attachRouteRegistry(
      * 读不全就什么都不推：`degrade` 会回推上一份成功清单，没有历史则保持空。
      */
     const ready = await readReadySnapshot(deps)
-    if (!ready.ok) return degrade(trigger, ready.reason)
+    if (!ready.ok) {
+      return { result: await degrade(trigger, ready.reason), verdict: 'unavailable' }
+    }
 
     const outcome = buildProfileFrom(trigger, ready.snapshot)
-    if (!('profile' in outcome)) return degrade(trigger, outcome.reason)
+    if (!('profile' in outcome)) {
+      return { result: await degrade(trigger, outcome.reason), verdict: 'unavailable' }
+    }
+
+    const built: GoodSnapshot = { profile: outcome.profile, channelOf: outcome.channelOf }
+
+    /**
+     * ## 目录护栏：**写盘与推送之前**的最后一道闸
+     *
+     * 问的不是「齐了吗」（答不了），而是「**比上一份差吗**」（答得了）——
+     * 见 {@link shrunkRows} 与[决策记录](../.agents/notes/2026-10-07-catalog-shrink-guard.md)。
+     *
+     * ⚠️ 它必须**在写别名段与写盘之前**：那两步都是**持久**的副作用，
+     * 一旦写下去，下次启动就**未经任何读**把它推给用户，没有东西能纠正。
+     *
+     * ⚠️ 放行名单来自**两个**来源，缺一不可：
+     * - `skipped`（永久读失败，404 / 凭据失效）—— 读不出来；
+     * - `dropped`（凭据被禁用 / 报错 / 不可用）—— 读得出来但不该供给。
+     *
+     * 两者都让清单**合法地**变小；只认其中一个，另一个场景就会把删号 / 禁用
+     * 永久卡在旧清单上。
+     */
+    if (lastGood !== undefined) {
+      const previous = lastGood
+      const allowedChannels = new Set<string>([
+        ...ready.snapshot.skipped.map((f) => f.provider),
+        ...ready.snapshot.dropped.map((d) => d.provider),
+      ])
+      const blocked = shrunkRows(
+        { ids: previous.profile.models.map((m) => m.id), channelOf: previous.channelOf },
+        outcome.profile.models.map((m) => m.id),
+        built.channelOf,
+        allowedChannels,
+      )
+      if (blocked.length > 0) {
+        /**
+         * 记下来等**重试用完就放行** —— 见 `runRetryChain` 与 `pendingShrink`。
+         * 不留这一份的话，一次**真的**缩水（用户删了号、且没留下任何 skip 信号）
+         * 会让护栏永远拦住，用户看到的是**已经删掉的模型**一直在选择器里。
+         */
+        pendingShrink = {
+          snapshot: built,
+          seq,
+          writeCache: ready.snapshot.skipped.length === 0,
+        }
+        deps.logger?.warn?.(
+          'cpa-panel: 目录护栏拦下这一轮（%s）：比上一份少 %d 行（%s）→ 不写盘、继续用上一份',
+          trigger,
+          blocked.length,
+          blocked.slice(0, 3).join(','),
+        )
+        const pushed = await pushProfile(previous, lastGoodSeq, `${trigger}:guarded`)
+        return {
+          result: {
+            ok: pushed.ok,
+            models: previous.profile.models.length,
+            reason: pushed.ok ? 'catalog-shrunk' : (pushed.reason ?? 'catalog-shrunk'),
+            stale: true,
+          },
+          verdict: 'blocked',
+        }
+      }
+    }
+
+    /**
+     * 走到这里说明这一轮**可信** —— 清掉待放行的那份（若有）。
+     *
+     * ⚠️ 必须清：否则重读链跑到最后一轮时，会拿一份**已经被更新的事实取代**
+     * 的旧清单去放行。
+     */
+    pendingShrink = undefined
 
     /**
      * 把别名段补进托管配置。骨架虽已在 bundle patch 里，但同名模型清单
@@ -1077,7 +1403,7 @@ export function attachRouteRegistry(
     /**
      * **完整快照 → 写盘**（下次启动就不必等读）。
      *
-     * ⚠️ **这里是唯一的写盘点**，且**必须**在「读全 + 算得出清单」之后：
+     * ⚠️ **这里是唯一的写盘点**，且**必须**在「读全 + 算得出清单 + 过了护栏」之后：
      * - 放在 `pushProfile` 里不行 —— 那个函数**快路径与 degrade 也会调**，
      *   会把「上一份」反复写回去（甚至一开始就没写过盘）；
      * - 跳过的渠道非空时也不写：那份清单的归属判定**丢了一个渠道**，
@@ -1089,10 +1415,106 @@ export function attachRouteRegistry(
      * 代价只是「这次没更新缓存」，下次读全了自然会更新。
      */
     if (ready.snapshot.skipped.length === 0) {
-      writeCachedRoutes(outcome.profile, deps.gateway.port)
+      writeCachedRoutes(outcome.profile, deps.gateway.port, built.channelOf)
     }
 
-    return pushProfile(outcome.profile, seq, trigger)
+    return { result: await pushProfile(built, seq, trigger), verdict: 'accepted' }
+  }
+
+  /**
+   * ## 有限重读链
+   *
+   * 被护栏拦下之后的补偿：按 {@link RETRY_DELAYS_MS} 再读几次，**四次封顶**。
+   *
+   * ## 三条硬约束（缺一不可）
+   *
+   * 1. **由迹象触发，不由时间触发** —— 只有「本轮读到了残缺」才排链；
+   *    没有迹象时一次都不多读（见 `refresh`）。
+   * 2. **次数有上限、不常驻** —— 四次之后无论好坏都收场，不留定时器。
+   * 3. **不许叠加两条链** —— `chainPromise` 非空时直接返回（见 `refresh`）。
+   *
+   * 这三条合起来才使它不违反仓库既有的「恢复逻辑挂事件、不挂时机」口径：
+   * 它是**一次有界的补偿**，不是轮询。
+   *
+   * ## 收场只有两种
+   *
+   * - **重读拿到更好的** → `runRound` 已经推了新的、覆盖了缓存 → 立刻收场；
+   * - **四次都没读到更好的** → **放行**最后一次读到的那份（连缓存一起写）。
+   *
+   * ⚠️ 放行是**必需**的：没有它，一次真的缩水会让护栏永远拦住，
+   * 用户看到的是**已经删掉的模型**一直在选择器里 —— 比少显示更糟。
+   *
+   * ⚠️ 放行时**不写别名段**：这一份**按定义**是可疑的（护栏拦过它），
+   * 而别名段是整段替换 —— 写下去可能把 CPA 里还活着的别名删掉。
+   * 清单是自愈的（下次读全就补回来），别名不是。
+   */
+  const runRetryChain = async (trigger: string): Promise<void> => {
+    try {
+      for (const delayMs of RETRY_DELAYS_MS) {
+        await clock.sleep(delayMs)
+        const round = await runRound(`${trigger}:retry`)
+        /** 拿到更好的 → 使命结束；读残 / 读失败 → 继续等下一档。 */
+        if (round.verdict === 'accepted') return
+      }
+      const pending = pendingShrink
+      if (pending === undefined) return
+      deps.logger?.warn?.(
+        'cpa-panel: 目录护栏重试用完（%s）→ 放行这一份（%d models）',
+        trigger,
+        pending.snapshot.profile.models.length,
+      )
+      if (pending.writeCache) {
+        writeCachedRoutes(pending.snapshot.profile, deps.gateway.port, pending.snapshot.channelOf)
+      }
+      await pushProfile(pending.snapshot, pending.seq, `${trigger}:retry-exhausted`)
+    } finally {
+      pendingShrink = undefined
+    }
+  }
+
+  /**
+   * 对外的那一个刷新入口。
+   *
+   * ⚠️ 快路径**不在**这里 —— 它在 `runRound` 内部（同一个机制同时服务
+   * 「重载空窗」与「启动用缓存」）。这里只负责「这一轮被护栏拦下了，
+   * 那就按时机决定要不要排一条有限重读链」。
+   */
+  const refresh = async (trigger = 'manual'): Promise<SyncResult> => {
+    const round = await runRound(trigger)
+
+    /**
+     * ⚠️ **只有会改 CPA 注册表的时机才排链**（见 {@link RETRYABLE_TRIGGERS}）：
+     * `config-reload` 每次设置写入都会到，挂上它就是无脑轮询。
+     *
+     * ⚠️ `chainPromise !== undefined` 时**不排第二条**：重读期间来的新触发
+     * 照常读一轮（它的结果照样参与裁决），但不许再叠一条链。
+     */
+    if (
+      round.verdict === 'blocked' &&
+      RETRYABLE_TRIGGERS.has(trigger) &&
+      chainPromise === undefined
+    ) {
+      deps.logger?.info?.(
+        'cpa-panel: 排有限重读（%s）：%s ms × %d',
+        trigger,
+        RETRY_DELAYS_MS.join('/'),
+        RETRY_DELAYS_MS.length,
+      )
+      chainPromise = runRetryChain(trigger)
+        .catch((error: unknown) => {
+          deps.logger?.warn?.('cpa-panel: 目录护栏重读链失败（%s）: %o', trigger, error)
+        })
+        .finally(() => {
+          chainPromise = undefined
+        })
+    }
+
+    return round.result
+  }
+
+  /** 等当前重读链收场（见 {@link RouteRefresher.settled}）。 */
+  const settled = async (): Promise<void> => {
+    while (chainPromise !== undefined) await chainPromise
   }
 
   /**
@@ -1141,5 +1563,14 @@ export function attachRouteRegistry(
   })
   deps.logger?.info?.('cpa-panel: subscribed to app-boot/config-reload')
 
-  return refresh
+  /**
+   * 交出去的是**可调用对象**：`refresh` 本体 + `settled`。
+   *
+   * 为什么不把 `settled` 塞进 deps：它是**调用方**（判据、将来的收尾逻辑）要的，
+   * 不是本函数要的依赖。加在返回面上，现有调用点 `ensureRoutesFresh(trigger)`
+   * 逐字不变。
+   */
+  const refresher = refresh as RouteRefresher
+  refresher.settled = settled
+  return refresher
 }

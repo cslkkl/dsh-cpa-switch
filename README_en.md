@@ -143,6 +143,10 @@ model picker on their own:
 - **Only these four channels are listed**: CPA may host channels this plugin does not manage,
   and their models are left out. An unmanaged channel has no panel to configure it with, so
   listing its name would be worse than listing nothing.
+- **Startup never shows you a partial list first**: if the first read after a DSH restart is still
+  incomplete (CPA just started, accounts still loading in batches), the plugin keeps the previous
+  complete list and re-reads within seconds — you never see a transient state with only one or two
+  models, or only one channel.
 
 Adding or removing accounts updates the model list automatically. How it works is described in
 [Architecture](docs/ARCHITECTURE.md).
