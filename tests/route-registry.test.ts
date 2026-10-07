@@ -295,11 +295,26 @@ interface FakeCpa {
    * 与上一条配对，专门钉「暂时 vs 永远」的分界。
    */
   makeChannelSupplyTransient(times: number, name?: string): void
+  /**
+   * 实际打过的 CPA 路径。
+   *
+   * 用来把「未托管渠道**连问都不问**」这条判据与「清单里不出现它们」区分开 ——
+   * 后者有第二道闸（`ROUTE_PREFIXES` 只含托管渠道）兜着，
+   * 只断言清单内容的话拆掉第一道闸仍然会绿，护栏等于没钉住。
+   */
+  requestedPaths(): readonly string[]
 }
 
 /** 假 CPA：只实现用到的三条读（渠道列表 / 逐凭据模型 / 模型目录）。 */
 function fakeCpa(input: {
-  files: readonly { name: string; provider: string }[]
+  files: readonly {
+    name: string
+    provider: string
+    /** 可选：上游给的健康度字段（`credentialUsable` 据此判能不能用）。 */
+    disabled?: boolean
+    status?: string
+    unavailable?: boolean
+  }[]
   models: Readonly<Record<string, readonly string[] | 'fail'>>
   catalog: readonly string[]
 }): FakeCpa {
@@ -312,7 +327,10 @@ function fakeCpa(input: {
   let supplyReadyAfter = 0
   let channelModelReads = 0
   let catalogReadyAfter = 0
+  /** 记下实际打过的路径 —— 让「未托管渠道连问都不问」这条判据可被隔离验证。 */
+  const requested: string[] = []
   const fetch = async (path: string): Promise<unknown> => {
+    requested.push(path)
     const hit = gate.find((row) => row.count > 0 && path.includes(row.match))
     if (hit !== undefined) {
       hit.count -= 1
@@ -320,7 +338,7 @@ function fakeCpa(input: {
     }
     if (path === '/v0/management/auth-files') {
       if (channelListFails) throw new Error('auth-files unavailable')
-      return { files: [...input.files] }
+      return { files: input.files.map((file) => ({ ...file })) }
     }
     if (path.startsWith('/v0/management/auth-files/models')) {
       channelModelReads += 1
@@ -378,6 +396,7 @@ function fakeCpa(input: {
     makeChannelSupplyTransient: (times, name) => {
       transientFailures.push({ count: times, name })
     },
+    requestedPaths: () => [...requested],
   }
 }
 
@@ -906,9 +925,13 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
   })
 
   /**
-   * 确实无归属的第三方 id 照常推出（与「还没读到」要分开）
+   * 认不出归属的 id **不产出行**（2026-10-07 起）。
+   *
+   * 旧行为是兜底成 `CPA · vendor/gpt-x` —— 那是在**谎称**「这是 CPA 自有的模型」，
+   * 而 CPA 是代理层、不生产模型。真没主的模型（远端目录里有、没凭据供的）
+   * 本来也调不通，出现在选择器里只会让人按错误的结论去用。
    */
-  it('确实无归属的第三方 id 照常推出（与「还没读到」要分开）', async () => {
+  it('⚠️ 认不出归属的 id 不产出（不再谎称 CPA 自有），但同轮的正常模型照常推', async () => {
     const cpa = fakeCpa({
       files: [{ name: 'w1', provider: 'workbuddy' }],
       models: { w1: ['hy3'] },
@@ -920,9 +943,11 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
     const names = pushed.flatMap((p) => p.names)
-    // 供给面非空（hy3 有归属）→ 这一轮可信 → vendor/gpt-x 的无归属是事实
     expect(names).toContain('WorkBuddy · hy3')
-    expect(names).toContain('CPA · vendor/gpt-x')
+    expect(names).not.toContain('CPA · vendor/gpt-x')
+    for (const name of names) {
+      expect(name).not.toMatch(/^CPA · /)
+    }
   })
 
   /**
@@ -1500,5 +1525,172 @@ describe('思考档位声明', () => {
     await until(() => {
       expect(pushed.at(-1)?.rows[0]?.reasoningEfforts).toEqual({ off: 'off', high: 'high' })
     })
+  })
+})
+
+/**
+ * **清单只收「托管渠道 + 能用的号」的供给面**（2026-10-07）。
+ *
+ * 治的是「有名字、用不了」那一类症状：实测 CPA 会为**已报错 / 当前不可用 / 已禁用**
+ * 的凭据照样报出一批模型名（一个 `status=error` + `unavailable=true` 的 kimi 凭据
+ * 报出 10 个），而 CPA 侧的渠道本身也是**动态的**（实测存在未登记的 kimi / mimo）。
+ *
+ * 三条判据各自独立：非托管渠道、不可用凭据、认不出归属的 id。
+ * 变异验证：逐条去掉对应闸门，各自至少一条转红。
+ */
+describe('供给面只收托管渠道的可用凭据', () => {
+  let home = ''
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-usable-'))
+    process.env.DSH_HOME = home
+    const dir = join(home, 'cpa-panel', 'runtime', 'cpa')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'config.yaml'), 'config-version: 8\n', 'utf8')
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /**
+   * **判据 1：CPA 侧没登记的渠道不进清单。**
+   *
+   * 不靠特判渠道名 —— 判据是「有没有 spec」，所以 CPA 以后新增渠道自动被挡，
+   * 不需要改这里的代码。
+   */
+  it('⚠️ 非托管渠道的凭据不产出任何模型行（kimi/mimo 及未来新渠道）', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w1', provider: 'workbuddy' },
+        { name: 'k1', provider: 'kimi' },
+        { name: 'm1', provider: 'mimo' },
+        { name: 'x1', provider: 'some-future-channel' },
+      ],
+      models: {
+        w1: ['hy3'],
+        k1: ['kimi-k2.8', 'kimi-k3-256k'],
+        m1: ['mimo-auto', 'mimo-pro'],
+        x1: ['brand-new-model'],
+      },
+      catalog: ['hy3', 'kimi-k2.8', 'kimi-k3-256k', 'mimo-auto', 'mimo-pro', 'brand-new-model'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const names = pushed.flatMap((p) => p.names)
+    expect(names).toContain('WorkBuddy · hy3')
+    for (const leaked of [
+      'Kimi · kimi-k2.8',
+      'Kimi · kimi-k3-256k',
+      'MiMo · mimo-auto',
+      'MiMo · mimo-pro',
+      'some-future-channel · brand-new-model',
+    ]) {
+      expect(names).not.toContain(leaked)
+    }
+    // ⚠️ 光断言清单不够：`ROUTE_PREFIXES` 只含托管渠道，第二道闸也会挡住它们，
+    // 拆掉第一道闸这里仍然会绿。真正被第一道闸钉住的是**连问都不问** ——
+    // 不去打 CPA 的管理接口，也就没有任何数据能漏进来。
+    const asked = cpa.requestedPaths().filter((p) => p.includes('auth-files/models'))
+    expect(asked.some((p) => p.includes('name=k1'))).toBe(false)
+    expect(asked.some((p) => p.includes('name=m1'))).toBe(false)
+    expect(asked.some((p) => p.includes('name=x1'))).toBe(false)
+    expect(asked.some((p) => p.includes('name=w1'))).toBe(true)
+  })
+
+  /** **判据 2：`unavailable` / `error` 的凭据不供给模型**（实测的 kimi 形态）。 */
+  it('⚠️ 上游标 unavailable 的凭据不产出模型行（有名字、调不通）', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'k1', provider: 'kimi', status: 'error', unavailable: true },
+        { name: 'w1', provider: 'workbuddy', status: 'active' },
+      ],
+      models: { k1: ['kimi-k2.8'], w1: ['hy3'] },
+      catalog: ['kimi-k2.8', 'hy3'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const names = pushed.flatMap((p) => p.names)
+    expect(names).toContain('WorkBuddy · hy3')
+    expect(names).not.toContain('Kimi · kimi-k2.8')
+  })
+
+  /** **判据 3：`disabled` 的号不供给模型**（面板禁用 ≠ 还能在选择器里选）。 */
+  it('⚠️ 面板已禁用的号不产出模型行', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w-off', provider: 'workbuddy', disabled: true, status: 'disabled' },
+        { name: 'w-on', provider: 'workbuddy', status: 'active' },
+      ],
+      models: { 'w-off': ['deepseek-v4-pro'], 'w-on': ['hy3'] },
+      catalog: ['deepseek-v4-pro', 'hy3'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const names = pushed.flatMap((p) => p.names)
+    expect(names).toContain('WorkBuddy · hy3')
+    expect(names).not.toContain('WorkBuddy · deepseek-v4-pro')
+  })
+
+  /**
+   * **反向护栏：过滤不能过头。**
+   *
+   * 上面三条都是「少推」，这条钉住「该推的一条不少」——
+   * 否则一个判据写反（该挡的没挡 / 不该挡的挡了）会表现成「模型少了」，
+   * 而模型变少与模型变多同样看不出来。
+   */
+  it('反向护栏：四个托管渠道的正常模型一条不少', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w1', provider: 'workbuddy', status: 'active' },
+        { name: 't1', provider: 'trae', status: 'active' },
+        { name: 'q1', provider: 'qoder', status: 'active' },
+        { name: 'z1', provider: 'zcode', status: 'active' },
+      ],
+      models: {
+        w1: ['hy3', 'kimi-k2.7'],
+        t1: ['custom_model_gemini', 'Doubao-Seed-2.1-Pro'],
+        q1: ['dfmodel', 'kmodel'],
+        z1: ['glm-4.5-air', 'glm-5-turbo'],
+      },
+      catalog: [
+        'hy3',
+        'kimi-k2.7',
+        'custom_model_gemini',
+        'Doubao-Seed-2.1-Pro',
+        'dfmodel',
+        'kmodel',
+        'glm-4.5-air',
+        'glm-5-turbo',
+      ],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const names = pushed.flatMap((p) => p.names)
+    for (const expected of [
+      'WorkBuddy · hy3',
+      'WorkBuddy · kimi-k2.7',
+      'Trae · custom_model_gemini',
+      'Trae · Doubao-Seed-2.1-Pro',
+      'Qoder · dfmodel',
+      'Qoder · kmodel',
+      'ZCode · glm-4.5-air',
+      'ZCode · glm-5-turbo',
+    ]) {
+      expect(names).toContain(expected)
+    }
   })
 })

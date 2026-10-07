@@ -30,6 +30,9 @@ kimi 能被算进别名表、能被推成模型路由，却从来没被写进 `p
 - **托管 / 非托管分开**：kimi 与 mimo 不由本插件管理，只在注册表里登记**展示名**
   （`UNMANAGED_LABELS`），不登记能力与路径。别名前缀的兜底是「原样小写」，
   所以它们连前缀都不需要登记。
+  ⚠️ **它们也不再进模型路由**（2026-10-07）：供给面与 `ROUTE_PREFIXES` 都只认
+  托管渠道，判据是「有没有 spec」—— CPA 以后新增渠道同样自动被挡，
+  不需要改本仓代码。见[决策记录](2026-10-07-model-routes-managed-healthy-only.md)。
 - 生成 `config.yaml` 的启用清单 = **磁盘上实际存在的 dll**（`listPluginIds()`），
   由 `prepare()` 在插件解压就位之后传给 `renderConfig`；手写清单删除。
 

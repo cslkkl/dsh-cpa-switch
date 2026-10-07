@@ -16,6 +16,11 @@
 | 某渠道**声明**支持哪些模型（含没登录的组） | 渠道的 `modelsPath`（见各 spec）                            | ——                            |
 | 某模型**属于哪个渠道**                     | 上面第一行的读数里出现过它                                  | ❌ `owned_by`                 |
 
+⚠️ **供给面只收「托管渠道 + 能用」的凭据**（2026-10-07）：`auth-files/models`
+只报模型名，而「能不能用」要看同一个 `auth-files` 返回的 `disabled` / `status` /
+`unavailable` —— 实测一个 `status=error` + `unavailable=true` 的凭据照样报出 10 个模型。
+认不出的健康度字段一律当**可用**（「过滤过头」比多列几个调不通的模型严重）。
+
 ⚠️ **`owned_by` 只是 CPA 的辅助标注，可为空，不能用来判归属。** 实测（2026-10-06）：
 Trae 供给的 11 条裸名（`custom_model_gemini`、`Doubao-Seed-*`、`kimi-k2.7-code` …）
 在 `/v1/models` 里 `owned_by` **全是空串**，一度被误判成「CPA 自有模型」；用权威端点
@@ -64,8 +69,11 @@ WorkBuddy 侧 id 叫 `kimi-k2.7`、name 是 `Kimi-K2.7-Code`）。**归属表必
   - 导出：`CHANNELS` / `CHANNEL_IDS` / `channelOf` / `channelLabel` / `channelOrder` /
     `aliasPrefixOf` / `accountsPathOf` / `configPathOf` / `ACTION_PATHS` / `AUTO_CHECKIN_PATHS` /
     `ROUTE_PREFIXES` / `SCHEDULER_MODE` / 类型 `ChannelId`
-  - **托管渠道**：有 spec、进面板、进模型路由；**非托管渠道**（kimi / mimo）只登记展示名
-  - ⚠️ 别名前缀的兜底是「原样小写」：非托管与未来渠道不需要登记，也不能被猜一个缩写出来
+  - **托管渠道**：有 spec、进面板、进模型路由；**非托管渠道**（kimi / mimo）只登记展示名，
+    且**不进模型路由** —— 供给面与 `ROUTE_PREFIXES` 都只认托管渠道，
+    判据是「有没有 spec」，CPA 以后新增渠道自动被挡
+    （[决策记录](../../.agents/notes/2026-10-07-model-routes-managed-healthy-only.md)）
+  - ⚠️ 别名前缀的兜底是「原样小写」：不能被猜一个缩写出来
 - **`normalize.ts`** —— 上游 payload → `NormalizedAccount`。
   - 导出：`normalizeAccounts`
   - 显示名兜底链：`nickname`（非空）→ `label`（且不是渠道名）→ `auth_id` 去 `.json` → `auth_index`

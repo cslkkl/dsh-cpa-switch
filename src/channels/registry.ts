@@ -7,9 +7,11 @@
  *
  * ## 托管渠道与非托管渠道
  *
- * - **托管渠道**：有 spec、进面板、进模型路由的展示名，本插件能管它的账号。
- * - **非托管渠道**：CPA 可能供给它们的账号（如 kimi / mimo），但本插件不管 ——
- *   只登记一个展示名，**不登记能力与路径**。
+ * - **托管渠道**：有 spec、进面板、进模型路由，本插件能管它的账号
+ *   （{@link CHANNELS} 里的四个，**这是本插件的全部职责范围**）。
+ * - **非托管渠道**：CPA 侧可能动态出现本插件不认识的渠道（实测 kimi / mimo）。
+ *   它们**不进面板、不进模型路由** —— 判据是「有没有 spec」，
+ *   所以 CPA 以后新增渠道不用改这里的代码。
  *
  * 判据见 `tests/channels.test.ts`：托管渠道的每条能力都必须有对应路径。
  *
@@ -43,10 +45,13 @@ export const CHANNEL_IDS: readonly ChannelId[] = CHANNELS.map((channel) => chann
 /**
  * 非托管渠道的展示名。
  *
- * 这些渠道不由本插件管理（没有 spec、没有面板、没有能力声明），但模型路由要显示
- * 它们的账号 —— 所以只登记展示名这一件事。
+ * 这些渠道不由本插件管理（没有 spec、没有面板、没有能力声明）。
  *
- * ⚠️ **不在这里登记前缀**：别名前缀的兜底是「原样小写」，与本表无关。
+ * ⚠️ **它们不进模型路由**（2026-10-07）：`readChannelModels` 只收托管渠道的供给面，
+ * 所以 CPA 侧动态出现的非托管渠道（实测有 kimi / mimo）**不会出现在模型选择器里** ——
+ * 不靠特判渠道名，而是「没有 spec 就不算渠道」这条规则自动生效。
+ *
+ * 这里保留它们只为**面板文案**（例如把上游返回的 provider 串翻译成展示名）。
  */
 const UNMANAGED_LABELS: Readonly<Record<string, string>> = {
   kimi: 'Kimi',
@@ -59,11 +64,13 @@ const UNMANAGED_IDS: readonly string[] = Object.keys(UNMANAGED_LABELS)
 /**
  * 模型 id 前缀里可能出现哪些渠道写法。
  *
- * = 托管渠道 id + 非托管渠道 id。
- * ⚠️ **别名前缀（`wb`）不在这里** —— 它由别名表自己识别（`aliases.resolve`），
- * 这里只回答「这个前缀是不是一个渠道 id」。
+ * = 托管渠道 id。
+ *
+ * ⚠️ **只有托管渠道**（2026-10-07）：非托管渠道的模型根本不进路由清单，
+ * 前缀匹配也就无须认它们。第三方自带的 `vendor/xxx` 同样不在表里，
+ * 由 `channelOfPrefix` 的「认不出就当第三方」兜底。
  */
-export const ROUTE_PREFIXES: readonly string[] = [...CHANNEL_IDS, ...UNMANAGED_IDS]
+export const ROUTE_PREFIXES: readonly string[] = [...CHANNEL_IDS]
 
 /** 按 id 找一个托管渠道；非托管或未知返回 `undefined`。 */
 export function channelOf(id: string): ChannelSpec | undefined {
@@ -76,10 +83,10 @@ export function channelLabel(id: string): string {
 }
 
 /**
- * 排序用的序号：托管渠道按 {@link CHANNELS} 的顺序，非托管按 {@link UNMANAGED_LABELS}
- * 的顺序跟在后面，认不出的排最后。
+ * 排序用的序号：托管渠道按 {@link CHANNELS} 的顺序。
  *
- * 模型路由用它把「本插件管的渠道」排在前面。
+ * 模型路由用它把四个托管渠道排成稳定顺序；非托管渠道走同一个入口时
+ * 排在托管之后（它们本不该出现在路由清单里，排序只是兜底）。
  */
 export function channelOrder(id: string): number {
   const managed = CHANNEL_IDS.indexOf(id as ChannelId)
@@ -91,8 +98,7 @@ export function channelOrder(id: string): number {
 /**
  * 同名模型的别名前缀。
  *
- * 兜底是**原样小写** —— 非托管渠道（kimi / mimo）与未来新增渠道不需要登记，
- * 也不能被猜一个缩写出来。
+ * 兜底是**原样小写** —— 不能被猜一个缩写出来。
  */
 export function aliasPrefixOf(id: string): string {
   return channelOf(id)?.aliasPrefix ?? id.trim().toLowerCase()

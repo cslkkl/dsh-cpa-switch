@@ -31,7 +31,13 @@
 
 import type { CpaGateway } from './gateway.ts'
 import type { CpaRuntime } from './runtime.ts'
-import { ROUTE_PREFIXES, channelLabel, channelOfPrefix, channelOrder } from './channels/registry.ts'
+import {
+  ROUTE_PREFIXES,
+  channelLabel,
+  channelOf,
+  channelOfPrefix,
+  channelOrder,
+} from './channels/registry.ts'
 import { buildAliasTable, type AliasTable } from './model-alias.ts'
 import { capsOf, reasoningDefaultOf, reasoningEffortsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
@@ -190,10 +196,16 @@ export interface RouteRegistryDeps {
   readonly reasoningEffortsEnabled?: (() => boolean) | undefined
 }
 
-/** `auth-files` 里一个凭据的形状（归属识别用）。 */
+/** `auth-files` 里一个凭据的形状（归属识别 + 健康度判据用）。 */
 interface AuthFileRef {
   readonly name?: unknown
   readonly provider?: unknown
+  /** 面板禁用的号。实测禁用时 `auth-files/models` 返 0 个模型，判据是双保险。 */
+  readonly disabled?: unknown
+  /** 上游给的状态串；实测取值含 `active` / `disabled` / `error`。 */
+  readonly status?: unknown
+  /** 上游标的「当前不可用」。实测 `error` 的凭据它为 `true`。 */
+  readonly unavailable?: unknown
 }
 
 /** 每个渠道各提供哪些模型 + 这一轮读**是否完整**。 */
@@ -229,6 +241,31 @@ export interface ChannelFailure {
   readonly provider: string
   /** `permanent` = 等也没用（404 / 凭据失效）；`transient` = 可能自愈。 */
   readonly kind: 'permanent' | 'transient'
+}
+
+/**
+ * 一个凭据**能不能用**。
+ *
+ * 实测（2026-10-07）：`auth-files/models` **只报模型名，不报这个号能不能调**。
+ * 一个 `status=error` + `unavailable=true` 的 kimi 凭据照样报出 10 个模型，
+ * 于是它们被推进路由清单、顶着 `Kimi · xxx` 的名字，用户选了必然失败。
+ *
+ * 所以健康度必须**从 `auth-files` 自己给的字段读**，不能等调用时报错才发现：
+ * - `disabled` —— 面板禁用 / 已登出的号（实测这类号报 0 个模型）；
+ * - `unavailable` —— 上游标的当前不可用（实测 `error` 的凭据为 `true`）；
+ * - `status` —— 上游给的状态串。
+ *
+ * ⚠️ **认不出的字段一律当「可用」**：上游加字段不该让已健康的渠道集体消失，
+ * 那是「过滤过头」，比多列几个调不通的模型严重（与 `failureKindOf`
+ * 「宁可判成暂时」同一个取向）。
+ *
+ * @returns `false` = 这个号的模型不该进清单。
+ */
+export function credentialUsable(file: AuthFileRef): boolean {
+  if (file.disabled === true) return false
+  if (file.unavailable === true) return false
+  const status = typeof file.status === 'string' ? file.status.trim().toLowerCase() : ''
+  return status !== 'error' && status !== 'disabled' && status !== 'unavailable'
 }
 
 /**
@@ -273,6 +310,24 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
     files.map(async (file) => {
       const provider = String(file?.provider ?? '')
       if (provider === '') return
+      /**
+       * **只收「托管渠道 + 能用的号」的供给面**（2026-10-07）。
+       *
+       * 两条闸各治一种「有名字、用不了」：
+       *
+       * 1. `channelOf(provider) === undefined` ⇒ 不是本插件管的渠道。
+       *    CPA 侧渠道是动态的（实测存在 kimi / mimo 等未登记渠道），
+       *    本插件只管 {@link CHANNELS} 里的四个 —— 其余一律不进路由清单，
+       *    **不靠特判渠道名**，新渠道自动被这条闸挡住。
+       * 2. `!credentialUsable(file)` ⇒ 这个号已禁用 / 已报错 / 当前不可用。
+       *    实测这类号仍会报出一批模型名，不挡掉就会顶着渠道名进清单。
+       *
+       * ⚠️ **被挡掉的渠道不算「读失败」**：它不是读不出来，是**不该出现**。
+       * 记进 `failures` 会让上层按「暂时/永远」重试或跳过，那是另一件事
+       * （见 {@link ChannelFailure}）。
+       */
+      if (channelOf(provider) === undefined) return
+      if (!credentialUsable(file)) return
       try {
         const data = (await deps.gateway.fetch(
           `/v0/management/auth-files/models?name=${encodeURIComponent(String(file.name))}`,
@@ -459,8 +514,25 @@ function buildCpaRouteProfile(
       }
       continue
     }
-    const label = plugin === undefined ? 'CPA' : channelLabel(plugin)
-    rows.push({ id, bare, label, channel: plugin ?? '' })
+    /**
+     * **认不出归属 → 不产出行**（2026-10-07）。
+     *
+     * 原来这里兜底成 `CPA · xxx`：目录里有、但没有任何渠道的可用凭据供给它。
+     * 那个兜底是**谎称**—— CPA 是代理层、不生产模型，把别人的模型说成
+     * 「CPA 自有」正是当初把 Trae 的 11 条平台模型误判的同一个坑
+     * （见 [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)）。
+     *
+     * 而它长得和「这轮读丢了归属」**完全一样**，下游无从分辨。
+     *
+     * 现在不产出行，两个后果都是对的：
+     * - 真没主（远端目录里的、没凭据供的）⇒ 本来就调不通，不该出现在选择器；
+     * - 这轮读丢了 ⇒ 少一行，等下一轮补上（护栏见 `refresh`）。
+     *
+     * ⚠️ `rows` 可能因此为空 —— 那由调用方按「拿不到完整清单」处理
+     * （{@link buildCpaRouteProfile} 末尾的 throw）。
+     */
+    if (plugin === undefined) continue
+    rows.push({ id, bare, label: channelLabel(plugin), channel: plugin })
   }
   if (rows.length === 0) {
     throw new Error('no routable model after channel split')

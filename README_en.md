@@ -137,6 +137,12 @@ model picker on their own:
 - When one model is served by several channels, each channel gets its own entry — **picking a
   channel means only that channel's accounts are used**, never round-robined across your other
   accounts.
+- **Only usable accounts are listed**: models belonging to a disabled, failed, or currently
+  unavailable account do not appear — the picker never offers an entry that turns out to be
+  uncallable.
+- **Only these four channels are listed**: CPA may host channels this plugin does not manage,
+  and their models are left out. An unmanaged channel has no panel to configure it with, so
+  listing its name would be worse than listing nothing.
 
 Adding or removing accounts updates the model list automatically. How it works is described in
 [Architecture](docs/ARCHITECTURE.md).

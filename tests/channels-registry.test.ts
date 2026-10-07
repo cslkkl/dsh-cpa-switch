@@ -103,7 +103,11 @@ describe('派生表覆盖全部托管渠道', () => {
 })
 
 describe('托管渠道与非托管渠道', () => {
-  it('非托管渠道没有 spec，但仍有展示名（不猜品牌大小写之外的东西）', () => {
+  /**
+   * 非托管渠道**有展示名但没有 spec**，且**不进模型路由**
+   * （2026-10-07：路由只收托管渠道，见下面前缀表那条判据）。
+   */
+  it('非托管渠道没有 spec，展示名仍登记（面板文案用），但不是渠道', () => {
     expect(channelOf('kimi')).toBeUndefined()
     expect(channelLabel('kimi')).toBe('Kimi')
     expect(channelLabel('mimo')).toBe('MiMo')
@@ -130,11 +134,24 @@ describe('托管渠道与非托管渠道', () => {
     expect(channelOrder('nope')).toBeGreaterThan(channelOrder('mimo'))
   })
 
-  it('模型 id 前缀表 = 托管 id + 非托管 id（别名前缀由别名表自己认）', () => {
+  /**
+   * **模型 id 前缀表只含托管渠道**（2026-10-07）。
+   *
+   * 这条是「非托管渠道不进模型路由」在注册表这侧的**结构性保证**：
+   * `routeOwnerOf` 按这张表反查归属，表里没有的渠道**永远认不出主人**。
+   * 与 `readChannelModels` 里那道闸各管一层 —— 那道闸让它连问都不问，
+   * 这道闸保证即便数据漏进来也挂不上标签。
+   *
+   * ⚠️ 别把它加回去（曾含 kimi / mimo）：加了会让 CPA 侧动态渠道的模型
+   * 重新出现在选择器里，而它们既无 spec 也无面板 —— 选了却管不了。
+   */
+  it('模型 id 前缀表 = 只有托管渠道 id（别名前缀由别名表自己认）', () => {
     for (const id of CHANNEL_IDS) expect(ROUTE_PREFIXES).toContain(id)
-    expect(ROUTE_PREFIXES).toContain('kimi')
-    expect(ROUTE_PREFIXES).toContain('mimo')
+    expect(ROUTE_PREFIXES).not.toContain('kimi')
+    expect(ROUTE_PREFIXES).not.toContain('mimo')
     // `wb` 是**别名前缀**不是渠道 id，不该混进这张表
     expect(ROUTE_PREFIXES).not.toContain('wb')
+    // 逐条相等 —— 防止将来有人往里加渠道而判据放行
+    expect([...ROUTE_PREFIXES].sort()).toEqual([...CHANNEL_IDS].sort())
   })
 })
