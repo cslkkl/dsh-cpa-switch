@@ -109,8 +109,40 @@ check('带 data-plugin-css 注入逻辑', /data-plugin-css/.test(clientSrc))
  * 这类静默失败在这里响起来。
  */
 const legacyClassNames = ['cpa-wrap', 'cpa-card', 'cpa-grid', 'cpa-sum', 'cpa-toolbar']
-const leaked = legacyClassNames.filter((name) => clientSrc.includes(name))
+
+/**
+ * 找一个**类名**是否还在，按分词边界匹配 —— **不是**裸子串。
+ *
+ * ⚠️ 这里第三回被裸子串咬（前两回见 `Switch 未被包在 label 里` 那条）：
+ * 新的自定义属性 `--cpa-card-padding` **含** `cpa-card` 这个子串，
+ * 于是本条判据把正确代码判成红。边界前后都不许是 `\w` 或 `-`：
+ * 这样 `--cpa-card-padding` 不命中，而真的类名（`.cpa-card` / `"cpa-card"`）命中。
+ */
+function hasClassNamed(source, name) {
+  return new RegExp(`(^|[^\\w-])${name}(?![\\w-])`).test(source)
+}
+
+const leaked = legacyClassNames.filter((name) => hasClassNamed(clientSrc, name))
 check('旧的全局限类名已全部消失', leaked.length === 0, leaked.join(','))
+
+/**
+ * ⚠️ **内建自证**：这条判据必须抓得住真泄漏、且不被自定义属性误伤。
+ *
+ * 抓不住缺陷的判据比没有更糟（永远绿）；而**误伤**的判据会被下一个人顺手删掉。
+ * 两种都得钉住。
+ */
+check(
+  '自证：类名判据抓得住真泄漏',
+  hasClassNamed('const css = ".cpa-card{border:0}"', 'cpa-card') &&
+    hasClassNamed('className="cpa-card"', 'cpa-card'),
+)
+check(
+  '自证：类名判据不被 --cpa-* 自定义属性误伤',
+  !hasClassNamed('--cpa-card-padding: 12px', 'cpa-card') &&
+    !hasClassNamed('--cpa-card-x', 'cpa-card') &&
+    // 前缀里的 `cpa-card` 紧跟 `-`，同样不该命中
+    !hasClassNamed('--cpa-card-', 'cpa-card'),
+)
 
 /**
  * 类名必须是**哈希**的，不是 `cpa-xxx` 这种全局裸名。

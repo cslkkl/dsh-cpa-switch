@@ -380,7 +380,17 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
 ### 2.9 结构改动（**先补判据再动结构**）
 
 改行为或签名的改动都走这个口径：**判据先到位，才允许动结构**。
-两件已立项的都在 2026-10-06 收口了：
+
+- **卡片纵向几何**（`panel.module.css` 的卡片段）—— 先把「六个槽位高度只有一处来源、
+  算式自洽、状态走 `data-*`」钉成判据（`tests/card-geometry.test.ts` 当时 11 条是红的），
+  再把高度改成 `.card` 上的 `--cpa-slot-*` + `calc()`、状态改成属性选择器：
+  [决策记录](../.agents/notes/2026-10-07-card-geometry-single-source.md)、
+  判据 [tests/card-geometry.test.ts](../tests/card-geometry.test.ts)。
+  ⚠️ 顺手量出两处**一直存在**的错：`height` 是 content-box 的内容高度，
+  而算式把内边距算了进去（声明 222、实测 248）；`numbers` 槽位声明 36px、
+  真实内容 42px（溢出 6px 被间距吃掉，谁也没看见）。
+
+两件更早立项的都在 2026-10-06 收口了：
 
 - **状态文件写入**（`state.ts`）—— 判据先证明旧写法真的会吞记录（两条用例当时是红的），
   再改成单入口读改写：[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)、
