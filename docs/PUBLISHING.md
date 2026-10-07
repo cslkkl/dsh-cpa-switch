@@ -11,9 +11,13 @@
 1. 跑全量门禁（与 `ci.yml` 同一份 `pnpm check`）
 2. 核对 tag 与 `package.json` 版本号一致
 3. `npm publish --provenance`
-4. 建 GitHub Release
+4. 建 GitHub Release（正文来源见下节）
 
 认证走 **Trusted Publishing（OIDC）**，仓库里不存 token —— 2026-10-06 以 `v0.3.0` 首次跑通。
+
+Release **正文**由 [release-drafter.yml](../.github/workflows/release-drafter.yml) 自动维护：
+每次有 PR 合并进 `main`，它按 PR 标签重算一份**草稿**。
+它不碰版本号、不打标签、不发布 —— 发布决策仍在人手里。
 
 本机 `npm whoami` 返回 401（不是包所有者），**发不出去**。分工是：本机准备代码与版本号，
 **所有者推标签**。OIDC 万一坏了，备用路径是所有者本机 `npm publish --access public`。
@@ -54,10 +58,26 @@ git push origin v<版本>        # 这一下触发发布
 
 ## Release 正文
 
-正文取 **`docs/releases/<tag>.md`**，**发版前写好并提交**（与 bump 同批）。
-没有该文件时 workflow 回落到 git log 摘要 —— **不会失败**，但那种正文可读性差。
+**默认自动，手写可选。**
 
-写法：先说使用者能观察到什么（新增 / 修复 / 升级方式），机制作为子条目，
+优先级：**`docs/releases/<tag>.md`（可选覆盖）→ Release Drafter 草稿（默认来源）→ git log 摘要**。
+每一步都在 Actions 注解里打印用了哪个来源 —— 回落是静默的，所以必须打印。
+
+| 来源                     | 什么时候           | 说明                                                             |
+| ------------------------ | ------------------ | ---------------------------------------------------------------- |
+| `docs/releases/<tag>.md` | 你**想手写**时     | **可选覆盖**，不是必须。存在就赢 —— 写它一定生效，不会被草稿顶掉 |
+| Release Drafter 草稿     | **不写上面那份时** | 默认来源。每次 PR 合并进 `main` 自动重算                         |
+| git log 摘要             | 前两者都没有       | 兜底，可读性差                                                   |
+
+- **旧文件保留，作为历史存档**（`v0.1.2` … `v0.8.0`）—— **不再要求补建**，
+  也别去回填：草稿只看安装之后合并的 PR，回填只会得到近乎空白的正文；
+  而且补建老 Release 会**抢走 Latest**（GitHub 按创建时间判定，见「发布后复核」）。
+- 分类与标签映射写在 [.github/release-drafter.yml](../.github/release-drafter.yml)；
+  **草稿 tag 为什么是 `next`** 也写在那份的文件头（用版本号当草稿 tag 会与正式标签撞车，
+  而 `gh release edit` 不会把草稿变成已发布 —— 那种失败没有任何报错）。
+- 排除某条 PR：给它打 `skip-changelog`（纯文档 / 纯测试 / 纯 chore 用）。
+
+写法（手写时）：先说使用者能观察到什么（新增 / 修复 / 升级方式），机制作为子条目，
 内部重构只留一段概括。判据同 PR 正文 —— 一段如果只是把 commit 列表复述一遍，就不该存在。
 
 ## 发布后复核
@@ -65,6 +85,10 @@ git push origin v<版本>        # 这一下触发发布
 npm 与 registry 都有 CDN 传播延迟：发布成功后头几分钟可能仍报旧版本、
 甚至对新版本报 `E404`。**那不是失败** —— 判据是 workflow 日志里的
 `+ dsh-cpa-switch@<版本>`，别据此重发（版本号不可撤销）。
+
+⚠️ **顺手核一下正文来源**：`publish.yml` 会打一条 `::notice::` 说明正文取自
+草稿 / `docs/releases/<tag>.md` / git log。**若来自草稿，草稿正文会带上
+`(#<PR 号>)` 的列表形状；若来自 git log，则是提交信息列表** —— 两者一眼能分。
 
 等一两分钟，要权威结果直查 registry：
 

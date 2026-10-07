@@ -114,9 +114,20 @@ jobs:
       # Release」，而 npm 那边**一切正常**，所以从发布日志上看不出少了什么
       # （v0.1.2 就这么漏掉了；v0.2.0 的 Release 是人类手工补的）。
       #
-      # 正文优先取 `docs/releases/<tag>.md`（人工写，质量高）；没有就回落到
-      # git log 摘要。**不因缺正文而失败** —— Release 建出来就比没有强，
-      # 正文可以事后编辑。
+      # 正文来源优先级：`docs/releases/<tag>.md`（**可选覆盖**）→ **草稿**
+      # （Release Drafter 自动维护，默认来源）→ git log 摘要。
+      #
+      # ⚠️ **人工那份在前**：「覆盖」必须真的覆盖，否则写了等于没写 —— 那是静默失效。
+      # 不写那份时草稿就是默认来源，所以**手写不再是必须步骤**。
+      #
+      # ⚠️ **每一步都打印用了哪个来源**（`::notice::`，会显示在 Actions 的注解里）。
+      # 回落是静默的：不打印就分不清「正文来自草稿」与「正文来自 git log」，
+      # 而这两者的差别正是本机制要保证的东西。
+      #
+      # ⚠️ 草稿的 tag 固定是 `next`（理由见 [release-drafter.yml](../release-drafter.yml)：
+      # 用版本号当草稿 tag 会与正式标签撞车，而 `gh release edit` **不会**把草稿
+      # 变成已发布 —— 那种失败没有任何报错）。所以这里**按 tag 从列表里挑 draft**，
+      # 不用 `gh release view next`：按 tag 查的端点拿不到草稿。
       #
       # ⚠️ **必须幂等**：重跑这条 workflow（`workflow_dispatch`）时 Release 可能已存在，
       # 那就改成更新正文，而不是报错退出 —— 否则「补正文」这个最常见的诉求反而修不了。
@@ -127,21 +138,30 @@ jobs:
         run: |
           $tag = $env:RELEASE_TAG
           $notes = "docs/releases/$tag.md"
+          $bodyFile = Join-Path $env:RUNNER_TEMP 'release-body.md'
 
           if (Test-Path $notes) {
-            Write-Output "using release notes from $notes"
-            $bodyFile = $notes
+            # 人工那份是**可选覆盖**：存在就赢。
+            Write-Output "::notice::release notes come from $notes (hand-written override)"
+            Copy-Item $notes $bodyFile
           } else {
-            Write-Output "no $notes — falling back to git log"
-            $prev = (git describe --tags --abbrev=0 "$tag^" 2>$null)
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($prev)) {
-              $range = $tag
+            $draft = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" `
+              --jq '[.[] | select(.draft) | select(.tag_name == "next") | .body][0] // ""' 2>$null
+
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($draft)) {
+              Write-Output "::notice::no $notes — release notes come from the Release Drafter draft ($($draft.Length) chars)"
+              Set-Content -Path $bodyFile -Value $draft -Encoding utf8
             } else {
-              $range = "$prev..$tag"
+              Write-Output "::notice::no $notes and no draft — falling back to git log"
+              $prev = (git describe --tags --abbrev=0 "$tag^" 2>$null)
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($prev)) {
+                $range = $tag
+              } else {
+                $range = "$prev..$tag"
+              }
+              $lines = git log --pretty=format:'- %s' $range
+              "## What's Changed`n`n$($lines -join "`n")" | Set-Content -Path $bodyFile -Encoding utf8
             }
-            $lines = git log --pretty=format:'- %s' $range
-            $bodyFile = Join-Path $env:RUNNER_TEMP 'release-body.md'
-            "## What's Changed`n`n$($lines -join "`n")" | Set-Content -Path $bodyFile -Encoding utf8
           }
 
           # 先看有没有 —— `gh release view` 对「不存在」返回非零，正好当开关用。
