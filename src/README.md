@@ -128,7 +128,8 @@
 - **`credentials.ts`** —— 管理密钥与调用密钥。
   - 导出：`AdminKeyStore`（类）/ `ensureApiKey` / `CPA_API_KEY_REF` / 类型 `CredentialsService` / `LoggerLike`
   - `AdminKeyStore` 持有解析缓存；`ensureForAutoInstall` 是「沿用优先」的三步取值
-  - 改后必测：只有明文能用（bcrypt 哈希必须被挡掉）
+  - 改后必测：只有明文能用（bcrypt 哈希必须被挡掉），判据 `tests/credentials.test.ts`
+    —— 三步取值的顺序、解析优先级、`persist` / `ensureApiKey` 的静默失败面都在那里
 - **`process.ts`** —— CPA 子进程托管。
   - 导出：`CpaProcess`（类）/ `resolveExe` / `probePort` / `waitForPort` / `defaultExeCandidates` / `DEFAULT_PORT`
   - 类型：`ProcessDeps` / `ChildProcessLike` / `PortState` / `EnsureResult`
