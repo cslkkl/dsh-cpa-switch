@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { cacheKeys } from './cache-keys.ts'
 import { paths, runSetup, startCpa } from './endpoints.ts'
 import { prefetch } from './read-cache.ts'
 import { PluginPanel, progressLine } from './PluginPanel.tsx'
@@ -78,14 +79,14 @@ export function Panel(props: PanelProps): ReactNode {
 
   /** 宿主 `GET /status`。`select` 原样透传，保持对象引用稳定（省一次无谓重渲染）。 */
   const statusResource = useResource<StatusInfo>({
-    key: 'status',
+    key: cacheKeys.status,
     path: paths.status,
     select: (result) => result as StatusInfo,
   })
 
   /** 宿主 `GET /setup`。 */
   const setupResource = useResource<SetupInfo>({
-    key: 'setup',
+    key: cacheKeys.setup,
     path: paths.setup,
     select: (result) => result as SetupInfo,
     /**
@@ -126,7 +127,7 @@ export function Panel(props: PanelProps): ReactNode {
 
   /** 渠道清单。它是**静态**的（四条渠道写死在 `channels/registry.ts`）。 */
   const pluginsResource = useResource<readonly PluginMeta[]>({
-    key: 'plugins',
+    key: cacheKeys.plugins,
     path: paths.plugins,
     select: (result) => {
       const list = result.plugins

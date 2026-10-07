@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { cacheKeys } from './cache-keys.ts'
 import { authCancel, paths, startAuth } from './endpoints.ts'
 import { invalidateReads } from './read-cache.ts'
 import { useResource } from './use-resource.ts'
@@ -71,7 +72,7 @@ export function useAccountLogin(options: UseAccountLoginOptions): AccountLogin {
    * key 带 `state`：这是**一次会话**的进度，不是可复用的资源。
    */
   const probe = useResource<{ readonly status: string }>({
-    key: 'auth:' + (authState ?? ''),
+    key: cacheKeys.auth(authState ?? ''),
     path: paths.authStatus(authState ?? ''),
     select: (result) => ({ status: String(result.status ?? 'unknown') }),
     pollMs: authState === undefined ? undefined : POLL_MS,
@@ -89,7 +90,7 @@ export function useAccountLogin(options: UseAccountLoginOptions): AccountLogin {
     const status = probe.data?.status
     if (status === undefined || status === 'wait') return
     setLogin(null)
-    invalidateReads('accounts:' + plugin)
+    invalidateReads(cacheKeys.accounts(plugin))
     onAuthorized()
   }, [authState, probe.data, plugin, onAuthorized])
 

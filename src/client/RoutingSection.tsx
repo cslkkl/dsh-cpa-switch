@@ -18,6 +18,7 @@
 
 import type { ReactNode } from 'react'
 import { IconWarningOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { cacheKeys } from './cache-keys.ts'
 import { paths } from './endpoints.ts'
 import { strategyTextOf, strategyWarns } from './routing-text.ts'
 import { useResource } from './use-resource.ts'
@@ -41,7 +42,7 @@ export function RoutingSection(props: RoutingSectionProps): ReactNode {
    * 只是噪音。它走缓存，第二次进来直接就有。
    */
   const strategy = useResource<string>({
-    key: 'routing',
+    key: cacheKeys.routing,
     path: paths.routing,
     select: (result) => (result.strategy === undefined ? '' : String(result.strategy)),
   })

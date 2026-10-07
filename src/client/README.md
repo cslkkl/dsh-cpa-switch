@@ -68,7 +68,7 @@
   - `plugin` 变化时整层清掉：覆盖层是渠道级状态，跟着渠道走
 - **`use-account-login.ts`** —— 「添加账号」弹窗的状态机（`idle` / `starting` / `wait` / `error`）。
   - 授权轮询也走 `useResource` 的 `pollMs`（`POLL_MS = 2500`）；还没有 `state` 时不轮询
-  - 到**终态**后 `invalidateReads('accounts:' + plugin)` 让账号列表自己刷新
+  - 到**终态**后 `invalidateReads(cacheKeys.accounts(plugin))` 让账号列表自己刷新
 - **`use-channel-actions.ts`** —— 渠道级动作（全部签到 / 任务、自动签到开关）+ 忙碌与提示。
   - 「批量在飞」与「某张卡在飞」**互相看得见**：并发点各发一次写请求会互相盖掉响应
 - **`report.tsx`** —— 操作结果提示的**唯一**组装处（文案 + 图标）。
@@ -149,6 +149,15 @@
 - **`transport.ts`** —— 传输层：一次 `/api/v1/cpa/*` 请求 + 错误收敛。
   - 导出：`api` / `post` / 类型 `ApiResult`
   - ⚠️ 任何异常收敛成 `{ ok: false, error }`，**不抛** —— 调用方只需判 `ok`
+- **`cache-keys.ts`** —— 浏览器半边**读缓存键的唯一来源**。
+  - 导出：`cacheKeys`（`status` / `setup` / `plugins` / `routing` / `accounts(plugin)` / `auth(state)`）
+  - ⚠️ 键在本侧**身兼两职**：读用它取键、写后用它当失效前缀（`invalidateReads` 按前缀清）。
+    两处各写一遍字面量时不一致**不报错** —— 只是那次作废匹配不到任何条目（空操作）、
+    界面继续拿旧值。收在一处之后「读用的键」与「作废用的前缀」同源
+  - ⚠️ **新增一个读键必须加到这里**，并在读到它的 `useResource` 里用它；判据
+    `tests/client-cache-keys.test.ts` 拦住别处手写的裸字面量（`key: '…'`）
+  - ⚠️ 这是**页面内**那套缓存，与宿主 `src/gateway.ts` 的 `cacheKeys`（**进程内**那套）
+    是两回事 —— 两边同名只是巧，不要互相 import，也不要「对齐」成一样
 - **`read-cache.ts`** —— **共享读缓存**（`ReadCache`）：新鲜 / 陈旧两档 + 按前缀作废。
   - 导出：`readCache` / `cachedGet` / `prefetch` / `invalidateReads` /
     `class ReadCache` / 类型 `CachedValue` / `ReadCacheOptions`

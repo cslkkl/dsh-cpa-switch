@@ -13,6 +13,7 @@
  * @module dsh-cpa-switch/client/endpoints
  */
 
+import { cacheKeys } from './cache-keys.ts'
 import { invalidateReads } from './read-cache.ts'
 import { api, post, type ApiResult } from './transport.ts'
 
@@ -82,7 +83,7 @@ export function act(plugin: string, kind: string, authIndex?: string): Promise<A
     paths.action,
     authIndex === undefined ? { plugin, kind } : { plugin, kind, authIndex },
   ).then((result) => {
-    if (result.ok) invalidateReads('accounts:' + plugin)
+    if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
     return result
   })
 }
@@ -94,7 +95,7 @@ export function act(plugin: string, kind: string, authIndex?: string): Promise<A
  */
 export function selectCpaAccount(plugin: string, authIndex: string): Promise<ApiResult> {
   return post(paths.accountSelect, { plugin, authIndex }).then((result) => {
-    if (result.ok) invalidateReads('accounts:' + plugin)
+    if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
     return result
   })
 }
@@ -111,7 +112,7 @@ export function setAccountEnabled(
   enabled: boolean,
 ): Promise<ApiResult> {
   return post(paths.accountEnabled, { plugin, authIndex, enabled }).then((result) => {
-    if (result.ok) invalidateReads('accounts:' + plugin)
+    if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
     return result
   })
 }
@@ -130,7 +131,7 @@ export function setAccountEnabled(
  */
 export function setAutoCheckin(plugin: string, enabled: boolean): Promise<ApiResult> {
   return post(paths.autoCheckin(plugin), { enabled }).then((result) => {
-    if (result.ok) invalidateReads('accounts:' + plugin)
+    if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
     return result
   })
 }
