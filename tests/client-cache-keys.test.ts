@@ -77,6 +77,18 @@ function rawInvalidations(source: string): string[] {
 const endpoints = clientFile('endpoints.ts')
 const actions = clientFile('use-channel-actions.ts')
 
+/**
+ * 抓出源码里每个 `useEffect` 的依赖数组。
+ *
+ * 用来判「有没有以 `plugin` 为唯一依赖的 effect」—— 那是「切渠道即清空」的
+ * 形状，也是本文件要挡回去的那个机制。
+ */
+function effectDeps(source: string): string[] {
+  return [...source.matchAll(/useEffect\([\s\S]*?\n\s*\}, (\[[^\]]*\])\)/g)].map(
+    (hit) => hit[1] ?? '',
+  )
+}
+
 describe('缓存键 · 只有一处产出（构造器）', () => {
   it('构造器给出的键与逐个 `useResource` 用的键对得上', () => {
     // 键的形状本身就是契约：带变量的那两个必须拼上变量，否则同渠道之间会串。
@@ -154,24 +166,49 @@ describe('写后界面值 · 取后端回读，不取本地意图（F33）', () 
       code(actions).indexOf('const toggleAuto'),
       code(actions).indexOf('const toggleAuto') + 900,
     )
-    expect(toggle).toMatch(/else\s*\{[\s\S]{0,200}?setAutoOverride\(null\)/)
+    expect(toggle).toMatch(/else\s*\{[\s\S]{0,200}?setAuto\([^)]*null\)/)
   })
 })
 
 describe('乐观覆盖层 · 后端确认才自我删除', () => {
-  it('⚠️ 有「读回来的值与覆盖一致 → 删掉覆盖」那一步', () => {
-    // 与 `use-disabled-overrides.ts` 同款口径：覆盖层只在「后端还没确认」时有信息量。
-    expect(code(actions)).toMatch(
-      /serverAutoCheckin\s*===\s*autoOverride[\s\S]{0,120}?setAutoOverride\(null\)/,
-    )
+  /**
+   * ⚠️ 这一节原先在这里用**抓源码文本**的方式钉（找 `serverAutoCheckin === autoOverride`
+   * 那一段）。抓文本抓不住行为：换个写法就红，而判定写错却照样绿 ——
+   * 于是判定搬进纯函数后，判据也搬到了
+   * [channel-action-state.test.ts](channel-action-state.test.ts)（含「无事可做时
+   * 返回同一引用」那条）。
+   *
+   * 留在这里的只剩**接线**：hook 必须把判定交给 `reconcileAuto`，
+   * **不许在 hook 里再写一遍比较**（写第二遍就会与判据漂开，且不报错）。
+   */
+  it('⚠️ 判定交给 `reconcileAuto`，hook 里不许再写一遍比较', () => {
+    const coded = code(actions)
+    expect(coded).toMatch(/reconcileAuto\(/)
+    expect(coded).not.toMatch(/serverAutoCheckin\s*===/)
   })
 
-  it('⚠️ 切渠道要清掉覆盖（组件不随渠道重挂载，留着就串了）', () => {
-    const coded = code(actions)
-    const resetEffect = coded.slice(
-      coded.indexOf('}, [plugin])') - 400,
-      coded.indexOf('}, [plugin])'),
-    )
-    expect(resetEffect).toContain('setAutoOverride(null)')
+  /**
+   * ⚠️ **切渠道不是靠「清空」处理的。** 那正是「结果串门」的来源：
+   * 清空只发生在切换那一刻，而请求是那之后才回来的 —— 于是 A 的结果
+   * 被当成 B 的结果报出来，在飞的标记也一起丢掉（按钮又能点，重复签到）。
+   *
+   * 判据取**形状**：不许有以 `plugin` 为唯一依赖的 effect。
+   */
+  it('⚠️ 切渠道不靠「清空」处理（没有以 plugin 为唯一依赖的 effect）', () => {
+    expect(effectDeps(code(actions))).not.toContain('[plugin]')
+  })
+
+  /** ⚠️ 内建自证：抓得住真缺陷形态，也认得出修好之后的形态。 */
+  it('⚠️ 内建自证：`effectDeps` 抓得住「切渠道即清空」，修好的形态不命中', () => {
+    // 缺陷当时的形状。
+    expect(effectDeps(`useEffect(() => {\n  setToast(null)\n}, [plugin])`)).toEqual(['[plugin]'])
+    // 修好之后的形状：依赖里带别的输入，不是「只看渠道」。
+    expect(
+      effectDeps(
+        `useEffect(() => {\n  setState((c) => reconcileAuto(c, plugin, server))\n}, [plugin, serverAutoCheckin])`,
+      ),
+    ).not.toContain('[plugin]')
+    // 一个 effect 都没有时是空的 —— 否则「永远不命中」会让这条判据恒绿。
+    expect(effectDeps('const x = 1')).toEqual([])
   })
 })

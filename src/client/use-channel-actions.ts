@@ -12,11 +12,34 @@
  * `actionReport`（归一结果里带着「签了几个 / 加了多少 / 哪个失败」）。
  * 只弹一个「签到 ✓」等于把上游给的明细全丢掉（2026-10-04 实机反馈）。
  *
+ * ## 归属：这些状态属于**发起它的渠道**，不属于当前显示的页签
+ *
+ * 面板不随渠道重挂载（否则切渠道必闪，见
+ * [决策记录](../../.agents/notes/2026-10-04-channel-switch-read-strategy.md)），
+ * 所以「跨渠道的状态自己认领归属」是这一侧所有状态的共同义务。
+ *
+ * 本 hook 原先走的是**清空**：`plugin` 一变就把这四个状态清零。它有两处会咬人，
+ * 且都不报错 —— 在飞的请求被清成「没在飞」（切回来按钮又能点，重复签到），
+ * 以及晚到的结果被当成**当前**渠道的结果显示出来（提示报在别的页签上）。
+ *
+ * 现在判据与分槽都在 [channel-action-state.ts](channel-action-state.ts)
+ * （纯函数、Node 侧测得到），这里只负责接线。
+ *
  * @module dsh-cpa-switch/client/use-channel-actions
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ActionOutcome, CreditUnit } from '../contracts/domain.ts'
+import {
+  emptyChannelActions,
+  markBusy,
+  markCardBusy,
+  reconcileAuto,
+  setAuto,
+  showToast,
+  viewOf,
+  type ChannelActionState,
+} from './channel-action-state.ts'
 import { act, autoCheckinOf, setAutoCheckin } from './endpoints.ts'
 import type { Translate } from './locales.ts'
 import { actionReport, reportOf, type Report } from './report.tsx'
@@ -67,39 +90,59 @@ export interface UseChannelActionsOptions {
 export function useChannelActions(options: UseChannelActionsOptions): ChannelActions {
   const { plugin, unit, serverAutoCheckin, t, onReload } = options
 
-  const [toast, setToast] = useState<ToastState | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [cardBusy, setCardBusy] = useState('')
-  const [autoOverride, setAutoOverride] = useState<boolean | null>(null)
+  /**
+   * 四个状态收在一个按渠道分槽的对象里。
+   *
+   * ⚠️ **别退回「`plugin` 一变就清空」**：清空只发生在切换那一刻，
+   * 而请求是在那之后才回来的 —— 于是 A 的结果被当成 B 的结果报出来，
+   * 在飞的标记也一起丢掉。理由与判据见 `channel-action-state.ts`。
+   */
+  const [state, setState] = useState<ChannelActionState<ToastState>>(() =>
+    emptyChannelActions<ToastState>(),
+  )
+
   /** toast 自增序号。见 {@link ToastState}。 */
   const seq = useRef(0)
 
   /**
-   * 切渠道就清掉这些 —— 上一个渠道的提示、正在转的按钮、切了一半的开关，
-   * 全都不属于当前页签。每个 hook 只清自己那份状态。
+   * 当前渠道该显示什么。
    *
-   * 刻意**不**清的：账号数据（走共享缓存，本来就是跨渠道的）、覆盖层
-   * （它自己按渠道认领，见 `use-disabled-overrides.ts`）。
+   * 每次渲染现算 —— 它只读自己那个槽，不做任何副作用。
    */
-  useEffect(() => {
-    setToast(null)
-    setBusy(false)
-    setCardBusy('')
-    setAutoOverride(null)
-  }, [plugin])
+  const view = viewOf(state, plugin)
 
+  /**
+   * `report` **绑定到当前的 `plugin`**。
+   *
+   * 这一条是「结果不串门」的关键：卡片在 A 渠道那次渲染里拿到的
+   * `onReport` 就是绑定 A 的那个函数，切走之后 A 的请求才回来，
+   * 走的是**当初那个闭包** —— 于是结果落在 A 名下，而不是当前显示的 B。
+   * 与 `runAll` / `toggleAuto` 捕获 `plugin` 是同一个道理。
+   */
   const report = useCallback(
     (result: { ok: boolean; error?: string | undefined }, action: string): void => {
       seq.current += 1
-      setToast({ ...reportOf(t, result, action), key: seq.current })
+      const toast = { ...reportOf(t, result, action), key: seq.current }
+      setState((current) => showToast(current, plugin, toast))
     },
-    [t],
+    [plugin, t],
+  )
+
+  const clearToast = useCallback((): void => {
+    setState((current) => showToast(current, plugin, null))
+  }, [plugin])
+
+  const setCardBusy = useCallback(
+    (value: string): void => {
+      setState((current) => markCardBusy(current, plugin, value))
+    },
+    [plugin],
   )
 
   const runAll = useCallback(
     async (kind: string): Promise<void> => {
-      setBusy(true)
-      setCardBusy('')
+      setState((current) => markBusy(current, plugin, true))
+      setState((current) => markCardBusy(current, plugin, ''))
       try {
         const result = await act(plugin, kind)
         if (!result.ok) {
@@ -108,10 +151,11 @@ export function useChannelActions(options: UseChannelActionsOptions): ChannelAct
         }
         const outcome = result.outcome as ActionOutcome | undefined
         seq.current += 1
-        setToast({ ...actionReport(t, outcome, unit), key: seq.current })
+        const toast = { ...actionReport(t, outcome, unit), key: seq.current }
+        setState((current) => showToast(current, plugin, toast))
         onReload()
       } finally {
-        setBusy(false)
+        setState((current) => markBusy(current, plugin, false))
       }
     },
     [onReload, plugin, report, t, unit],
@@ -134,16 +178,16 @@ export function useChannelActions(options: UseChannelActionsOptions): ChannelAct
    */
   const toggleAuto = useCallback(
     async (next: boolean): Promise<void> => {
-      setBusy(true)
-      setAutoOverride(next)
+      setState((current) => markBusy(current, plugin, true))
+      setState((current) => setAuto(current, plugin, next))
       const result = await setAutoCheckin(plugin, next)
-      setBusy(false)
+      setState((current) => markBusy(current, plugin, false))
       if (result.ok) {
         const confirmed = autoCheckinOf(result)
-        if (confirmed !== undefined) setAutoOverride(confirmed)
+        if (confirmed !== undefined) setState((current) => setAuto(current, plugin, confirmed))
         onReload()
       } else {
-        setAutoOverride(null)
+        setState((current) => setAuto(current, plugin, null))
       }
       report(result, t('autoCheckin'))
     },
@@ -158,24 +202,27 @@ export function useChannelActions(options: UseChannelActionsOptions): ChannelAct
    * 覆盖层只在「后端还没确认」时有信息量，确认了就自我删除
    * —— 这是 `use-disabled-overrides.ts` 的同一口径。
    *
-   * 切渠道时由上面那个 `[plugin]` effect 清掉（组件不随渠道重挂载）。
+   * 判定本身在 `reconcileAuto`（纯函数、有判据）；它无事可做时返回**同一个
+   * 引用**，所以这个 effect 不会因为「值没变」而每轮重渲染。
+   *
+   * ⚠️ 只看**当前渠道**那一格：别的渠道的覆盖层此刻不显示，等用户切过去时
+   * `serverAutoCheckin` 已经是那个渠道的值，这条判定会照样把它收掉 ——
+   * 所以**不再需要**「切渠道清空覆盖层」那一步（那一步正是「结果串门」的来源，
+   * 见本文件头部与 [channel-action-state.ts](channel-action-state.ts)）。
    */
   useEffect(() => {
-    if (autoOverride === null || serverAutoCheckin === undefined) return
-    if (serverAutoCheckin === autoOverride) setAutoOverride(null)
-  }, [autoOverride, serverAutoCheckin])
+    setState((current) => reconcileAuto(current, plugin, serverAutoCheckin))
+  }, [plugin, serverAutoCheckin])
 
   return {
-    busy,
-    cardBusy,
+    busy: view.busy,
+    cardBusy: view.cardBusy,
     setCardBusy,
-    toast,
-    clearToast: () => {
-      setToast(null)
-    },
+    toast: view.toast,
+    clearToast,
     report,
     runAll,
-    auto: autoOverride ?? serverAutoCheckin ?? false,
+    auto: view.autoOverride ?? serverAutoCheckin ?? false,
     toggleAuto,
   }
 }
