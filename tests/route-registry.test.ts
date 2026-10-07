@@ -296,6 +296,32 @@ interface FakeCpa {
    */
   makeChannelSupplyTransient(times: number, name?: string): void
   /**
+   * 按**轮**给模型目录：第 i 轮 `readReadySnapshot` 用 `rounds[i]`（越界取最后一个）。
+   *
+   * 「轮」以 `auth-files` 列表读的次数为标尺 —— `readReadySnapshot` 每轮恰好读一次它，
+   * 所以这个标尺与「第几次读 CPA」严格对齐，不受 `readStableCatalog` 一轮读两次影响。
+   *
+   * 用途：模拟「第一轮读到残缺目录、重读时 CPA 已经加载完」——
+   * 那是本批要治的时序，而 `delayCatalogUntilChannelReads` 只能做「空 vs 满」，
+   * 做不出「**残缺** vs 满」。
+   */
+  setCatalogRounds(rounds: readonly (readonly string[])[]): void
+  /**
+   * 换掉凭据列表（模拟用户禁用 / 删号 / 新增账号）。
+   *
+   * 用途：护栏的逃生口要在**同一份 `attachRouteRegistry`** 里跨轮验证，
+   * 而 `files` 是构造参数 —— 不能换就只能重建 registry，那就测不到「上一份」了。
+   */
+  setFiles(
+    files: readonly {
+      name: string
+      provider: string
+      disabled?: boolean
+      status?: string
+      unavailable?: boolean
+    }[],
+  ): void
+  /**
    * 实际打过的 CPA 路径。
    *
    * 用来把「未托管渠道**连问都不问**」这条判据与「清单里不出现它们」区分开 ——
@@ -327,6 +353,17 @@ function fakeCpa(input: {
   let supplyReadyAfter = 0
   let channelModelReads = 0
   let catalogReadyAfter = 0
+  /** 按**轮**（= `auth-files` 列表读次数，1 起）给的模型目录；空 = 用构造时的 `input.catalog`。 */
+  let catalogRounds: readonly (readonly string[])[] = []
+  let supplyRounds = 0
+  /** 当前凭据列表 —— `setFiles` 可换（护栏逃生口要跨轮验）。 */
+  let files: readonly {
+    name: string
+    provider: string
+    disabled?: boolean
+    status?: string
+    unavailable?: boolean
+  }[] = input.files
   /** 记下实际打过的路径 —— 让「未托管渠道连问都不问」这条判据可被隔离验证。 */
   const requested: string[] = []
   const fetch = async (path: string): Promise<unknown> => {
@@ -338,7 +375,8 @@ function fakeCpa(input: {
     }
     if (path === '/v0/management/auth-files') {
       if (channelListFails) throw new Error('auth-files unavailable')
-      return { files: input.files.map((file) => ({ ...file })) }
+      supplyRounds += 1
+      return { files: files.map((file) => ({ ...file })) }
     }
     if (path.startsWith('/v0/management/auth-files/models')) {
       channelModelReads += 1
@@ -369,7 +407,11 @@ function fakeCpa(input: {
       catalogReads += 1
       // 反向：目录还没到（同样是「成功的空读」）
       if (channelModelReads < catalogReadyAfter) return { data: [] }
-      return { data: input.catalog.map((id) => ({ id })) }
+      const ids =
+        catalogRounds.length > 0
+          ? (catalogRounds[Math.min(supplyRounds - 1, catalogRounds.length - 1)] ?? [])
+          : input.catalog
+      return { data: ids.map((id) => ({ id })) }
     }
     throw new Error(`unexpected path: ${path}`)
   }
@@ -395,6 +437,12 @@ function fakeCpa(input: {
     },
     makeChannelSupplyTransient: (times, name) => {
       transientFailures.push({ count: times, name })
+    },
+    setCatalogRounds: (rounds) => {
+      catalogRounds = rounds
+    },
+    setFiles: (next) => {
+      files = next
     },
     requestedPaths: () => [...requested],
   }
@@ -1170,9 +1218,15 @@ describe('启动用持久缓存', () => {
 
   /**
    * **只有完整快照才写盘**：读全之后缓存要被**更新**，且内容是新读到的。
+   *
+   * ⚠️ 种的是**这一轮清单的子集**（`dfmodel`），不是随便一个别的模型：
+   * 0.8.0 起目录护栏会把「比上一份少」的清单拦下（见下面「目录护栏」一组）。
+   * 种一个**不相交**的集合会让这一轮被护栏拦下，于是这条测的就不再是
+   * 「读全后更新缓存」而是「护栏拦不拦」了 —— 那是另一条判据的事。
+   * 名字故意写旧，好断言「缓存被这一轮的新值覆盖」而不是原样留着。
    */
   it('读全后更新缓存（写盘的必须是这一轮的新清单）', async () => {
-    seedCache([{ id: 'stale-model', name: 'Qoder · stale-model' }])
+    seedCache([{ id: 'dfmodel', name: 'Qoder · 旧名字' }])
     const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
     const { entry } = fakeEntry(BASELINE)
     const { host } = fakeHost(entry)
@@ -1184,8 +1238,8 @@ describe('启动用持久缓存', () => {
       }
       expect(onDisk.profile.models.map((m) => m.id).sort()).toEqual(['dfmodel', 'hy3'])
     })
-    // 旧的 stale-model 被覆盖掉了
-    expect(readFileSync(cachePath(), 'utf8')).not.toContain('stale-model')
+    // 旧名字被这一轮的新值覆盖掉了
+    expect(readFileSync(cachePath(), 'utf8')).not.toContain('旧名字')
   })
 
   /**
@@ -1350,6 +1404,30 @@ describe('启动用持久缓存', () => {
  * 「关掉不生效」这种最可能的回归（写了却忽略开关）没有判据。
  */
 describe('思考档位声明', () => {
+  let home = ''
+
+  /**
+   * ⚠️ **必须隔离 `DSH_HOME`**（2026-10-07 补）。
+   *
+   * 这一组原先没隔离，于是 `attachRouteRegistry` 启动时会去读**开发机真实**的
+   * `storages/cpa-panel-routes.json` 当 `lastGood`。在 0.8.0 之前看不出来 ——
+   * 慢路径那份清单总是**最后**推的，所以 `pushed.at(-1)` 照样是本组想要的那份。
+   * 加了目录护栏之后它**当场转红**：真实缓存里那 70 多个模型让本组这份
+   * 单模型清单被判成「比上一份少」而拦下，于是断言拿到的是别人的清单。
+   *
+   * 教训：判据读的是**行为**，而行为可能依赖进程外的文件 —— 不隔离就是
+   * 「本机绿、CI 红（或反之）」，且与代码对不对无关。
+   */
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-reasoning-'))
+    process.env.DSH_HOME = home
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
   // 一份最小可用目录：一个渠道、一条凭据、一个模型。
   const FILES = [{ name: 'w1', provider: 'workbuddy' }]
   const MODELS = { w1: ['deepseek-v4.1-flash'] }
@@ -1692,5 +1770,394 @@ describe('供给面只收托管渠道的可用凭据', () => {
     ]) {
       expect(names).toContain(expected)
     }
+  })
+})
+
+/**
+ * ## 目录护栏 + 有限重读（0.8.0）
+ *
+ * 治的现象（第 1 批真机三次重启里中**两次**）：重启后选择器里**只剩 1 个模型**
+ * （`WorkBuddy · deepseek-v4.1-flash`）或**只剩一个渠道**的模型，
+ * 几秒后 / 点一下才自愈。
+ *
+ * 根因：启动时读到**残缺目录**，而旧判据只问「非空吗」，于是把它当完整写进磁盘缓存 ——
+ * 那份缓存下次启动会**未经任何读**直接推给用户，于是可能变成永久的。
+ *
+ * 修法不是调「多久算读完了」的阈值（前五轮都卡在这里：调松推出半成品、
+ * 调严一个坏渠道把门卡死），而是换一个**答得了**的问题：**这一份比上一份差吗**。
+ * CPA 的模型目录只会因加号增长（加号、加渠道、重启加载），不会自己缩小。
+ *
+ * 七条判据各自独立，并逐条变异验证（去掉对应闸门 ⇒ 至少一条转红）。
+ */
+describe('目录护栏与有限重读', () => {
+  let home = ''
+  const cachePath = (): string => join(home, 'storages', 'cpa-panel-routes.json')
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-guard-'))
+    process.env.DSH_HOME = home
+    const dir = join(home, 'cpa-panel', 'runtime', 'cpa')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'config.yaml'),
+      'config-version: 8\noauth:\n    auth-dir: "auth"\n',
+      'utf8',
+    )
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  const FILES = [
+    { name: 'q1', provider: 'qoder' },
+    { name: 'w1', provider: 'workbuddy' },
+  ]
+  const MODELS = { q1: ['dfmodel', 'glm-5.3'], w1: ['glm-5.3'] }
+  const CATALOG = ['dfmodel', 'glm-5.3']
+
+  /**
+   * 读全时的三行：`dfmodel` 只由 qoder 供（裸名），`glm-5.3` **两家都供**
+   * ⇒ 按渠道拆成两条别名（`qoder/glm-5.3` / `wb/glm-5.3`）。
+   *
+   * 这份夹具是刻意的：它让「一个渠道消失」同时**改名**另一个渠道的行
+   * （别名不再需要 ⇒ 变回裸名）。护栏拿行 id 比就会在这里误判 ——
+   * 见 `shrunkRows` 的比较单位。
+   */
+  const FULL_IDS = ['dfmodel', 'qoder/glm-5.3', 'wb/glm-5.3']
+  const FULL_CHANNELS: Record<string, string> = {
+    dfmodel: 'qoder',
+    'qoder/glm-5.3': 'qoder',
+    'wb/glm-5.3': 'workbuddy',
+  }
+  const FULL_ROWS = [
+    { id: 'dfmodel', name: 'Qoder · dfmodel' },
+    { id: 'qoder/glm-5.3', name: 'Qoder · glm-5.3' },
+    { id: 'wb/glm-5.3', name: 'WorkBuddy · glm-5.3' },
+  ]
+
+  /** 往缓存文件里种一份「上次完整成功过」的清单（含行归属表）。 */
+  function seedCache(
+    models: { id: string; name: string }[],
+    channels: Record<string, string>,
+  ): void {
+    mkdirSync(join(home, 'storages'), { recursive: true })
+    writeFileSync(
+      cachePath(),
+      JSON.stringify({
+        version: 1,
+        port: 8317,
+        savedAt: '2026-10-05T00:00:00.000Z',
+        profile: {
+          displayName: 'CPA Switch',
+          api: 'openai-completions',
+          baseURL: 'http://127.0.0.1:8317/v1',
+          apiKeyEnv: 'CPA_API_KEY',
+          models,
+        },
+        channels,
+      }),
+      'utf8',
+    )
+  }
+
+  function seedFullCache(): void {
+    seedCache(FULL_ROWS, FULL_CHANNELS)
+  }
+
+  /** 磁盘上那份缓存的行 id（按**集合**看，不依赖顺序）。 */
+  function cachedIds(): string[] {
+    const parsed = JSON.parse(readFileSync(cachePath(), 'utf8')) as {
+      profile?: { models?: { id?: unknown }[] }
+    }
+    return (parsed.profile?.models ?? []).map((m) => String(m.id)).sort()
+  }
+
+  /** 推上去的那份的行 id（按集合看）。 */
+  function pushedIds(pushed: PushRecord[]): string[] {
+    return [...(pushed.at(-1)?.ids ?? [])].sort()
+  }
+
+  /**
+   * **半闸门时钟**：重读退避（≥ 2 秒）由测试显式放行，其余（目录稳定的 250ms 级）
+   * 立刻返回。
+   *
+   * 为什么不能全自动：有一条判据是「**被挡住的那几轮一个字都没写盘**」——
+   * 那只有在链**跑到一半**时才观察得到。一口气跑完看到的已经是
+   * 「重试用完 → 放行」之后的状态了，那条判据就成了空话。
+   */
+  function retryGate(): {
+    clock: Clock
+    pending: () => number[]
+    released: number[]
+    release: () => Promise<void>
+  } {
+    const waiting: { ms: number; resolve: () => void }[] = []
+    const released: number[] = []
+    let now = 0
+    return {
+      clock: {
+        now: () => now,
+        sleep: (ms) => {
+          if (ms < 2000) {
+            now += ms
+            return Promise.resolve()
+          }
+          return new Promise<void>((resolve) => {
+            waiting.push({
+              ms,
+              resolve: () => {
+                now += ms
+                released.push(ms)
+                resolve()
+              },
+            })
+          })
+        },
+      },
+      pending: () => waiting.map((w) => w.ms),
+      released,
+      release: async () => {
+        waiting.shift()?.resolve()
+        // 让链把这一轮跑完：这条路径上的 await 全部立刻返回，微任务足够
+        for (let i = 0; i < 200; i += 1) await Promise.resolve()
+      },
+    }
+  }
+
+  /** 把重读链一路放行到底。 */
+  async function drain(gate: ReturnType<typeof retryGate>, max = 8): Promise<void> {
+    for (let i = 0; i < max && gate.pending().length > 0; i += 1) await gate.release()
+  }
+
+  /** 装好一份「种了完整缓存 + 闸门时钟」的 registry。 */
+  function attach(cpa: FakeCpa): {
+    refresh: ReturnType<typeof attachRouteRegistry>
+    pushed: PushRecord[]
+    gate: ReturnType<typeof retryGate>
+  } {
+    const gate = retryGate()
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    const refresh = attachRouteRegistry(host, { ...depsFor(cpa), clock: gate.clock })
+    return { refresh, pushed, gate }
+  }
+
+  /**
+   * **判据 1：有残缺迹象 → 会排重读。**
+   *
+   * 迹象 = 「这一份比上一份少」。判据 4 是它的反向（没迹象时一次都不多读），
+   * 两条配对才说明「由迹象触发」而不是「定时轮询」。
+   */
+  it('⚠️ 读到残缺目录时排重读（退避 2s 起），不把它当事实', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // 第 1 轮只读到 1 条（CPA 刚起、注册表还在加载），第 2 轮读全
+    cpa.setCatalogRounds([['dfmodel'], CATALOG])
+    const { refresh, gate } = attach(cpa)
+
+    await refresh('boot')
+
+    expect(gate.pending()).toEqual([2000])
+
+    await drain(gate)
+    await refresh.settled()
+
+    // 重读拿到更好的 → 链当场收场，不继续等 5/15/30 秒
+    expect(gate.released).toEqual([2000])
+  })
+
+  /**
+   * **判据 2：重读拿到更好的 → 推新的、覆盖缓存。**
+   *
+   * 判据 1 只证明「排了链」，这条证明**链真的有用**：
+   * 新清单推到了宿主，也写进了磁盘缓存（否则下次启动还是那份残缺的）。
+   */
+  it('⚠️ 重读拿到更好的 → 推新的、覆盖缓存', async () => {
+    // 上一份少了 workbuddy 那一行（模拟「上次也只读到一半」）
+    seedCache(FULL_ROWS.slice(0, 2), { dfmodel: 'qoder', 'qoder/glm-5.3': 'qoder' })
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.setCatalogRounds([['dfmodel'], CATALOG])
+    const { refresh, pushed, gate } = attach(cpa)
+
+    await refresh('boot')
+    await drain(gate)
+    await refresh.settled()
+
+    expect(pushedIds(pushed)).toEqual([...FULL_IDS].sort())
+    expect(cachedIds()).toEqual([...FULL_IDS].sort())
+    // 行归属也写进了缓存 —— 下次启动的护栏靠它按渠道放行（见判据 5）
+    expect(JSON.parse(readFileSync(cachePath(), 'utf8'))).toMatchObject({
+      channels: { 'wb/glm-5.3': 'workbuddy' },
+    })
+  })
+
+  /**
+   * **判据 3：重读还不如上一份 → 丢掉、不写盘。**
+   *
+   * 观察点是**链跑到一半**的时候：那时磁盘上必须还是上一份，
+   * 手上推出去的也必须是上一份 —— 残缺那份连「推」都不该推。
+   */
+  it('⚠️ 重读还不如上一份 → 丢掉、不写盘、也不推它', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // 前两轮残缺，第三轮才读全
+    cpa.setCatalogRounds([['dfmodel'], ['dfmodel'], CATALOG])
+    const { refresh, pushed, gate } = attach(cpa)
+
+    await refresh('boot')
+    await gate.release() // 重读 1：还是残缺
+
+    // 链还活着（下一档 5s），而这两轮残缺**一个字都没写进缓存**
+    expect(gate.pending()).toEqual([5000])
+    expect(cachedIds()).toEqual([...FULL_IDS].sort())
+    expect(pushedIds(pushed)).toEqual([...FULL_IDS].sort())
+
+    await drain(gate)
+    await refresh.settled()
+
+    // 全程没有任何一次把那份残缺清单推出去过
+    expect(pushed.every((p) => p.ids.length === FULL_IDS.length)).toBe(true)
+  })
+
+  /**
+   * **判据 4：没迹象 → 一次都不多读。**
+   *
+   * 这条是「由迹象触发、不由时间触发」的**反向护栏**：没有它，
+   * 把重读改成无脑轮询也能让上面三条全绿。
+   */
+  it('⚠️ 没有残缺迹象时一次都不多读（不排链）', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { refresh, gate } = attach(cpa)
+
+    await refresh('boot')
+    await refresh.settled()
+
+    expect(gate.pending()).toEqual([])
+    expect(gate.released).toEqual([])
+    // 一次 `auth-files` 读 = 只读了一轮
+    expect(cpa.requestedPaths().filter((p) => p === '/v0/management/auth-files')).toHaveLength(1)
+  })
+
+  /**
+   * **判据 5：跳过的渠道 → 护栏不生效。**
+   *
+   * 删号 / 凭据失效时清单**合法地**变小，拦下来就是把删号卡死。
+   *
+   * ⚠️ 这条夹具刻意让「workbuddy 消失」同时**改名** qoder 的行
+   * （`qoder/glm-5.3` → `glm-5.3`，别名不再需要）—— 所以它同时钉住
+   * 「比较单位是（渠道, 模型）而不是行 id」。
+   */
+  it('⚠️ 被跳过的渠道：它名下的缩水放行（删号不许被卡死）', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // workbuddy 的凭据永久读不到（404）→ 跳过该渠道
+    cpa.makeChannelSupplyPermanent(Number.MAX_SAFE_INTEGER, 'w1')
+    const { refresh, pushed, gate } = attach(cpa)
+
+    await refresh('boot')
+
+    // 没有排重读 —— 这是**合法**缩水，护栏当场放行
+    expect(gate.pending()).toEqual([])
+    expect(pushedIds(pushed)).toEqual(['dfmodel', 'glm-5.3'])
+  })
+
+  /**
+   * **判据 5 的反向配对：放行只覆盖「被跳过那个渠道」。**
+   *
+   * 这条钉的是**按渠道**放行而不是整体放行 —— 整体放行的话，用户只要有一个
+   * 长期禁用的号，护栏就永久失效，本批要治的病（残缺被当完整）就放回来了。
+   */
+  it('⚠️ 放行只覆盖被跳过的渠道：别的渠道缩水照样拦', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // workbuddy 永久坏（允许它缩水），同时 qoder 的目录也残了（**不许**）
+    cpa.makeChannelSupplyPermanent(Number.MAX_SAFE_INTEGER, 'w1')
+    cpa.setCatalogRounds([['dfmodel']])
+    const { refresh, gate } = attach(cpa)
+
+    await refresh('boot')
+
+    // workbuddy 的消失被放行，但 qoder 的 `glm-5.3` 消失没有被放行 → 仍然排链
+    expect(gate.pending()).toEqual([2000])
+    await drain(gate)
+    await refresh.settled()
+  })
+
+  /**
+   * **判据 5c：凭据不可用 → 护栏不生效**（逃生口的**第二个**来源）。
+   *
+   * 与判据 5 是**不同的信号**：那条是「读不出来」（`skipped`，404 / 凭据失效），
+   * 这条是「读得出来、但不该供给」（`dropped`，面板禁用 / 上游报错）。
+   * 两者都让清单合法变小 —— 只认其中一个，另一个场景就会把删号 / 禁用卡死。
+   *
+   * ⚠️ 变异验证发现的缺口：0.8.0 的判据原先**只覆盖了 `skipped`**，
+   * 把 `dropped` 从放行名单里删掉时**一条都不红** —— 逃生口等于裸奔一半。
+   */
+  it('⚠️ 凭据不可用（面板禁用）：它名下的缩水同样放行', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    // 用户在面板上禁用了 workbuddy 的号 —— 它的模型不该供给，也不该被护栏拦
+    cpa.setFiles([
+      { name: 'q1', provider: 'qoder' },
+      { name: 'w1', provider: 'workbuddy', disabled: true, status: 'disabled' },
+    ])
+    const { refresh, pushed, gate } = attach(cpa)
+
+    await refresh('boot')
+
+    expect(gate.pending()).toEqual([])
+    expect(pushedIds(pushed)).toEqual(['dfmodel', 'glm-5.3'])
+  })
+
+  /**
+   * **判据 6：重试用完 → 放行。**
+   *
+   * 这是「不许永久卡死」的落点：一份**真的**缩水过的清单（用户删了号、
+   * 而这次没留下任何 skip 信号）不能被护栏永远拦住 ——
+   * 否则用户看到的是**已经删掉的模型**一直在选择器里，比少显示更糟。
+   */
+  it('⚠️ 重试用完 → 放行（连缓存一起写，不许永久卡死）', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.setCatalogRounds([['dfmodel']]) // 一直残缺
+    const { refresh, pushed, gate } = attach(cpa)
+
+    await refresh('boot')
+    await drain(gate)
+    await refresh.settled()
+
+    // 四档退避恰好走一遍，一个不多
+    expect(gate.released).toEqual([2000, 5000, 15000, 30000])
+    // 放行 = 推出去 + 写盘：只推不写的话下一轮又会拦，等于换了个地方卡住
+    expect(pushedIds(pushed)).toEqual(['dfmodel'])
+    expect(cachedIds()).toEqual(['dfmodel'])
+  })
+
+  /**
+   * **判据 7：重读期间来了新触发 → 不叠加两条链。**
+   *
+   * `config-reload` 每次设置写入都会到；若每个触发都排一条链，
+   * 用户随手改个设置就会叠出好几条 52 秒的链。
+   */
+  it('⚠️ 重读期间来了新触发 → 不叠加第二条链', async () => {
+    seedFullCache()
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.setCatalogRounds([['dfmodel']])
+    const { refresh, gate } = attach(cpa)
+
+    // 两个「会改注册表」的时机同时到（boot 与 setup）
+    await Promise.all([refresh('boot'), refresh('setup')])
+
+    // 只有一条链在等第一档
+    expect(gate.pending()).toEqual([2000])
+
+    await drain(gate)
+    await refresh.settled()
+
+    // 退避序列只走了一遍 —— 叠加的话这里会是两遍
+    expect(gate.released).toEqual([2000, 5000, 15000, 30000])
   })
 })
