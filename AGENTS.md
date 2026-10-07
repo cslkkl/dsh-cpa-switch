@@ -149,6 +149,13 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 - [ ] **`providerId` 粒度裁决** —— 现在是按**渠道**（四个），要考虑是否该细化到
       **每单元**（号 / 模型组）。先想清「一个 providerId 到底代表什么」再动：
       它牵扯模型目录的分组方式，改错会让选择器里出现重复条目。
+      已按「先补判据再动结构」立项：[PLAN §2.9](docs/PLAN.md)。
+      ⚠️ 但立项理由里「**按模型声明思考档位**做不到」已被推翻 —— 声明本就是逐模型的
+      （宿主 `resolveModelReasoning` 读 `entry.reasoningEfforts`），见
+      [按渠道拼写决策](.agents/notes/2026-10-06-reasoning-off-spelling-per-channel.md)，
+      动手前先重核那条理由。
+- [ ] **`hunyuan-chat` 两档都不思考**（真·假 high），给它档位开关纯属误导 ——
+      依据[实测报告](docs/audits/2026-10-06-reasoning-effort-off-vs-high.md)。
 - [ ] **面板只显示自己要的渠道与模型**（想法未定，仅记录）—— 现在四个渠道全列，
       每个渠道下又平铺全部模型；有人只用一两个渠道、也只想看其中几个模型。
       诉求是**可勾选**「哪些渠道 / 哪些模型出现在面板里」。
