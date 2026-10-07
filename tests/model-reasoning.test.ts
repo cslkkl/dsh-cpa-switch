@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest'
 import {
   REASONING_DEFAULT,
   REASONING_EFFORTS,
+  offSpellingOf,
   reasoningDefaultOf,
   reasoningEffortsOf,
 } from '../src/model-caps.ts'
+import { CHANNEL_IDS } from '../src/channels/registry.ts'
 
 /**
  * 思考档位的判据。
@@ -101,6 +103,52 @@ describe('reasoningEffortsOf', () => {
       if (declared === undefined) continue
       expect(Object.keys(declared).length).toBeGreaterThan(1)
     }
+  })
+})
+
+/**
+ * 「关」发出去的**值**按渠道给 —— 因为上游认的词不同。
+ *
+ * ⚠️ 写错的后果与上面那组**不同**：形状违约是「provider 注册失败、模型一起消失」，
+ * 而**值写错是请求时才炸、炸掉整轮对话**（zcode 实测 `1210`）。宿主不校验值，
+ * 所以这条**没有兜底**，只能靠这里钉住。
+ */
+describe('关的拼写按渠道给', () => {
+  it('实测过的渠道用 none —— zcode 的词表里没有 off', () => {
+    expect(reasoningEffortsOf(true, 'zcode')).toEqual({ off: 'none', high: 'high' })
+  })
+
+  it('其余渠道保持 off（实测它们接受 off 且与 none 等效）', () => {
+    for (const channel of ['workbuddy', 'qoder', 'trae', '']) {
+      expect(reasoningEffortsOf(true, channel)).toEqual({ off: 'off', high: 'high' })
+    }
+  })
+
+  it('渠道大小写与空白不影响判定', () => {
+    expect(reasoningEffortsOf(true, ' ZCode ')).toEqual({ off: 'none', high: 'high' })
+  })
+
+  it('认不出的渠道退回 off —— 不猜一个它可能不认的词', () => {
+    expect(reasoningEffortsOf(true, 'kimi')).toEqual({ off: 'off', high: 'high' })
+  })
+
+  it('⚠️ 换的只是**值**，档位名（键）永远是 off / high —— 界面文案不受影响', () => {
+    for (const channel of ['zcode', 'workbuddy']) {
+      expect(Object.keys(reasoningEffortsOf(true, channel) ?? {})).toEqual(['off', 'high'])
+    }
+  })
+
+  it('⚠️ 每个托管渠道都要能取到「关」的值，且不许是空串', () => {
+    for (const channel of CHANNEL_IDS) {
+      const declared = reasoningEffortsOf(true, channel) ?? {}
+      expect(typeof declared.off).toBe('string')
+      expect((declared.off as string).length).toBeGreaterThan(0)
+      expect(offSpellingOf(channel).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('⚠️ zcode 的 off 绝不能是 off —— 那是唯一会让整轮对话失败的组合', () => {
+    expect(offSpellingOf('zcode')).not.toBe('off')
   })
 })
 
