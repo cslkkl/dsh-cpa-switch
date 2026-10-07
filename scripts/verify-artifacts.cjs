@@ -150,10 +150,112 @@ check(
  *
  * 所以先删掉 `const css = "..."` 整条语句，再在剩下的**代码**里查。
  * 这样既保住 F31 那条真判据，又不被样式表文本干扰。
+ *
+ * ⚠️ **而且必须锚在真实的 JSX 标签上**（`jsx("label"` / `jsxs("label"`），不能写成
+ * 裸的 `label[^>]*\{[^}]*Switch` —— 后者只要代码里**任何**地方先出现子串 `label`、
+ * 再出现 `Switch`，就会跨着几百字节误配。
+ * 2026-10-07 实踩第二次：骨架屏的 `data-shape: "summary-label"` 与后面骨架卡的
+ * `headSwitch` 类名被连成一段，门禁直接红，而 JSX 里同样没有 label。
+ * 判据要查的是「有没有 label 元素包住 Switch」，那就只匹配标签本身。
  */
 const clientCode = clientSrc.replace(/const css = "(?:[^"\\]|\\.)*";/g, '')
 
-check('Switch 未被包在 label 里（会双触发）', !/label[^>]*\{[^}]*Switch/.test(clientCode))
+/**
+ * 真实的 JSX 标签形式。
+ *
+ * ⚠️ 产物里是 `(0, react_jsx_runtime.jsx)("label", …` —— `jsx` 与 `"label"` 之间
+ * 隔着 `)` 和 `(`（前者收 `jsx` 的调用，后者收 jsx 自己的实参）。
+ * 写成 `jsx\("label"` 会一个都匹配不到（2026-10-07 被判据自证抓到）。
+ */
+const LABEL_TAG_SOURCE = 'jsxs?\\)\\(\\s*"label"\\s*,'
+
+/**
+ * `Switch` 在产物里的真实写法。
+ *
+ * ⚠️ 不能只找子串 `Switch`：产物里 `headSwitch` 这个**类名字符串**也含它
+ * （剥离内联样式之后仍在 class map 里），于是「label 之后 400 字节内出现
+ * `Switch`」这种窗口判定会被类名骗到。
+ * primitives 由宿主注入，所以真实的组件引用长这样：
+ * `_deepseek_ai_dsh_client_ui_primitives.Switch`。
+ */
+const SWITCH_REF = /_deepseek_ai_dsh_client_ui_primitives\.Switch\b/
+
+/**
+ * `label` 标签到 `Switch` 的距离上限。
+ *
+ * 真被包住时，`jsx("label", { children: … })` 到 `Switch` 只隔一个 children 字段，
+ * 产物里是几十字节；跨过一整段无关代码（几百字节以上）就不是这个结构了。
+ */
+const LABEL_SWITCH_SPAN = 400
+
+/**
+ * 有没有 `label` 元素把 `Switch` 包在 children 里。
+ *
+ * 判据是「`label` 标签与 `Switch` 组件引用靠得足够近」——真被包住时只隔一个
+ * `children` 字段；两个判据都锚在**真实写法**上，所以类名字符串骗不到它。
+ *
+ * @param code - 已剥离内联样式的产物代码。
+ * @returns 命中则返回那段原文，否则 `undefined`。
+ */
+function labelWrappingSwitch(code) {
+  // ⚠️ 正则**每次现建**：带 `g` 的正则会在 `lastIndex` 上留状态，
+  // 复用同一个实例时第二次调用会从上次的位置继续 —— 自证因此漏检了一次
+  // （2026-10-07 被自己的自证抓到）。
+  const labelTag = new RegExp(LABEL_TAG_SOURCE, 'g')
+  let hit
+  while ((hit = labelTag.exec(code)) !== null) {
+    const window = code.slice(hit.index, hit.index + LABEL_SWITCH_SPAN)
+    if (SWITCH_REF.test(window)) return window
+  }
+  return undefined
+}
+
+check(
+  'Switch 未被包在 label 里（会双触发）',
+  labelWrappingSwitch(clientCode) === undefined,
+  labelWrappingSwitch(clientCode)?.slice(0, 120),
+)
+
+/**
+ * 上面那条判据的**自证**。
+ *
+ * 为什么需要：一个抓不住缺陷的判据比没有判据更糟 —— 它是永远绿的。
+ * 2026-10-07 这条判据连红两次、两次都是**误配**（`headSwitch` 类名与 `label`
+ * 子串被连起来），说明它的匹配面一直没锚在真实写法上。所以这里把「真的能抓到」
+ * 与「不会被类名骗到」都钉住。
+ *
+ * 判据自证的三条：真缺陷要抓到、误配形态不许命中、正确形状不许命中。
+ */
+const selfTest = [
+  {
+    name: '真正的 label 包 Switch 能抓到',
+    code:
+      '(0, react_jsx_runtime.jsx)("label", { children: ' +
+      '(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Switch, { checked: !0 }) })',
+    expectHit: true,
+  },
+  {
+    name: '只有 headSwitch 类名时不许命中',
+    code:
+      '(0, react_jsx_runtime.jsx)(Bone, { shape: "summary-label" }),' +
+      '"headSwitch": "Y0b6Da_headSwitch",'.repeat(1) +
+      'className: panel_module_css_default.headSwitch,' +
+      '(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Switch, { checked: !0 })',
+    expectHit: false,
+  },
+  {
+    name: 'div 包 Switch（正确形状）不许命中',
+    code:
+      '(0, react_jsx_runtime.jsxs)("div", { className: panel_module_css_default.headSwitch,' +
+      ' children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Switch, {})] })',
+    expectHit: false,
+  },
+]
+
+for (const c of selfTest) {
+  check(`判据自证 · ${c.name}`, (labelWrappingSwitch(c.code) !== undefined) === c.expectHit)
+}
+
 check('开关行用 div 包裹', /div[^>]*\{[^}]*switchRow|_switchRow/.test(clientSrc))
 
 /**
