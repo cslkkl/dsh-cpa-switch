@@ -206,7 +206,7 @@
 ## 模型路由
 
 - **`route-registry.ts`** —— **保证 CPA 路由可用的唯一入口**。
-  - 导出：`attachRouteRegistry` / `readStableCatalog` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `Clock` / `SyncResult` / `systemClock`
+  - 导出：`attachRouteRegistry` / `readStableCatalog` / `shrunkRows` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `RouteRefresher` / `Clock` / `SyncResult` / `systemClock`
   - 一条链：**查 CPA 目录 → 算别名 → 补写配置 → 推 models**
   - 骨架在 `cordis.patch.yml`（随包发布），清单走 volatile —— **两层缺一不可**
   - **重载前后可见状态必须连续**：收到 `app-boot/config-reload` 先用**零 CPA 读**推回上一份成功清单
@@ -224,7 +224,10 @@
     `CPA · xxx` 兜底已删除 —— 它在**谎称** CPA 自有，且与「这轮读丢了归属」同形。
     变更新增健康度字段**一律当可用**（「过滤过头」比多列几个调不通的模型严重）；
     判据在 `tests/route-registry.test.ts`「供给面只收托管渠道的可用凭据」，
-    见[决策记录](../.agents/notes/2026-10-07-model-routes-managed-healthy-only.md)
+    见[决策记录](../.agents/notes/2026-10-07-model-routes-managed-healthy-only.md)。
+    ⚠️ 被挡掉的号要**记进 `ReadySnapshot.dropped`**（不能只是 `return`）：
+    那是目录护栏的**逃生口信号** —— 不记的话，用户一禁用账号，
+    那份少了模型的清单就会被护栏判成「读残」而**永久卡在旧值上**
   - ⚠️ **算「同名」前必须剥掉渠道前缀**：`auth-files/models` 返回的是**别名形态**
     （`wb/glm-4.6`），原样收键会让同模型的两条别名变成两个键 → `overlaps` 恒为空 →
     别名不再生成（**静默**退回跨渠道轮询）。剥前缀只认已知渠道前缀，
@@ -271,6 +274,31 @@
     ⚠️ 别在等待路径上直接写 `setTimeout` / `Date.now`：那会让「间隔序列」和
     「等到上限就收场」变得只能拿真时间测（10 秒级），退化了也未必红 ——
     见[决策记录](../.agents/notes/2026-10-06-route-clock-injection.md)
+  - ⚠️ **写盘与推送前必过「目录护栏」**（2026-10-07，`shrunkRows`）：
+    问的不是「齐了吗」（答不了 ——「还在长」与「永远长不出来」在时间上不可区分，
+    前五轮都卡在这个阈值上），而是「**比上一份差吗**」（答得了：CPA 的目录只会因加号增长）。
+    ⚠️ **比较单位是「渠道 + 模型裸名」，不是行 id** —— 一个渠道消失后别名不再生成、
+    **别的渠道**的行会从 `qoder/glm-5.3` 改回裸名，拿行 id 比会把这次**合法改名**
+    当成缩水拦下，于是「跳过坏渠道」的逃生口根本走不通。
+    ⚠️ **放行按渠道、不整体放行**：整体放行的话，用户只要有一个长期禁用的号，
+    护栏就永久失效 —— 那正好把本批要治的病放回来。
+    被挡住时走 `degrade` 回推上一份，**不写盘、不写别名段、不推**。
+    判据在 `tests/route-registry.test.ts` 的「目录护栏与有限重读」，
+    见[决策记录](../.agents/notes/2026-10-07-catalog-shrink-guard.md)
+  - **有限重读**（`RETRY_DELAYS_MS` = `2/5/15/30s`，**四次封顶**）：
+    只在**会改 CPA 注册表**的时机排 —— `boot` / `setup` / `oauth`；
+    ⚠️ `config-reload` **不排**（它每次设置写入都到，挂上就是无脑轮询）。
+    三条硬约束缺一不可：**由迹象触发**（本轮读到残缺）、**次数有上限**、
+    **不叠加两条链**（`chainPromise`）。收场两种：重读拿到更好的 → 立刻收场；
+    四次都没更好 → **放行**（否则一次真的缩水会让**已删除的模型**永远留在选择器里）。
+    ⚠️ 放行时**不写别名段**：那一份按定义可疑，而别名段是整段替换
+  - `attachRouteRegistry` 交出的是**可调用对象** `RouteRefresher`：
+    调用它照旧（`ensureRoutesFresh(trigger)` 逐字不变），另多一个 `settled()`
+    给判据与收尾等后台重读链 —— 链是后台跑的（不许把调用方卡在 52 秒上），
+    没有它判据只能靠 `tick()` 猜时间
+  - ⚠️ 行归属表（模型 id → 渠道）随缓存落盘（`state.ts` 的 `channels`）却
+    **不 bump 缓存版本**：老文件缺它 ⇒ 解析成空表 ⇒ 护栏走**保守路径**，
+    语义仍正确；bump 反而作废一份完好缓存、把「首次启动什么都没有」请回来
   - ⚠️ 目录与 `baseURL` 都经 [gateway.ts](gateway.ts)、探活经 [runtime.ts](runtime.ts) ——
     **别自己 `probePort`**：那会另开一条探活路径，与面板的 `/status` 给出相反答案
   - ⚠️ **必须订阅 `app-boot/config-reload`**：宿主每次重建 profile 都 emit 它，
