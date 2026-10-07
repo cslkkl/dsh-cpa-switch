@@ -381,6 +381,29 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
 
 改行为或签名的改动都走这个口径：**判据先到位，才允许动结构**。
 
+**立项中**：
+
+- **按模型声明思考档位（需要先把 `providerId` 拆细）** ——
+  维护者口径是「**关不掉的就把档位列删掉**，不留一个假的『关』」，而全量实测显示
+  99 个模型里只有 10 个是真开关、23 个方向相反、9 个关不掉
+  （[实测报告](../docs/audits/2026-10-06-reasoning-effort-off-vs-high.md)）。
+  ⚠️ **原立项理由已推翻**：曾记为「`reasoningEfforts` 是 provider 级（按渠道）声明、
+  条件按模型分，所以要先拆 `providerId`」—— 实测宿主是**逐模型**读的
+  （`resolveModelReasoning(provider, entry, base)` 取 `entry.reasoningEfforts`），
+  所以「按模型声明档位」在现有结构下就做得到，**不必拆 provider**
+  （[决策记录](../.agents/notes/2026-10-06-reasoning-off-spelling-per-channel.md)）。
+  剩下的才是真约束：宿主的硬校验要求「除 `off` 外至少一个档位」，所以**不能**把某个
+  模型的档位删成空对象或只剩 `off` —— 那是**整个 provider 注册失败、该渠道所有模型
+  一起消失**（判据 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)）。
+  **疑似可行但尚未实测**的路子：**逐模型省略 `reasoningEfforts`** —— 宿主此时落
+  `reasoning: false`（`resolveModelReasoning` 的 `efforts === void 0` 分支），
+  界面直接不给该模型档位列（`reasoningInfo` 见 `!model.reasoning` 即不暴露），
+  正是维护者要的「关不掉就删掉这一栏」。要先补的判据：
+  **省略后该模型确实没有 Effort 行、同清单其余模型不受影响、选择器分组不出现重复条目**。
+  与根 [AGENTS.md](../AGENTS.md) 待办区那条「`providerId` 粒度裁决」是同一件事。
+
+**已完成**：
+
 - **卡片纵向几何**（`panel.module.css` 的卡片段）—— 先把「六个槽位高度只有一处来源、
   算式自洽、状态走 `data-*`」钉成判据（`tests/card-geometry.test.ts` 当时 11 条是红的），
   再把高度改成 `.card` 上的 `--cpa-slot-*` + `calc()`、状态改成属性选择器：
@@ -389,8 +412,8 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   ⚠️ 顺手量出两处**一直存在**的错：`height` 是 content-box 的内容高度，
   而算式把内边距算了进去（声明 222、实测 248）；`numbers` 槽位声明 36px、
   真实内容 42px（溢出 6px 被间距吃掉，谁也没看见）。
-
-两件更早立项的都在 2026-10-06 收口了：
+  **原「卡片说明行 36px」与「卡片高度的算式收成一份」两条立项由此落地**：
+  `facts` 槽位收成一行（36px → 18px），高度只由 `.card` 上那份变量和决定。
 
 - **状态文件写入**（`state.ts`）—— 判据先证明旧写法真的会吞记录（两条用例当时是红的），
   再改成单入口读改写：[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)、
@@ -429,7 +452,7 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)、
   判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts)。
 
-⚠️ 本节**当前没有立项项** —— 新条目照上面的口径办：先补判据，再动结构。
+⚠️ 上面「立项中」的都是**维护者的可见诉求**，动手前照口径办：**先补判据，再动结构**。
 
 ---
 

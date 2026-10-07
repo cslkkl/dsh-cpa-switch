@@ -114,21 +114,15 @@ wb/kimi-k2.6 · wb/minimax-m3
 ```
 
 而本插件硬编码的就是 `{ off: 'off', high: 'high' }`（见
-[model-caps.ts](../src/model-caps.ts) 的 `REASONING_EFFORTS`）。
+[model-caps.ts](../../src/model-caps.ts) 的 `REASONING_EFFORTS`）。
 **在 zcode 渠道选 `off` 会报 400、整轮对话失败** —— 命中的正是
-[AGENTS.md](../AGENTS.md) 里记的那个坑。`zcode` 侧对应的关闭语义是 **`none`**，
+[AGENTS.md](../../AGENTS.md) 里记的那个坑。`zcode` 侧对应的关闭语义是 **`none`**，
 不是 `off`。
 
 ## 复现方法
 
-检测脚本在 `.probe/`（临时目录，未入库）：
-
-```powershell
-cd .probe
-# 全量：每个模型 off / high 各 3 次，输出思考块字数
-node think.mjs '["wb/glm-5.2","hy3","trae/glm-5.2"]' off,high 3 out.json
-```
-
+⚠️ **本轮那批原始数据与批处理脚本没有保留** —— `.probe/` 临时目录已删除，
+下面只剩可复算的最小命令与判据。要重算请从这条命令重跑（它不需要密钥）。
 底层就是一条普通的 OpenAI 兼容请求，**不需要密钥**：
 
 ```powershell
@@ -142,15 +136,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8317/v1/chat/completions" -Method POST 
   -Body $body -ContentType "application/json"
 ```
 
-原始数据（均在**未入库**的临时目录 `.probe/`）：
-
-- `verdicts-think.json` —— 99 条逐模型判定，每条含三次的原始数组与**三条 token 路径分别的值**
-  （缺失记 `null`，不默认 0）；
-- `think-batch{0..3}.json` —— 未加工的原始响应；
-- `REPORT.md` —— 逐模型明细表（每个模型的三次原始字数都列出来，便于复算）；
-- `think.mjs` —— 复现脚本。
-
-⚠️ `.probe/` 是**临时探测目录**，未入库、未加 `.gitignore`；要长期保留请先决定它的归属。
+原始数据（当时的 `.probe/` 目录：`verdicts-think.json` 逐模型判定与三条 token 路径、
+`think-batch{0..3}.json` 未加工响应、`REPORT.md` 明细表、`think.mjs` 脚本）
+**均已随临时目录丢弃**。本文件保留的是判定口径与结论，不是可复算的原始数据。
 
 ## 结论与建议
 
@@ -169,14 +157,14 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8317/v1/chat/completions" -Method POST 
 ⚠️ **但本仓现状下「按模型删档位」做不到**，原因是结构性的：
 
 - `reasoningEfforts` 是 **provider 级**声明（按**渠道**，四个），不是模型级 ——
-  见 [route-registry.ts](../src/route-registry.ts) 的推送逻辑；
+  见 [route-registry.ts](../../src/route-registry.ts) 的推送逻辑；
 - 且宿主的硬校验要求「**除 `off` 外至少一个档位**」，删成空对象或只剩 `off`
   ⇒ **不是「这个模型没档位」，是整个 provider 注册失败、该渠道所有模型一起消失**
-  （判据 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)）。
+  （判据 [tests/model-reasoning.test.ts](../../tests/model-reasoning.test.ts)）。
 
 所以「只给部分模型删档位」需要**先把 providerId 拆细**（让 qoder / trae 各自成为
 独立 provider），那会改模型选择器的分组 —— 属结构改动，与
-[AGENTS.md](../AGENTS.md) 待办区那条「`providerId` 粒度裁决」是同一件事，
+[AGENTS.md](../../AGENTS.md) 待办区那条「`providerId` 粒度裁决」是同一件事，
 **应先立项再动**。
 
 不需要动结构的部分有两条，可单独做：

@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ActionOutcome, CreditUnit } from '../contracts/domain.ts'
-import { act, setAutoCheckin } from './endpoints.ts'
+import { act, autoCheckinOf, setAutoCheckin } from './endpoints.ts'
 import type { Translate } from './locales.ts'
 import { actionReport, reportOf, type Report } from './report.tsx'
 
@@ -117,19 +117,53 @@ export function useChannelActions(options: UseChannelActionsOptions): ChannelAct
     [onReload, plugin, report, t, unit],
   )
 
+  /**
+   * 切换自动签到。
+   *
+   * 三步，缺一步都会让开关「自己弹回去」：
+   *
+   * 1. **立刻**盖上乐观值 —— 手感不能等一个往返；
+   * 2. 写成功后**回读**：作废缓存只让**下一次**读不命中，界面要拿到新值，
+   *    还得有人真的去读一次（批量动作 `runAll` 一直是这么做的，开关原先漏了）。
+   *    ⚠️ 顺带把这个回合里更准的那个值（宿主写完自己回读出来的 `enabled`）盖上，
+   *    否则「写成功」与「重读落地」之间会有一帧拿的是旧值；
+   * 3. 写**失败**就立刻撤掉乐观值 —— 界面不许替后端撒谎。
+   *
+   * 「什么时候撤掉乐观值」见下面那个 effect：**后端回读确认了**才撤
+   * （与 `use-disabled-overrides.ts` 同款口径）。
+   */
   const toggleAuto = useCallback(
     async (next: boolean): Promise<void> => {
       setBusy(true)
-      // 立刻反映用户的意图：开关的手感不能等一个往返
       setAutoOverride(next)
       const result = await setAutoCheckin(plugin, next)
       setBusy(false)
-      // 无论成没成都撤掉 override：之后一律以宿主读到的值为准，别让界面撒谎
-      setAutoOverride(null)
+      if (result.ok) {
+        const confirmed = autoCheckinOf(result)
+        if (confirmed !== undefined) setAutoOverride(confirmed)
+        onReload()
+      } else {
+        setAutoOverride(null)
+      }
       report(result, t('autoCheckin'))
     },
-    [plugin, report, t],
+    [onReload, plugin, report, t],
   )
+
+  /**
+   * 后端回读确认之后，才撤掉乐观覆盖层。
+   *
+   * ⚠️ **别退回「写请求一返回就撤」**：那样在「写成功」与「重读落地」之间，
+   * `serverAutoCheckin` 还是缓存里的旧值，开关会**闪回**旧位置再跳回来。
+   * 覆盖层只在「后端还没确认」时有信息量，确认了就自我删除
+   * —— 这是 `use-disabled-overrides.ts` 的同一口径。
+   *
+   * 切渠道时由上面那个 `[plugin]` effect 清掉（组件不随渠道重挂载）。
+   */
+  useEffect(() => {
+    if (autoOverride === null || serverAutoCheckin === undefined) return
+    if (serverAutoCheckin === autoOverride) setAutoOverride(null)
+  }, [autoOverride, serverAutoCheckin])
 
   return {
     busy,
