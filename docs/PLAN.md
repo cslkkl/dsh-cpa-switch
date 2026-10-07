@@ -60,6 +60,9 @@
 
 ## 2. 下一步（按优先级）
 
+> 已结案的节**整节撤下并保留原号** —— 号段有历史空档（2.2 / 2.5 / 2.8），
+> **不是漏号**；编号被本文件之外引用，顺移会把那些引用指到别的节（见 §4）。
+
 ### 2.1 推理接口仍然无鉴权（P0，最高）
 
 托管 `config.yaml` 已显式 `server.host: "127.0.0.1"`，但 **`/v1/*` 不校验任何密钥**：
@@ -117,28 +120,6 @@
 > `http://192.168.3.22:8317/v1/models` **不带鉴权返回 200**；补上 host 后只监听
 > `127.0.0.1`（用 18317 端口跑真实 exe 复验过）。本机 `runtime/cpa/config.yaml`
 > 已含 `host: "127.0.0.1"`（2026-10-04 核对）。
-
-### 2.2 同名模型跨渠道轮询（已结案）
-
-**已完成，此处只留结论**；过程、实测与本轮踩的坑见
-[决策记录](../.agents/notes/2026-10-04-channel-pinned-model-alias.md)
-与 [issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)。
-
-**问题**：模型 id 不带渠道，同名模型由多个渠道供给时 CPA 会在**全部渠道的号之间**
-轮询（实测 `glm-5.3` 被三个渠道供给时三个号轮着来），面板「只启用一个号」拦不住，
-上游缓存命中率因此对半。
-
-**最终语义**（渠道名 + 模型名 = 唯一值）：给每渠道的同名模型配唯一别名
-（`oauth.model-alias.<渠道>`，如 `wb/glm-5.3`），别名只登记在该渠道名下 →
-CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是这么写的
-（`config.example.yaml`：For strict backend pinning, use unique aliases/prefixes）。
-
-**落地位置**：`src/setup/config.ts`（写 CPA 配置时生成 `model-alias` 段）、
-`src/route-registry.ts`（注册时用别名当 id，展示名保持「渠道 · 模型名」不变）、
-`src/model-caps.ts`（上下文窗口校准表，见 §2.3）。
-
-> 重叠清单**不写在这里** —— 它随账号变动（10-04 快照是 71 个模型 / 12 个重叠），
-> 抄下来必然过期。运行时由 `route-registry.ts` 按实时目录现算。
 
 ### 2.3 上游接口兼容（P1）
 
@@ -234,18 +215,6 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
       即那次发布恰好是干净的；但机制上仍无保证。）
 - [ ] **`go test ./... -count=1` 带 `continue-on-error: true`** ——
       任何测试失败都照发。建议只对已知 flaky 用例单独放行，其余失败阻断发布。
-
-### 2.5 补测试
-
-**已完成**：`src/credentials.ts` 的「沿用优先」三步取值（已解析到的 → 托管配置里的
-明文 → 新造）由 [tests/credentials.test.ts](../tests/credentials.test.ts) 覆盖，
-连 `resolve` / `persist` / `ensureApiKey` 的静默失败面一起（托管配置走真文件，
-`DSH_HOME` 指向临时目录；凭据服务走注入 seam 的内存假实现）。
-
-判据**经变异验证**，不是「跑了就算」：把 bcrypt 过滤关掉、把「读明文」与「新造」
-两步对调、把「已解析到的优先」改成返回空串 —— 三处各自让对应用例红一次
-（bcrypt 那条尤其值钱：`tests/setup-config.test.ts` 只测到 `looksLikeBcrypt`
-本身，没人钉过 `readSecretKeyFromConfig` 真的用上它）。
 
 ### 2.6 研究方向（未立项，先记录）
 
@@ -364,23 +333,6 @@ clone 后没有这个目录；拉取方式见 [reference/README.md](../reference
 - [ ] 按需补 `CONTRIBUTING`（若走 tag 触发的自动发布）
 - [ ] 分支保护由维护者在平台设置里开启（不属 agent 操作范围）
 
-### 2.8 边界重构（已完成，2026-10-05）
-
-批次的逐条历史看 `git log`（P0–P7，十一次 PR）；**结论已并入
-[架构说明](ARCHITECTURE.md)**（§3.1 的三条尺子与目录裁决、§7 的 P7 口径：
-**只搬位置、不改行为**，一次移动一个提交），
-PR 与合并的纪律见[决策记录](../.agents/notes/2026-10-05-pr-discipline.md)，
-P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-physical-relocation.md)。
-
-**P7 已收官**：纯物理迁移只有 `net.ts` 一件（归入 `setup/`），其余候选都不是纯位置问题 ——
-`src/` 根剩下的模块要么是基础登记处（`ids` / `paths` / `state`），要么是装配与传输层
-（`index` / `boot` / `route-table` / `routes` / `gateway` / `runtime` / `process`），
-按 §3.1 的尺子**没有该搬的**：判据类（`select-plan` / `checkin-ledger` / `model-alias` /
-`model-caps` / `action-outcome`）留在根，因为「判据层」这个目录被 §3.1 裁掉不建，
-它们由守卫的清单规则守着。改行为的那些转 2.9。
-
-⚠️ 原方案文件 `docs/REFACTOR.md` 已按约定删除 —— 不要再引用它。
-
 ### 2.9 结构改动（**先补判据再动结构**）
 
 改行为或签名的改动都走这个口径：**判据先到位，才允许动结构**。
@@ -480,6 +432,9 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   `pnpm test`、CI 记录），本文件只留「去哪查」。
 - **已完成的工作不留 `[x]` 清单** —— 历史在 `git log` 与决策记录里，
   留在这里只会让「下一步」被淹没。
+- **撤下一节不重排号段** —— §2 的号段被本文件之外引用（根 [AGENTS.md](../AGENTS.md)、
+  [架构说明](ARCHITECTURE.md)、已发布的 [release notes](releases/)），顺移补号会把那些
+  引用指到别的节；空档就留着，原位置也不留「已撤下」的墓碑。
 - 与根 [AGENTS.md](../AGENTS.md) 是**两个粒度**：那份给 agent 每次会话读（短、可照做），
   这份给接手的人读（有背景、成轮工作）。**同一件事只在一边展开**，另一边给指针。
 
