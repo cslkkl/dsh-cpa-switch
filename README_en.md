@@ -36,6 +36,9 @@ Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own t
 
 - **See account balances**: available / used / quota pool / package count; tokens and credits
   are shown separately and never summed together.
+- **Quota cycle reminders**: when the provider supplies a valid cycle end date, expand a notice in
+  the last seven days to see the account, package, remaining quota, and end time. A cycle ending
+  does not necessarily mean unused quota expires.
 - **Check in all / run all tasks**: one click per channel; each account can also be operated
   individually.
 - **Enable / disable accounts**: every account has a toggle, and "Use only this one" disables

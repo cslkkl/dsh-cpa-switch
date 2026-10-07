@@ -10,7 +10,7 @@
  */
 
 import type { ReactNode } from 'react'
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/domain.ts'
 import { cacheKeys } from './cache-keys.ts'
@@ -26,6 +26,7 @@ import { useAccountLogin } from './use-account-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
 import { useResource } from './use-resource.ts'
+import { CYCLE_WINDOW_DAYS, upcomingCycles } from './upcoming-cycles.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
@@ -125,6 +126,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
 
   const accounts = overrides.accounts
   const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
+  const cycles = useMemo(() => upcomingCycles(accounts, Date.now()), [accounts])
 
   /**
    * 记下本渠道读到几个账号 —— 供**下一次首屏**决定摆几张占位卡。
@@ -236,6 +238,41 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
             </span>
           </div>
         </div>
+      )}
+
+      {cycles.length > 0 && (
+        <details className={css.cycleNotice} key={plugin}>
+          <summary className={css.cycleSummary}>
+            {t('cycleUpcoming', {
+              count: String(cycles.length),
+              days: String(CYCLE_WINDOW_DAYS),
+            })}
+          </summary>
+          <div className={css.cycleList}>
+            {cycles.map((cycle, index) => (
+              <div className={css.cycleRow} key={index}>
+                <span className={css.cycleAccount} title={cycle.account}>
+                  {cycle.account}
+                </span>
+                <span className={css.cyclePack} title={cycle.name ?? t('cycleUnnamed')}>
+                  {cycle.name ?? t('cycleUnnamed')}
+                </span>
+                {cycle.remain !== undefined && Number.isFinite(cycle.remain) && (
+                  <span className={css.cycleRemain}>
+                    {t('cycleRemaining', { amount: fmt(cycle.remain), unit: unitText })}
+                  </span>
+                )}
+                <time
+                  className={css.cycleDate}
+                  dateTime={cycle.hasTime ? new Date(cycle.endsAt).toISOString() : cycle.date}
+                >
+                  {cycle.date}
+                </time>
+              </div>
+            ))}
+          </div>
+          <p className={css.cycleHint}>{t('cycleHint')}</p>
+        </details>
       )}
 
       {/*

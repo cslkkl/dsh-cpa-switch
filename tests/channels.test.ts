@@ -33,6 +33,26 @@ describe('normalizeAccounts', () => {
     expect(account?.credits?.packages[0]?.name).toBe('包A')
   })
 
+  it('把上游周期结束日期带到额度包；空日期不补值', () => {
+    const credits = {
+      accounts: [
+        {
+          auth_index: '0',
+          credits: {
+            total_remain: 100,
+            packages: [
+              { name: '有周期', remain: 25, cycle_end: '2026-10-10' },
+              { name: '无周期', remain: 50, cycle_end: '' },
+            ],
+          },
+        },
+      ],
+    }
+    const [account] = normalizeAccounts('workbuddy', { accounts: [{ auth_index: '0' }] }, credits)
+    expect(account?.credits?.packages[0]?.cycleEnd).toBe('2026-10-10')
+    expect(account?.credits?.packages[1]?.cycleEnd).toBe('')
+  })
+
   it('解析 trae 的 credits_pool 结构，并带上可靠签到信号', () => {
     const payload = {
       results: [

@@ -178,6 +178,79 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* ---- Upcoming quota cycles ---------------------------------------------- */
+
+.cycleNotice {
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-left: 3px solid var(--dsw-alias-state-warn-primary);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.cycleSummary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cycleSummary:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-warn-primary);
+  outline-offset: 2px;
+}
+
+.cycleList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  margin-top: 10px;
+  overflow-y: auto;
+}
+
+.cycleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.cycleAccount,
+.cyclePack {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cycleAccount {
+  max-width: 160px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.cyclePack {
+  max-width: 220px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.cycleRemain {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cycleDate {
+  margin-left: auto;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cycleHint {
+  margin: 8px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
 /* ---- Toolbar ----------------------------------------------------------- */
 
 .toolbar {
