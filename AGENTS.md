@@ -89,19 +89,19 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 
 ## 文档地图
 
-| 想知道                       | 去哪                                                                        |
-| ---------------------------- | --------------------------------------------------------------------------- |
-| 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)）               |
-| **辅助文档区有什么、改哪**   | [docs/README.md](docs/README.md)（规则 → [docs/AGENTS.md](docs/AGENTS.md)） |
-| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                                |
-| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                                |
-| 宿主半端各模块               | [src/README.md](src/README.md)                                              |
-| 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                                |
-| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                                  |
-| 测试覆盖与运行               | [tests/README.md](tests/README.md)                                          |
-| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)                                    |
-| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                                            |
-| 上游源码参考（只读，本机）   | [reference/README.md](reference/README.md)（本机目录，不入库）              |
+| 想知道                       | 去哪                                                                                                                                     |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 怎么用、怎么装、配什么       | [README.md](README.md)（英文版 [README_en.md](README_en.md)）                                                                            |
+| **辅助文档区有什么、改哪**   | [docs/README.md](docs/README.md)（规则 → [docs/AGENTS.md](docs/AGENTS.md)）                                                              |
+| 为什么这样设计、防错清单     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                                                                                             |
+| 下一步做什么                 | [docs/PLAN.md](docs/PLAN.md)                                                                                                             |
+| 宿主半端各模块               | [src/README.md](src/README.md)                                                                                                           |
+| 浏览器半端各模块             | [src/client/README.md](src/client/README.md)                                                                                             |
+| 环境准备模块                 | [src/setup/README.md](src/setup/README.md)                                                                                               |
+| 测试覆盖与运行               | [tests/README.md](tests/README.md)                                                                                                       |
+| 发布流程与版本号语义         | [docs/PUBLISHING.md](docs/PUBLISHING.md)（规则 → [.github/AGENTS.md](.github/AGENTS.md)、索引 → [.github/README.md](.github/README.md)） |
+| 决策记录（当时为什么这么定） | [.agents/notes/](.agents/notes/)                                                                                                         |
+| 上游源码参考（只读，本机）   | [reference/README.md](reference/README.md)（本机目录，不入库）                                                                           |
 
 ## 事实来源（只查不抄）
 
@@ -197,205 +197,72 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 
 ## 活跃坑
 
-> **只放「不知道就会踩、而且踩了没有信号」的陷阱。** 别处的 home：
+> **只放「不知道就会踩、而且踩了没有任何报错」的陷阱。** 别处的 home：
 > **宏观架构与跨模块契约** → [架构说明](docs/ARCHITECTURE.md)；
-> **样式 / 卡片 / 状态表达等模块级规范** → [src/client/README.md](src/client/README.md)；
-> **「当时为什么这么定」** → [决策记录](.agents/notes/)；
-> **成轮工作与未立项方向** → [docs/PLAN.md](docs/PLAN.md)。
->
-> 判断标准：**这条会不会让人在「没有任何报错」的情况下写出错的东西？**
-> 不会的就不该在这里 —— 本文件每次会话都注入，噪音会淹掉真陷阱。
+> **模块级陷阱** → 该子树的 `AGENTS.md`（进入目录时自动注入，见上面的文档地图）；
+> **「当时为什么这么定」** → [决策记录](.agents/notes/)。
 
-**改了没效果，先怀疑这些（静默失败）**
+⚠️ **根文件只留跨模块的**：判断标准是「这条会不会在**不止一个**子树里踩到」。
+只在一个目录里踩的陷阱写在那个目录的 `AGENTS.md` —— 写在这里会淹掉真陷阱。
+
+**跨模块的静默失败**
 
 - **`lib/` 不入库，但它才是宿主读的东西** —— clone 后先 `pnpm install && pnpm build`；
-  改完源码也必须重建，否则跑的是旧产物。
-- **`lib/client.js` 少导出 `inject` 时插件不报错、只是不出现** —— 构建后跑
-  `pnpm verify:artifacts` 确认。
-- **`icon.svg` 与 `locale/*.json` 宿主直读，代码一个字节都不读** —— 坏了零信号，
-  只静默回落成默认图形或包名。⚠️ XML 注释里出现连续两个连字符会让整份 SVG 解析失败。
-- **产物断言里别写死 CSS Module 的哈希形状** —— `[hash]` 由 lightningcss 从样式表的
-  **绝对路径**算出，不同 checkout 必然不同，且以数字开头时会被转义成前导下划线。
-  只锚 `[local]` 那一半（`card` / `grid` / `wrap` …），否则**本机绿、CI 红**（实踩）。
-- **两级读缓存都「坏了也不报错」** —— 合并失效只是慢、漏失效只是数字不对。
-  新增改变 CPA 状态的写操作时，宿主侧调 `gateway.invalidateChannel()`、
-  浏览器侧调 `invalidateReads()`；判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`。
-  宿主侧**清哪些 key 由 [gateway.ts](src/gateway.ts) 的 `cacheKeys` 决定**（键即失效前缀）——
-  新增一个读 key 却忘了登记，那条读会永远显示写之前的值。
-  **哪条写路径漏了调用**由 `tests/ops-write-paths.test.ts` 逐条钉住。
-- **路由响应体少一个 `ok: true`，整块界面静默空白** —— 浏览器 `useResource`
-  用 `result.ok` 判成败（[transport.ts](src/client/transport.ts) 把响应体原样当
-  `ApiResult`）。缺了它 `result.ok` 是 `undefined` ⇒ 走失败分支 ⇒ 那条路由的数据
-  恒为空，**而宿主这边 HTTP 200、逻辑也对，控制台与日志都没有报错**。
-  ⚠️ `/status` 曾长期漏掉（`/setup`、`/plugins`、`/account-intent` 都带了），
-  于是**状态条与两条告警一起消失**（2026-10-06 真机）。**新增或改任何一条路由的
-  响应体，`ok: true` 都要写上**；判据 `tests/route-table.test.ts` 的
-  「GET 路由的响应体都带 ok: true」（F47）。
+  改完源码也必须重建，否则跑的是旧产物。产物断言的坑见 [scripts/AGENTS.md](scripts/AGENTS.md)。
 - **路径不许自己拼 `homedir()/.dsh`** —— 走 [src/paths.ts](src/paths.ts)。
   `DSH_HOME` 覆盖被忽略时**零报错**：状态与 40MB 运行时会落到另一个目录，
   用户看到的是「设置老是不生效」。
-- **`--dsw-alias-bg-layer-N` 只定义到 3** —— 宿主自己的 `fields.module.css` 引用了
-  不存在的 layer-4，照抄那个引用会得到一条**静默失效**的背景色声明。
-- **自定义属性不会被 CSS Modules 改名** —— lightningcss 只改类名与 `@keyframes`。
-  所以 `--xxx` 是**全局**的：不带 `--cpa-` 前缀就可能与宿主同名相撞，而相撞不报错、
-  只是值悄悄变成宿主的。同理 `:root` 不会被作用域化，别往那儿写。
-- **`data-x={false}` 会渲染成 `data-x="false"`，照样命中 `[data-x]`** ——
-  用属性当开关时必须给字符串值（宿主自己的写法是 `data-y={cond || undefined}`）。
-  这类「明明为假却生效」的样式错位没有任何报错。
-- **产物断言别写裸子串** —— `label[^>]*\{[^}]*Switch` 这类匹配已经误配两次
-  （CSS 类名 `headSwitch` 与 `label` 子串被连成一段）。判据要锚在**产物里的真实写法**上
-  （`jsx)("label"` / `_primitives.Switch`），并**内建自证**：真缺陷抓得住、
-  误配形态不命中。见[决策记录](.agents/notes/2026-10-07-artifact-label-guard-anchored.md)。
-- **判据不隔离 `DSH_HOME` 就会读到开发机的真实缓存** —— `attachRouteRegistry` 启动时
-  **同步**读 `storages/cpa-panel-routes.json` 当 `lastGood`。没隔离的那一组判据于是
-  拿**本机真实清单**（实测 70 多条）参与裁决，形态是「本机绿 / CI 红」，
-  与代码对不对无关。0.8.0 加目录护栏之前看不出来（慢路径那份总是最后推的），
-  加完之后**当场转红**。凡是用 `attachRouteRegistry` 的 `describe` 都要有
-  `beforeEach` 指到 `mkdtempSync` 目录。
-
-**环境与运行**
-
-- **`link:` 到 profile 外的插件，仓库必须自己装好 peer deps**（仓库 `pnpm install` +
-  lockfile 的 `autoInstallPeers: true` 会做到）—— 漏了报 `ERR_MODULE_NOT_FOUND`、
-  插件显示「未运行」。装法与判据见[发布手册](docs/PUBLISHING.md)。
-- **停 CPA 不能依赖插件 shutdown 清理调度器** —— 会 SIGSEGV；
-  走 shutdown 端点 → Ctrl-C → `taskkill /F`。
-- **被限流的号 CPA 仍报 `status: active`**（code 6004）：面板「启用」≠「现在能用」。
-- **`auth-files/models` 只报模型名，不报这个号能不能调** —— 实测一个
-  `status=error` + `unavailable=true` 的凭据照样报出 10 个模型，于是它们被当成
-  健康模型推进路由清单、顶着渠道名，选了必然失败（2026-10-07 实机）。
-  「能不能用」只能从**同一个 `auth-files` 返回**的 `disabled` / `status` /
-  `unavailable` 读 —— 只读 models 的返回值就看不出差别，**且没有任何报错**。
-  判据 `tests/route-registry.test.ts`；见[决策记录](.agents/notes/2026-10-07-model-routes-managed-healthy-only.md)。
-- **CPA 侧的渠道是动态的**：实测存在本插件没登记的渠道（kimi / mimo），
-  将来还会更多。**别把渠道名硬编进判据** —— 认「有没有 spec」，
-  这样新渠道自动被挡；给非托管渠道补一条特判就是下一次同类事故。
-  见[决策记录](.agents/notes/2026-10-07-model-routes-managed-healthy-only.md)。
-- **目录护栏的两条粒度错了都「不报错、只是卡住」** —— 比较单位写成**行 id**
-  （而不是「渠道 + 模型裸名」）时，一个渠道消失会让别名不再生成、**别的渠道**的行
-  从 `qoder/glm-5.3` 改回裸名，于是这次**合法改名**被判成缩水，
-  **删号 / 坏渠道要卡满 52 秒**才放行；放行写成**整体放行**（本轮有任一渠道被跳过
-  就全放）时，用户只要有一个**长期禁用的号**，护栏就**永久失效** ——
-  本批要治的病当场回来。两者代码都跑得好好的、日志也正常。
-  见[决策记录](.agents/notes/2026-10-07-catalog-shrink-guard.md)。
-
-**改动前先读的契约**
-
-- **只靠运行时 volatile 注册的 provider 路由会随设置写入消失** —— 任何设置写入
-  （切语言、改主题、存模型页配置）都触发宿主 `reconcileProfilePatches`，下游 fiber
-  **全部 dispose + 重建**，运行时注入的 volatile 值随之消失。**修法三件事缺一不可**：
-  骨架写进 `cordis.patch.yml` + 订阅 `app-boot/config-reload` 重推清单 +
-  **守住重推前的空窗**（重建那一瞬 `models` 为空，选择器会退化成显示 `provider/model`
-  并停用 composer）：先**零读推回上一份成功清单**再读目录核对，读失败或读不全回推上一份，
-  无历史则保持空，渠道读不全**既不推清单也不写别名段**。
-  恢复逻辑挂在「配置可能变」的**语义**上，挂在 boot / setup / oauth 这些时机上必漏。
-  详见[架构说明](docs/ARCHITECTURE.md) F39 与[决策记录](.agents/notes/2026-10-05-route-reload-blank-window.md)。
-- **启动超时 ≠ 启动失败（`ensure()` 的等待必须可续）** —— `startTimeoutSeconds`
-  只是**一次等待预算**，用尽时 CPA 往往还在跑（实测比 DSH 晚起 54 秒，默认预算 30 秒）。
-  ⚠️ **超时后不许丢掉「正在起」的记忆** —— 丢了的话下一个调用方会**重新 spawn**，
-  于是永远在从头等一个已被自己放弃的窗口；症状是**静默**的：面板显示可用、
-  模型清单却是空的（`UNKNOWN_MODEL`），直到某次设置写入才碰巧补上。
-  反向同样要守：child 已退出（`exitCode !== null`）**必须**能重新拉起，
-  对着死进程空等比原 bug 更糟。判据 `tests/process.test.ts`（注入 seam，
-  8 例 170ms），决策见[决策记录](.agents/notes/2026-10-06-startup-timeout-is-not-failure.md)。
-- **「就绪」是一个统一判据，不是「每个读各自成功」** —— 模型路由的清单由**多份读**
-  拼成（模型目录 `/v1/models` + 逐凭据供给面 `auth-files/models`），它们
-  **分开读、无同步**。每份读**各自**判断成败时，「目录齐了、归属没齐」会
-  **两边都算成功** → 推出去的清单里独供模型**认不出归属**（2026-10-07 起
-  不再兜底成 `CPA · xxx`，而是**不产出行**），而**没有任何判据报错**
-  （2026-10-06 实机症状）。
-  **三条纪律**：① 读收在 `readReadySnapshot` 一处，由 `agreeOnOwnership` 裁决；
-  ② **稳定看内容不看条数** —— 计数相同而集合不同时，陈旧目录会被当成新事实；
-  ③ **暂时 vs 永远必须分开**（404/401/403/410 = 永久 → 跳过该渠道推其余；
-  超时/5xx = 暂时 → 等），否则**一个坏渠道就能把门永久卡死 → 全部模型消失**。
-  门不通过时**必须**走 `degrade` 回推 `lastGood`，不许孤立地「不推」。
-  判据 `tests/route-registry.test.ts`；决策见
-  [决策记录](.agents/notes/2026-10-06-unified-readiness-gate.md)。
-- **启动不等读，用磁盘缓存** —— 实测：DSH→CPA 进程启动差 **7.6 秒**，
-  `/v1/models` 只要 **2–4ms**（读内存注册表，**与凭据无关**），
-  而**凭据注册是秒级的** ⇒ 端口一通目录就有内容、供给面还空着 →
-  归属算不出（2026-10-07 起**不产出行**，此前兜底成 `CPA · xxx`）。
-  **「点一下两秒就好」正是那个窗口。**
-  ⚠️ **不要试图判断「供给面好了没」** —— 「还在长」与「永远长不出来」
-  在时间上不可区分，给短了把半成品当成品、给长了把坏渠道等到超时。
-  正确做法：启动**直接推上次完整成功过的那份**（`readCachedRoutes`），
-  再后台读新的；读全才更新缓存。
-  **三条硬约束**：① **不设硬过期**（过期后又要等读、重现那个窗口）；
-  ② **只有完整快照才写盘**（读全 **且没跳过任何渠道**）；
-  ③ **`port` 变了作废**（`baseURL` 焊着端口）。
-  `lastGood` 是缓存的**运行时镜像**，只在完整快照时更新 ——
-  一处赋值管住「重载回推什么」与「下次启动用什么」。
-  判据 `tests/state.test.ts` + `tests/route-registry.test.ts`；决策见
-  [决策记录](.agents/notes/2026-10-06-startup-does-not-wait.md)。
+- **两级读缓存都「坏了也不报错」** —— 合并失效只是慢、漏失效只是数字不对。
+  新增改变 CPA 状态的写操作时，宿主侧要 `gateway.invalidateChannel()`、
+  浏览器侧要 `invalidateReads()`；判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`，
+  **哪条写路径漏了调用**由 `tests/ops-write-paths.test.ts` 逐条钉住。
 - **宿主槽位的 error boundary 是锁存的** —— 一次抛出带走整块配置区，用户只能禁用
   再启用插件。所以 `PanelBoundary` 必需，且**必须是类组件**
   （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的 `react`
   shim 因此必须提供 `Component`，缺了它脚本在加载阶段就抛。
-- **上游数据不能改，只能适配；实测过的值才映射，认不出的原样透传** ——
-  ⚠️ 别拿 `plugins/*.dll` 里的字符串当契约，那些大多是 **Go 注释**。
-  详见[架构说明](docs/ARCHITECTURE.md) §4.9 与[决策记录](.agents/notes/2026-10-04-upstream-value-translation.md)。
-- **额度字段缺了就是 `undefined`，不许编 0**；**`credits_pool_known` 与 `remain_known`
-  是两条独立的轴**，别合并。详见[架构说明](docs/ARCHITECTURE.md) F40 与
-  [决策记录](.agents/notes/2026-10-05-credit-shape-per-channel.md)。
-- **`reasoningEfforts` 写错形状不是「这个模型没档位」，是*整个 provider 注册失败、
-  所有模型一起消失*** —— 宿主校验：空对象、除 `off` 外没有别的档位、除 `off` 外的
-  档位值为空串，三条任一命中即 `invalid`。所以这个值**只能由
-  `reasoningEffortsOf()` 按渠道返回**，别在推清单时手工拼。判据
-  `tests/model-reasoning.test.ts`；理由见[决策记录](.agents/notes/2026-10-06-reasoning-effort-two-levels.md)。
-- ⚠️ **形状有宿主兜底，*值*没有** —— 「关」发出去的那个词只由我们给（zcode 只认
-  `none`、不认 `off`），而宿主**不校验值是不是上游认的词** ⇒ 写错没有任何构建期
-  或测试期信号，只到请求时才炸，而且炸的是**整轮对话**。所以每加一个渠道都要有
-  实测出处、**别猜**：判据是 `tests/model-reasoning.test.ts` 的逐渠道用例，
-  路由级还有一条 `tests/route-registry.test.ts` 的「同清单两种拼写」；
-  理由见[决策记录](.agents/notes/2026-10-06-reasoning-off-spelling-per-channel.md)。
-- **上游会对推理档位返硬错误，让整轮会话失败**（2026-10-06 实踩 `11150 the reasoning
-effort value is not supported by the current model`，`503 auth_unavailable` 与 `400`
-  两种外壳都出现过）。所以「思考档位」这个开关的**首要价值是逃生通道**：
-  默认全开意味着每个请求都带档位，抽风时关掉即回到不声明。⚠️ 别把它当
-  「给不想用的人关掉」的普通偏好项删掉。
-- **选择器里的 `Default` 行不是我们给的档位，删档位去不掉它** —— 它是
-  `dsh-client-ui-model-selection` 在**路由没声明默认档位**时补的一行
-  （`defaultEffort === undefined` ⇒ 补 `effort.providerDefault`）。所以
-  「只留关/开」要动的是**路由级 `reasoning`**，不是 `reasoningEfforts` 的键。
-  ⚠️ 把它理解成「删 `off`」会同时踩两脚：**`Default` 照旧在**（少了个真档位而已），
-  而且除 `off` 外没了别的档位 ⇒ **宿主判非法、整个 provider 一起消失**。
-  另一半没有兜底：默认值写错时宿主**当作没设**（描述能力不该因配置降级而失败）⇒
-  `Default` 悄悄回来，**零报错**。判据 `tests/model-reasoning.test.ts` +
-  `tests/route-registry.test.ts`；理由见[决策记录](.agents/notes/2026-10-06-reasoning-default-row-removed.md)。
+
+**模型路由的三条不变量（一条因果链，改任一条先读另两条）**
+
+它们各自都修过，而**每一次松动都长出了下一环的 bug** —— 按顺序读：
+
+1. **「就绪」是一个统一判据，不是「每个读各自成功」** —— 清单由**多份读**拼成
+   （模型目录 + 逐凭据供给面），它们**分开读、无同步**。每份读**各自**判断成败时，
+   「目录齐了、归属没齐」会**两边都算成功** → 独供模型**认不出归属**，
+   而**没有任何判据报错**。三条纪律：① 读收在一处、由归属裁决统一判定；
+   ② **稳定看内容不看条数**（计数相同而集合不同时，陈旧目录会被当成新事实）；
+   ③ **暂时 vs 永远必须分开**（404/401/403/410 = 永久 → 跳过该渠道推其余；
+   超时/5xx = 暂时 → 等），否则**一个坏渠道就能把门永久卡死 → 全部模型消失**。
+   门不通过时**必须**回退上一份，不许孤立地「不推」。
+2. **启动不等读，用磁盘缓存** —— 实测 DSH→CPA 进程启动差 **7.6 秒**，而**凭据注册是秒级的**
+   ⇒ 端口一通目录就有内容、供给面还空着（「点一下两秒就好」正是那个窗口）。
+   ⚠️ **不要试图判断「供给面好了没」** —— 「还在长」与「永远长不出来」在时间上不可区分。
+   三条硬约束：**不设硬过期**、**只有完整快照才写盘**、**`port` 变了作废**。
+3. **目录护栏** —— 前两条把不完整的清单拦在门外，代价是**可能一直推不出东西**；
+   护栏补的是反面：写盘与推送前比「**是不是比上一份差**」（CPA 的目录只会因加号增长）。
+   ⚠️ 比较单位是（渠道, 模型裸名）**不是行 id**；放行**按渠道**、**不整体放行**；
+   重读**由迹象触发、有上限**。
+   护栏与逃生口的粒度错了都**不报错、只是卡住**（删号卡满重试预算、或护栏永久失效）。
+
+判据在 `tests/route-registry.test.ts` 与 `tests/state.test.ts`；决策见
+[统一就绪判据](.agents/notes/2026-10-06-unified-readiness-gate.md)、
+[启动不等读](.agents/notes/2026-10-06-startup-does-not-wait.md)、
+[目录护栏](.agents/notes/2026-10-07-catalog-shrink-guard.md)。
 
 **与 git / 本仓维护有关的**
 
 - **`.gitignore` 只对未追踪的文件生效** —— 加了忽略规则还要 `git rm -r --cached`
   才真的生效；验收走 `gh api`，⚠️ **别用 PowerShell 查中文路径**（引用与编码不一致
   会让 `git ls-tree` / `cat-file` 给出自相矛盾的结果）。
-- **推 tag 不会自动产生 Release** —— tag 是 git 引用，Release 是挂在它上面的独立页面
-  对象，**必须显式创建**。漏了的症状是「标签页有 tag、右边没有 Release」，
-  而 npm 那半**一切正常**，发布日志里看不出少了什么（v0.1.2 就这么漏掉了）。
-  ⚠️ 建 Release 要 `permissions: contents: write` —— 只读时 npm 仍会成功，
-  挂在最后的 `gh release create` 才 403，症状与「没写这一步」一模一样。
-  正文默认由 Release Drafter 的草稿提供（`docs/releases/<tag>.md` 是**可选覆盖**，
-  存在即赢；不写就用草稿），流程见[发布手册](docs/PUBLISHING.md)。
-- **`gh release edit` 不会把草稿变成已发布** —— 所以 Release Drafter 的草稿 tag
-  固定成 `next`，**不许改成 `v$RESOLVED_VERSION`**：那样它会与正式标签同名，
-  `publish.yml` 里 `gh release view <tag>` 命中草稿、走 `edit` 分支，于是
-  **npm 发成功、Release 页上查不到，且没有任何报错**。
-  见 [.github/release-drafter.yml](.github/release-drafter.yml) 的文件头。
-- **`npm view` 查不到刚发布的版本不等于发布失败** —— npm 侧有传播延迟，
-  发布成功后几分钟内它可能仍报旧版本、甚至对新版本报 `E404`。判据是发布日志里的
-  `+ dsh-cpa-switch@<版本>`；要权威结果直查 registry，别据此重发（版本号不可撤销）。
-  复核命令见[发布手册](docs/PUBLISHING.md)。
 - **PR 的正文与评论：链接写绝对 URL、ref 用 `main`、文本走文件** —— 相对路径会被 GitHub
   解析到 `.../compare/<path>` 这个空视图；写功能分支名则更糟：分支合并后会被删，
-  链接**永久 404**；正文**内联**进命令行会被 PowerShell 吃掉反引号（**仓库内的文档**照旧用
-  相对路径）。另两条同样属于「事后才发现」：**打标签前先 `gh label list`**、
-  ⚠️ **rebase merge 会重写 sha** —— 逐提交评论里的 sha 合并后就成了孤儿，要按 subject
-  对回 `main` 的新 sha 并 PATCH 评论。
+  链接**永久 404**；正文**内联**进命令行会被 PowerShell 吃掉反引号。
   纪律全文与三次实踩见[决策记录](.agents/notes/2026-10-05-pr-discipline.md)。
 - **PR 正文四段：为什么 / 改了什么 / 前后 / 怎么验** —— 链接合并到末尾，
-  术语说大白话，**不写「回滚方式」这类常识段**。大改动可留完整版，小改动别硬凑。
-  **判据：一段如果只是把 diff 复述一遍，就不该存在** —— PR 只写 diff 表达不了的东西。
-  逐提交评论仍然保留（它服务「这个提交为什么这么切」，与正文的「整批为什么」不同层）。
+  术语说大白话，**不写「回滚方式」这类常识段**。
+  **判据：一段如果只是把 diff 复述一遍，就不该存在**。
   **标签最多 3 个 = 批次标签 + 主类型**；**子类型（`test` / `docs` / `chore`）写进正文、
   不进标签**（它们与主类型同轴，并列打会让按类型筛选失效）。
-  主意图明确时只打一个；`bug` + `feat` 允许但要知道它落在两条筛选轴里。
   见[决策记录](.agents/notes/2026-10-06-pr-body-four-sections.md)。
+- **发布链路的坑**（tag 不自动建 Release、`gh release edit` 不会把草稿变成已发布、
+  npm 传播延迟、`link:` 装法）→ [.github/AGENTS.md](.github/AGENTS.md) 与
+  [发布手册](docs/PUBLISHING.md)。

@@ -30,5 +30,18 @@ src/ 特有约束：
 - **有新计划别记在这里** —— 跨模块待办进根 [AGENTS.md](../AGENTS.md) 待办区，
   成轮工作与未立项的方向进 [docs/PLAN.md](../docs/PLAN.md)。
 - 改动后跑 `pnpm check`（typecheck + lint + format + build + test），不要只看构建通过。
+- ⚠️ **`icon.svg` 与 `locale/*.json` 宿主直读，代码一个字节都不读** —— 坏了零信号，
+  只静默回落成默认图形或包名。⚠️ XML 注释里出现连续两个连字符会让整份 SVG 解析失败。
+- ⚠️ **`model-caps.ts` 的思考档位契约有三条不报错的坑**（2026-10-06 实踩，逐条都有判据）：
+  ① **写错形状不是「这个模型没档位」，是整个 provider 注册失败、所有模型一起消失**
+  （宿主校验：空对象、除 `off` 外没有别的档位、除 `off` 外的档位值为空串，任一命中即 `invalid`）
+  —— 所以这个值**只能由 `reasoningEffortsOf()` 按渠道返回**，别在推清单时手工拼；
+  ② **形状有宿主兜底，*值*没有** —— 「关」发出去的那个词只由我们给（zcode 只认 `none`
+  不认 `off`），宿主**不校验值是不是上游认的词** ⇒ 写错没有任何构建期或测试期信号，
+  只到请求时才炸，而且炸的是**整轮对话**（实测 `11150`）；
+  ③ **选择器里的 `Default` 行不是我们给的档位，删档位去不掉它** —— 要动的是
+  **路由级 `reasoning`**（`REASONING_DEFAULT`）；把它理解成「删 `off`」会同时踩两脚：
+  `Default` 照旧在，而且除 `off` 外没了别的档位 ⇒ 宿主判非法、整个 provider 一起消失。
+  判据 `tests/model-reasoning.test.ts` + `tests/model-caps.test.ts`。
 
 文件清单与「改哪」见 [README.md](README.md)，不写在这里。
