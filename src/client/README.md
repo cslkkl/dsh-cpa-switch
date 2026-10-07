@@ -21,7 +21,7 @@
     `PluginPanel` 在 `plugin` 变化时自己重置
 - **`PluginPanel.tsx`** —— 单渠道面板。
   - 内容：余额汇总、工具栏（刷新 / 全部签到 / 全部任务 / 自动签到开关）、账号网格、添加账号弹窗
-  - 导出：`PluginPanel` / `progressLine`（把宿主进度渲染成一行话）/ 类型 `PluginMeta`
+  - 导出：`PluginPanel` / 类型 `PluginMeta`（进度那行话已搬到 `progress-text.ts`）
   - 刷新**不清空**网格：重验期间只在工具栏末尾多一行「刷新中…」
   - 承担「取消 `key` 重挂载」的清理责任：`plugin` 一变就清 toast / busy / 登录弹窗
 - **`AccountCard.tsx`** —— 单张账号卡。**六个槽位语义死锁**，每个只含一种东西、空着也占位
@@ -77,6 +77,22 @@
     再拼一个就成了「签到✓」配一个勾（2026-10-04 用户实机指出）
   - ⚠️ **不用 Emoji**：警告三角用 `IconWarningOutlineRegular`，跟随主题色
   - 主机错误码在这里翻成人话；不认识的上游原文原样透传，不猜不吞
+- **`progress-text.ts`** —— 把宿主上报的安装进度渲染成**一行话**（纯函数，无 JSX）。
+  - 导出：`progressLine`
+  - ⚠️ 它原先住在 [PluginPanel.tsx](PluginPanel.tsx) 里 —— 那个文件含 JSX，Node 侧 import 不了，
+    于是这段「六个分支 + 数字格式化」的逻辑**一条判据都没有**。搬出来才有
+    `tests/progress-text.test.ts`
+  - ⚠️ **只做展示，不做状态判断**：形状不对或 `phase` 认不出都返回**空串**，
+    让调用方退回通用文案 —— 而不是把 `undefined` 印到界面上
+  - ⚠️ 三个数必须**有限且分母为正**才算得出「已下载 xx / 共 yy（zz%）」那一截：
+    上游在下载刚开始时会报 `total: 0`，那时算出来是 `Infinity%`
+- **`react-css-props.d.ts`** —— 让 `style={{ … }}` 接受**自定义属性**（`--cpa-*`）。
+  - ⚠️ 它是「TS 把运行期数值交给 CSS」这条通道的类型支撑，见
+    [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §4.10
+  - ⚠️ 索引签名**只收 `--*` 开头的键** —— 开成「什么键都能塞」等于把 `CSSProperties`
+    的类型检查关掉
+  - ⚠️ 必须**独立**于 [css-modules.d.ts](css-modules.d.ts)：那个文件靠「不是模块」才放得下
+    `declare module '*.module.css'`，而模块增强要求本文件是模块
 - **`credit-text.ts`** —— 额度区的**唯一组装处**（单位文案 + 两格数字 + 说明行）。
   **不含 JSX、不引 UI 包**。
   - 导出：`creditViewOf`（一张卡的额度文案）/ `unitTextOf`（单位 → 文案）/
