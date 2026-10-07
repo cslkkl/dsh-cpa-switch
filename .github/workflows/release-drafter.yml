@@ -28,8 +28,19 @@ permissions:
 
 jobs:
   update_release_draft:
-    # 与 ci.yml / publish.yml 同一个 runner，不另开一种。
-    runs-on: windows-latest
+    # ⚠️ **必须是 Linux runner，不能用 windows-latest**（2026-10-07 实踩）。
+    #
+    # action 通过 GitHub API 读配置，而它用 `path.join()` 拼路径 ——
+    # 在 Windows runner 上拼出来是 `.github\release-drafter.yml`（**反斜杠**），
+    # API 只认正斜杠，于是 404：
+    #
+    #     Config not found in <owner>/<repo>, falling back to <owner>/.github
+    #     ##[error]Repo load failed. Config file not found with error 404.
+    #
+    # 实测：同一个文件，正斜杠取得到（3549 字节）、反斜杠 404。
+    # 症状是 workflow **整个失败**（不是静默），所以只是白跑一次 ——
+    # 但别照抄本仓其他 workflow 的 `windows-latest`，那三个是构建 Windows 产物才需要的。
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       # 不需要 checkout：action 通过 GitHub API 读配置（`config-name` 相对 `.github`）。
