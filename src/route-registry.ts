@@ -425,7 +425,8 @@ export function failureKindOf(error: unknown): 'permanent' | 'transient' {
  *
  * 后果是**静默失效**：`overlaps` 恒为空 → `patchModelAlias` 整个跳过
  * （它要求 `overlaps` 非空）→ 别名不再自动生成，新出现的重名模型在所有渠道的号
- * 之间轮询（正是 §2.2 解决的问题），而**没有任何报错**。
+ * 之间轮询（正是[别名决策](../.agents/notes/2026-10-04-channel-pinned-model-alias.md)
+ * 要解决的问题），而**没有任何报错**。
  *
  * 剥前缀只认**已知渠道前缀**（{@link channelOfPrefix}）—— 第三方自带的
  * `vendor/xxx` 这类斜杠 id 原样保留，不参与同名判定。
@@ -1088,37 +1089,6 @@ export function attachRouteRegistry(
    */
   let chainPromise: Promise<void> | undefined
 
-  /**
-   * 启动时**预填** `lastGood`：从磁盘缓存读一份完整清单。
-   *
-   * 端口不符 / 版本不符 / 形状不对 / 文件损坏 → 一律读不到，退回原路径。
-   * 这是**同步**读一次（不是每轮 `refresh` 都读盘）——
-   * 之后 `lastGood` 由 `pushProfile` 维护。
-   *
-   * ⚠️ **不设硬过期**：过期后又会走回「等读 → 半成品」的老路。
-   * 偏旧这件事由「读全后覆盖」自然解决，不由计时器决定「什么时候没数据可用」。
-   */
-  const restored = readCachedRoutes(deps.gateway.port)
-  if (restored !== undefined) {
-    /**
-     * ⚠️ `channelOf` **从缓存里读回**（2026-10-07）。它决定护栏对这份基线
-     * 按不按渠道放行：没有它时「删号 / 禁用账号」这类**合法缩水**会被
-     * 一律拦下（要等重试用完才放行，约 52 秒）。
-     *
-     * 老缓存没有这个字段 ⇒ 解析成空表 ⇒ 退化成保守路径，
-     * 语义仍然安全（宁可多跑一轮重读，也不放过一次真的读残）。
-     */
-    lastGood = {
-      profile: restored.profile as RouteProfile,
-      channelOf: restored.channelOf,
-    }
-    deps.logger?.info?.(
-      'cpa-panel: 启动用磁盘缓存清单（%d models，存于 %s）',
-      lastGood.profile.models.length,
-      restored.savedAt,
-    )
-  }
-
   /** inject 是异步解析的，boot 可能先跑到这里 —— 最多等 10 秒。 */
   const findEntry = async (): Promise<LoaderEntryLike | undefined> => {
     const deadline = clock.now() + 10000
@@ -1144,6 +1114,18 @@ export function attachRouteRegistry(
     trigger: string,
   ): Promise<SyncResult> => {
     const profile = snapshot.profile
+    const entry = await findEntry()
+
+    /**
+     * ⚠️ **序号要判在「等到条目之后」**（2026-10-07）。
+     *
+     * 判据是「旧清单不许覆盖新清单」，而**等待本身**就会让手里这份变旧：
+     * 装配即推（见下）与 `boot` / `config-reload` 的推送会并发，前者若卡在
+     * `findEntry` 上（`inject` 是异步解析的），醒来时后者早已推了一份更新的上去。
+     * 判在等待**之前**的话，那次醒来会把新清单盖回旧的，还把 `pushedSeq` 一起倒退。
+     *
+     * 代价只是「被顶掉的那次不再省下等待」，换来的是判据与它的字面意思一致。
+     */
     if (seq < pushedSeq) {
       deps.logger?.info?.(
         'cpa-panel: 旧清单不覆盖新清单（%s: seq %d < %d）',
@@ -1153,7 +1135,6 @@ export function attachRouteRegistry(
       )
       return { ok: true, models: profile.models.length, reason: 'superseded' }
     }
-    const entry = await findEntry()
     if (loaderRef === undefined) return { ok: false, reason: 'loader-unavailable' }
     if (entry === undefined || entry.fiber === undefined) {
       return { ok: false, reason: 'llm-pi-ai-not-loaded' }
@@ -1172,6 +1153,65 @@ export function attachRouteRegistry(
     pushedSeq = seq
     deps.logger?.info?.('cpa-panel: model routes %s: %d models', trigger, profile.models.length)
     return { ok: true, models: profile.models.length }
+  }
+
+  /**
+   * **装配即推**：插件挂上来的这一刻，就把磁盘缓存里那份完整清单推给宿主。
+   *
+   * ## 为什么必须在这里推，不能等 `boot` 那条链
+   *
+   * `boot` 的顺序是「(补装环境) → `ensure()` 等 CPA 起来 → 恢复账号意图 →
+   * 开机补签 → 推清单」，**每一步都可能很久、也可能根本走不到**：
+   * `ensure()` 的预算（`startTimeoutSeconds`，默认 30s）用尽时 `state.running`
+   * 为假，而旧写法只在为真时才推 —— 于是「上次完整成功过的那份清单」明明
+   * 就躺在磁盘上，用户却要等到某次设置写入触发 `config-reload` 才看得到模型。
+   *
+   * 实机症状（2026-10-07）：开机后第一条消息必报
+   * `pi-ai provider "cpa" has no configured model "wb/…"`（`UNKNOWN_MODEL`），
+   * 重开 dsh web 就好 —— 因为那一次是**新的启动**，这次 CPA 起得够快。
+   * 模型选择器读的就是 `providers.cpa.models`，而它此刻是**空骨架**。
+   *
+   * 推这份缓存的代价是**零 CPA 读**（一次 volatile update 往返），所以没有任何
+   * 理由让它排在 CPA 后面 —— 这里推完，DSH 一能用就有模型可选。
+   *
+   * ## 为什么失败不抛、但要记
+   *
+   * 推不上去只有两种可能：`llm-pi-ai` 的条目还没挂上（装配期，正常）、或
+   * `entry.update` 失败（异常）。两者都不该影响插件装配，所以只记日志；
+   * 而**必须记** —— 否则「模型清单没推上去」在日志里毫无痕迹。
+   * 这里推失败还有两次补救：`boot` 末尾那次（见 `boot.ts`）与
+   * `app-boot/config-reload`。
+   *
+   * ⚠️ **`lastGood` 只在完整快照时更新**：它是磁盘缓存的运行时镜像，
+   * 而这里是它唯一的「启动来源」。形状校验（非空 / 形状 / 版本 / 端口）在
+   * {@link readCachedRoutes} 里，坏缓存进不来。
+   */
+  const restored = readCachedRoutes(deps.gateway.port)
+  if (restored !== undefined) {
+    /**
+     * ⚠️ `channelOf` **从缓存里读回**（2026-10-07）。它决定护栏对这份基线
+     * 按不按渠道放行：没有它时「删号 / 禁用账号」这类**合法缩水**会被
+     * 一律拦下（要等重试用完才放行，约 52 秒）。
+     *
+     * 老缓存没有这个字段 ⇒ 解析成空表 ⇒ 退化成保守路径，
+     * 语义仍然安全（宁可多跑一轮重读，也不放过一次真的读残）。
+     */
+    lastGood = {
+      profile: restored.profile as RouteProfile,
+      channelOf: restored.channelOf,
+    }
+    deps.logger?.info?.(
+      'cpa-panel: 启动用磁盘缓存清单（%d models，存于 %s）',
+      lastGood.profile.models.length,
+      restored.savedAt,
+    )
+    void pushProfile(lastGood, lastGoodSeq, 'boot:cache')
+      .then((result) => {
+        deps.logger?.info?.('cpa-panel: 装配即推缓存清单 → %o', result)
+      })
+      .catch((error: unknown) => {
+        deps.logger?.warn?.('cpa-panel: 装配即推缓存清单失败: %o', error)
+      })
   }
 
   /**

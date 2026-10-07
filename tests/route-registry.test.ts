@@ -715,6 +715,63 @@ describe('重载空窗', () => {
       expect(pushed).toHaveLength(1)
     })
 
+    /**
+     * ⚠️ **装配即推迟到时，不许盖掉后来推上去的新清单**（序号判在「等到之后」）。
+     *
+     * 场景：装配时 loader 还没挂上，缓存那份清单卡在 `findEntry` 的等待里；
+     * 期间一轮真读已经推了**更新**的一份上去。等它终于落下来时，若序号判在
+     * 等待**之前**（旧写法），它会用旧缓存盖回新的、并把 `pushedSeq` 一起倒退 ——
+     * 用户看到「模型列表自己退回上一版」，而没有任何报错。
+     */
+    it('⚠️ 装配即推迟到时不覆盖后来推上去的新清单', async () => {
+      /**
+       * 种的必须是**这一轮清单的子集**（且名字是旧的，好区分是谁推的）：
+       * 0.8.0 的目录护栏会把「比上一份少」的清单拦下 —— 种一个不相交的集合
+       * 会让这一轮根本不推，于是这条测的就变成「护栏拦不拦」了。
+       */
+      mkdirSync(join(home, 'storages'), { recursive: true })
+      writeFileSync(
+        join(home, 'storages', 'cpa-panel-routes.json'),
+        JSON.stringify({
+          version: 1,
+          port: 8317,
+          savedAt: '2026-10-07T00:00:00.000Z',
+          profile: {
+            displayName: 'CPA Switch',
+            api: 'openai-completions',
+            baseURL: 'http://127.0.0.1:8317/v1',
+            apiKeyEnv: 'CPA_API_KEY',
+            models: [{ id: 'dfmodel', name: 'Qoder · 旧名字' }],
+          },
+        }),
+        'utf8',
+      )
+
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+      const late = lateLoaderHost(entry)
+      const refresh = attachRouteRegistry(late.host, depsFor(cpa))
+
+      // 装配即推卡在 loader 上：一份都还没推出去
+      await tick(300)
+      expect(pushed).toHaveLength(0)
+
+      // loader 挂上 → 真读一轮，推上去的是**新**清单（条目上此刻是新名字）
+      late.deliver()
+      await refresh('boot')
+      expect(pushed.at(-1)?.names).toContain('Qoder · dfmodel')
+
+      // 装配即推这时才醒来 —— 手里是旧缓存，不许盖回去
+      await tick(300)
+      const finalNames = pushed.at(-1)?.names ?? []
+      expect(finalNames).toContain('Qoder · dfmodel')
+      expect(finalNames).toContain('WorkBuddy · glm-5.3')
+      expect(finalNames).not.toContain('Qoder · 旧名字')
+      expect(modelsOf(entry.options.config).map((row) => String(row.name))).not.toContain(
+        'Qoder · 旧名字',
+      )
+    })
+
     it('loader 始终不来：等到上限就收场，不无限等', async () => {
       const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
       const { entry, pushed } = fakeEntry(BASELINE)
@@ -811,7 +868,8 @@ describe('推送行的模态与展示名', () => {
 //
 // ⚠️ 这是静默失效：`patchModelAlias` 要求 `overlaps` 非空，空则整个跳过，
 // 配置里只留下历史别名；新出现的重名模型会在所有渠道的号之间轮询
-// （正是 §2.2 花大力气解决的问题），而且**没有任何报错**。
+// （正是[别名决策](../../.agents/notes/2026-10-04-channel-pinned-model-alias.md)
+// 要解决的问题），而且**没有任何报错**。
 
 describe('同名的识别要剥掉前缀', () => {
   let home: string
@@ -1214,6 +1272,53 @@ describe('启动用持久缓存', () => {
     expect(pushed[0]?.names).toContain('WorkBuddy · hy3')
     // 启动即用，所以 **没有一条** CPA 读需要放行
     expect(pushed[0]?.names.some((n) => String(n).startsWith('CPA · '))).toBe(false)
+  })
+
+  /**
+   * ⚠️ **装配那一刻就把缓存清单推上去** —— 不等 `boot` 那条链，也不看 CPA 在不在跑。
+   *
+   * 为什么值得单独一条（2026-10-07 实机）：`boot` 的顺序是「(补装环境) → 等 CPA 起来
+   * → 恢复账号意图 → 开机补签 → 推清单」，**每一步都可能很久、也可能走不到**
+   * （`ensure()` 的预算用尽时 `state.running` 为假，旧写法就一句 warn 结束、永不推）。
+   * 症状是开机第一条消息报 `pi-ai provider "cpa" has no configured model "wb/…"`，
+   * 而**那份清单当时就躺在磁盘上**，重开 dsh web（＝新的一次启动）才好。
+   *
+   * 判据形状：**连返回的 refresh 都不调**，且所有 CPA 读都不放行 ——
+   * 清单仍然必须出现，只可能来自缓存。
+   */
+  it('⚠️ 装配即推缓存清单（不调 refresh，也不等 CPA）', async () => {
+    seedCache([
+      { id: 'dfmodel', name: 'Qoder · dfmodel' },
+      { id: 'hy3', name: 'WorkBuddy · hy3' },
+    ])
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.hangNext('', 99)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    // 只装配：不调它返回的那个 refresh（`boot` 的那条链一步都没走）
+    attachRouteRegistry(host, depsFor(cpa))
+
+    await until(() => {
+      expect(pushed.length).toBeGreaterThan(0)
+    })
+    expect(pushed[0]?.names).toContain('Qoder · dfmodel')
+    expect(pushed[0]?.names).toContain('WorkBuddy · hy3')
+    // 启动即用：没有一条 CPA 读被放行，也没有兜底名
+    expect(pushed[0]?.names.some((n) => String(n).startsWith('CPA · '))).toBe(false)
+  })
+
+  /** 反向：**没有缓存就不许凭空推**（「绝不发明清单」在装配这条路径上同样成立）。 */
+  it('没有缓存时装配不推任何东西', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    cpa.hangNext('', 99)
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    attachRouteRegistry(host, depsFor(cpa))
+    await tick(200)
+
+    expect(pushed).toHaveLength(0)
   })
 
   /**

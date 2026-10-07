@@ -108,12 +108,37 @@ export async function runBoot(deps: BootDeps): Promise<void> {
     deps.logger?.info?.('cpa-panel: restore account intent %o', restored)
     const result = await ops.actions.startupCheckin({ enabled: readConfig().autoCheckinOnStart })
     deps.logger?.info?.('cpa-panel: startup checkin %o', result)
-    /**
-     * CPA 就绪后立即注册路由 —— 新用户装完插件、CPA 首次跑起来，
-     * 模型就能出现在选择器里。内部已兜错，失败不影响生命周期。
-     */
-    await ensureRoutesFresh('boot')
   } else {
     deps.logger?.warn?.('cpa-panel: CPA unavailable at startup (%s)', state.reason ?? 'unknown')
+  }
+
+  if (cancelled()) return
+
+  /**
+   * **推模型路由。**
+   *
+   * ⚠️ **它不许挂在「CPA 此刻在不在跑」上**（2026-10-07 实机）——
+   * 那个写法让「CPA 起得慢」直接等于「这一轮永不推清单」：`ensure()` 的
+   * `startTimeoutSeconds` 预算（默认 30s）用尽时 `state.running` 为假，
+   * 于是 `providers.cpa.models` 停在空骨架，用户开机发第一条消息就报
+   * `pi-ai provider "cpa" has no configured model "wb/…"`，
+   * 直到某次设置写入触发 `config-reload` 才补上。
+   *
+   * 而 `refresh` 内部本来就处理「CPA 没跑」：读快照会返回 `idle` →
+   * `degrade` **回推上一份成功清单**（没有历史才保持空），
+   * **不是**什么都不做。所以无条件调它才是对的语义。
+   *
+   * 顺带把结果记下来：「没推上去」从前是**零痕迹**的（返回值被丢掉），
+   * 于是「模型清单空着」只能靠用户抱怨来发现。
+   */
+  const pushed = await ensureRoutesFresh('boot')
+  if (pushed.ok) {
+    deps.logger?.info?.('cpa-panel: model routes at boot %o', pushed)
+  } else {
+    deps.logger?.warn?.(
+      'cpa-panel: 启动没能推上模型清单（%s）—— 选择器此刻可能没有模型，' +
+        '下一次设置写入或配置重载会重推',
+      pushed.reason ?? 'unknown',
+    )
   }
 }
