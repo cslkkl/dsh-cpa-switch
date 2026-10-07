@@ -15,6 +15,9 @@ docs/ 特有约束：
   一律指向唯一事实源。要精确值时现查。
 - **发布正文的优先级**：`docs/releases/<tag>.md` 是**可选覆盖**（存在即赢），
   **不是必须**；不写时由 Release Drafter 草稿提供。细则见 [PUBLISHING.md](PUBLISHING.md)。
+- ⚠️ **撤下的方案文件不要再照旧路径新建** —— 边界重构（P0–P7）的 `docs/REFACTOR.md`
+  已按约定删除，结论并入 [ARCHITECTURE.md](ARCHITECTURE.md)。`pnpm check:doc-paths`
+  只扫 `src` / `tests` / `scripts` 三类裸路径，**`docs/` 内的旧提法是零信号的**。
 - **改完跑文档校验**：链接 + 行尾 + `pnpm check:doc-paths`，命令见
   [../AGENTS.md](../AGENTS.md) 的「常用命令」。
 
