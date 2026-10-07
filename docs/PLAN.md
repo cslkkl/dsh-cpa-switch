@@ -380,7 +380,44 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
 ### 2.9 结构改动（**先补判据再动结构**）
 
 改行为或签名的改动都走这个口径：**判据先到位，才允许动结构**。
-两件已立项的都在 2026-10-06 收口了：
+
+**立项中**：
+
+- **按模型声明思考档位（需要先把 `providerId` 拆细）** ——
+  维护者口径是「**关不掉的就把档位列删掉**，不留一个假的『关』」，而全量实测显示
+  99 个模型里只有 10 个是真开关、23 个方向相反、9 个关不掉
+  （[实测报告](../docs/audits/2026-10-06-reasoning-effort-off-vs-high.md)）。
+  ⚠️ **原立项理由已推翻**：曾记为「`reasoningEfforts` 是 provider 级（按渠道）声明、
+  条件按模型分，所以要先拆 `providerId`」—— 实测宿主是**逐模型**读的
+  （`resolveModelReasoning(provider, entry, base)` 取 `entry.reasoningEfforts`），
+  所以「按模型声明档位」在现有结构下就做得到，**不必拆 provider**
+  （[决策记录](../.agents/notes/2026-10-06-reasoning-off-spelling-per-channel.md)）。
+  剩下的才是真约束：宿主的硬校验要求「除 `off` 外至少一个档位」，所以**不能**把某个
+  模型的档位删成空对象或只剩 `off` —— 那是**整个 provider 注册失败、该渠道所有模型
+  一起消失**（判据 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)）。
+  **疑似可行但尚未实测**的路子：**逐模型省略 `reasoningEfforts`** —— 宿主此时落
+  `reasoning: false`（`resolveModelReasoning` 的 `efforts === void 0` 分支），
+  界面直接不给该模型档位列（`reasoningInfo` 见 `!model.reasoning` 即不暴露），
+  正是维护者要的「关不掉就删掉这一栏」。要先补的判据：
+  **省略后该模型确实没有 Effort 行、同清单其余模型不受影响、选择器分组不出现重复条目**。
+  与根 [AGENTS.md](../AGENTS.md) 待办区那条「`providerId` 粒度裁决」是同一件事。
+- **卡片说明行（`facts`）的 36px 是否该收成一行** —— 那一行常态只有一行
+  （`factsOf()` 最多拼三项 `N 包` · `套餐：X` · `剩余 ?`，每项只在真有值时出现），
+  36px 是给「认不出的上游档位名」留的**夹断容量**。收成一行有两种改法、
+  都动到卡片高度：① 只改 `.facts`，`space-between` 会把省下的 18px 摊进行距（六行变松）；
+  ② 同时改 `.card`（222 → 204px），卡片**真的变矮**。
+  动之前要先补的判据：**槽位高度只有一份来源**（见下条）、
+  「改 `facts` 高度时 `.card` 的高度必须同步」。
+  与维护者 2026-10-07 的诉求同源（「毕竟只有一行，它为什么预留两行」）。
+- **卡片高度的算式收成一份** —— 现在 222px 与六个槽位高度**有三处家**：
+  `panel.module.css` 的声明与注释、[src/client/README.md](../src/client/README.md) 的长高表、
+  [tests/card-slots.test.ts](../tests/card-slots.test.ts) 里自己重抄一遍的 `[21,19,36,18,36,28]`。
+  后两处是**会漂的副本**（改槽位忘了改 222 时，判据照样绿）。
+  方向：CSS 用自定义属性表达（`--cpa-slot-*` + `height: calc(…)`），
+  判据只断言「求和用到的每个变量恰好定义一次」与「`.card` 的高度就是那个和」。
+  动之前要先补的判据（改动前应当是**红的**）：**改一个槽位高度而不同步 `.card` 时，判据必须报错**。
+
+**已完成**：
 
 - **状态文件写入**（`state.ts`）—— 判据先证明旧写法真的会吞记录（两条用例当时是红的），
   再改成单入口读改写：[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)、
@@ -419,7 +456,7 @@ P7 的口径与已完成项见[决策记录](../.agents/notes/2026-10-05-p7-phys
   [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)、
   判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts)。
 
-⚠️ 本节**当前没有立项项** —— 新条目照上面的口径办：先补判据，再动结构。
+⚠️ 上面「立项中」的都是**维护者的可见诉求**，动手前照口径办：**先补判据，再动结构**。
 
 ---
 
