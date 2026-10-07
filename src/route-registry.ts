@@ -474,20 +474,24 @@ function buildCpaRouteProfile(
     return a.bare.localeCompare(b.bare)
   })
   /**
-   * 思考档位声明：**读一次，整份清单共用同一个对象**。
+   * 思考档位声明：**逐行按各自渠道给**。
    *
-   * 不逐行调用 —— 开关是全局的，逐行算会得到一堆内容相同的对象，
-   * 且「某个模型没带上」这种不一致从此无人能发现。
+   * ⚠️ 这里曾经是「整份清单共用一个对象」，前提是「档位不分渠道」。
+   * 实测推翻了这个前提：`off` 在 zcode 上是**硬错误**（`1210`），
+   * 该渠道只认 `none`（见 `model-caps.ts` 的 `OFF_SPELLING`）。
+   *
+   * 好在**宿主本就是逐模型读这个字段的**（`dsh-llm-pi-ai` 的
+   * `resolveModelReasoning(provider, entry, base)` 里 `entry.reasoningEfforts`），
+   * 所以按渠道各给一份是正当用法，**不必拆 provider**。
    */
-  const reasoningEfforts = reasoningEffortsOf(deps.reasoningEffortsEnabled?.() ?? false)
+  const effortsEnabled = deps.reasoningEffortsEnabled?.() ?? false
   /**
-   * 路由默认档位：**与声明同源同开关**。
+   * 路由默认档位：**与档位声明同源同开关**。
    *
-   * 它承担的是「去掉选择器里的 `Default` 行」这件界面事，取值理由见
-   * `model-caps.ts` 的 `REASONING_DEFAULT`。两个值都从同一个开关读出来，
-   * 所以不会出现「声明撤了、默认还在」的半截状态。
+   * ⚠️ 它留在**路由级**（不分渠道）：它承担的是「去掉选择器里的 `Default` 行」
+   * 这件界面事，而选择器是路由级的。取值理由见 `model-caps.ts` 的 `REASONING_DEFAULT`。
    */
-  const reasoning = reasoningDefaultOf(deps.reasoningEffortsEnabled?.() ?? false)
+  const reasoning = reasoningDefaultOf(effortsEnabled)
   return {
     displayName: 'CPA Switch',
     api: 'openai-completions',
@@ -497,6 +501,7 @@ function buildCpaRouteProfile(
     models: rows.map((row) => {
       // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
       const caps = capsOf(row.channel, row.bare)
+      const reasoningEfforts = reasoningEffortsOf(effortsEnabled, row.channel)
       return {
         id: row.id,
         name: `${row.label} · ${row.bare}`,
@@ -511,14 +516,14 @@ function buildCpaRouteProfile(
          */
         ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
         /**
-         * 思考档位：**每个模型都带上同一份声明**（开关打开时）。
+         * 思考档位：**逐模型带上、值按该行的渠道给**（开关打开时）。
          *
          * ⚠️ **这是「乐观默认」，不是逐模型实测过的**：有些模型可能压根不产思考，
          * 标了也只表现为「开了开关却看不到思考」，不会崩。这与
          * `supportsImages`（多标会卡死会话）的方向**相反**，所以这里可以宽。
          *
-         * ⚠️ 唯一的硬风险是上游对档位值返硬错误（实测 `11150`）——
-         * 逃生通道是面板上的总开关，不是这里的值。
+         * ⚠️ 但**「关」的拼写不能宽** —— 写错是硬错误、炸整轮对话（实测 `1210`）。
+         * 逃生通道仍是面板上的总开关。
          */
         ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
       }
