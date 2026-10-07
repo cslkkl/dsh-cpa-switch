@@ -337,7 +337,7 @@
  *   1. it would wash out the **balance figures** too — a disabled account's
  *      remaining credits are still worth reading;
  *   2. `filter` creates a stacking context, which eats the selected ring
- *      (`.selected` is an `inset` box-shadow).
+ *      (`.card[data-selected]` is an `inset` box-shadow).
  * Background, border and the selected ring are left untouched; only these step
  * down (2026-10-05, maintainer's decision):
  *
@@ -346,33 +346,60 @@
  *   - the switch        → the primitive's own disabled look
  *   - the button row    → the primitive's own disabled look
  */
-.isDisabled .nickname,
-.isDisabled .value {
+.card[data-disabled] .nickname,
+.card[data-disabled] .value {
   color: var(--dsw-alias-label-secondary);
 }
 
-.isDisabled .meter {
+.card[data-disabled] .meter {
   opacity: 0.5;
 }
 
 .card {
+  /* 卡片纵向几何的**唯一来源**：六个槽位的高度 + 节奏都在这里。
+     槽位规则只引用这些变量（判据 tests/card-geometry.test.ts 钉住），
+     所以改一个槽位高度，卡片高度自动跟着变 —— 不必再去别处重算一个数。
+     ⚠️ 从前同一个 222px 散在四处（这里的 height 与注释、顶部槽位表、
+     六个槽位各自的 height、判据里重抄的 [21,19,36,18,36,28]），
+     忘改一处**不报错**：判据拿自己抄的那份算，算出来还是 222。 */
+  --cpa-slot-count: 6;
+  --cpa-slot-head: 21px;
+  --cpa-slot-tag: 19px;
+  /* ⚠️ 42px 不是随手写的：它装的是「标签 + 数字」两行，实测
+     `.label` 12px/18px 与 `.value` 16px/24px → 18 + 24 = 42。
+     原先声明的是 36px，于是内容一直**溢出 6px**，被 `.card` 的 8px 间距
+     吃掉，谁也没看见（2026-10-07 真机量出来的）。声明必须等于真实内容高度，
+     否则「六槽位之和 = 卡片高度」这个算式算的是假的。 */
+  --cpa-slot-numbers: 42px;
+  --cpa-slot-meter: 18px;
+  --cpa-slot-facts: 18px;
+  --cpa-slot-actions: 28px;
+  --cpa-slot-gap: 8px;
+  --cpa-card-padding: 12px;
+
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px;
-  /* Definite height, not a floor: see the slot table above.
-     222px = the six slots (21 + 19 + 36 + 18 + 36 + 28) + five 8px gaps
-     + 12px padding on both sides. The enable switch now shares the head row, so
-     it no longer costs a slot of its own. */
-  height: 222px;
+  gap: var(--cpa-slot-gap);
+  padding: var(--cpa-card-padding);
+  /* 确定高度，不是地板：**六个槽位 + 五个间距**。
+     ⚠️ 这里**不写内边距、也不写边框** —— 它们是 content-box 之外的东西。
+     这个算式从前把内边距算了进来（slots + gaps + 24），而 height 在 content-box 下
+     **不含**内边距，于是「222px 的卡片」实际是 248px（+24 内边距 +2 边框），
+     多出来的 24px 变成了松动的行距；六个槽位加五个间距本来正好 198 = 222 − 24，
+     说明当初是按 border-box 想的。2026-10-07 真机量出来才对上。 */
+  height: calc(
+    var(--cpa-slot-head) + var(--cpa-slot-tag) + var(--cpa-slot-numbers) + var(--cpa-slot-meter) +
+      var(--cpa-slot-facts) + var(--cpa-slot-actions) + (var(--cpa-slot-count) - 1) *
+      var(--cpa-slot-gap)
+  );
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
 }
 
 /* The selected account is the one the user picked, so it gets the host's
    success colour as a ring. `inset` keeps the 1px from eating the layout. */
-.selected {
+.card[data-selected] {
   box-shadow: inset 0 0 0 1px var(--dsw-alias-state-success-primary);
   border-color: transparent;
 }
@@ -390,6 +417,8 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  /* 从前是文字的自然高度（14px × 1.5），现在显式声明 —— 否则它算不进「六槽位之和」。 */
+  height: var(--cpa-slot-head);
 }
 
 /* Tag row: fixed 19px (the Tag's own line-height 17px + 1px padding top and
@@ -401,7 +430,7 @@
   gap: 6px;
   flex-wrap: nowrap;
   overflow: hidden;
-  height: 19px;
+  height: var(--cpa-slot-tag);
 }
 
 /* Takes the free space, shrinks first, and truncates. `flex: 1 1 auto` plus
@@ -434,7 +463,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  height: 36px;
+  height: var(--cpa-slot-numbers);
 }
 
 .number {
@@ -453,7 +482,7 @@
    no bar here". With no ratio the slot must be blank or a note (2026-10-05,
    maintainer's report). */
 .meterSlot {
-  height: 18px;
+  height: var(--cpa-slot-meter);
   display: flex;
   align-items: center;
 }
@@ -494,12 +523,18 @@
 /* Card sub-text: the tertiary 12px tier, with tabular figures so a column of
    numbers lines up between cards.
  *
- * Fixed two-line slot (2 × 12px × 1.5 = 36px). An unrecognised upstream `plan`
- * is passed through verbatim (see `plan-text.ts`) and can be arbitrarily long,
- * so this **clamps to two lines** instead of growing the card and breaking the
- * row's equal heights. The full value is still in the `title` attribute. */
+ * **One line** (12px × 1.5 = 18px). This line is one line in practice: `factsOf()`
+ * joins at most three short items (`N 包` · `套餐：X` · `剩余 ?`) and each one
+ * only appears when it really has a value.
+ *
+ * ⚠️ The clamp must match the height (1). At a one-line height with a two-line
+ * clamp, a long line would be **cut through the middle of the glyphs** instead of
+ * ending in an ellipsis. An unrecognised upstream `plan` is passed through
+ * verbatim (see `plan-text.ts`) and can be long, so this **clamps to one line**
+ * instead of growing the card and breaking the row's equal heights. The full
+ * value is still in the `title` attribute. */
 .facts {
-  height: 36px;
+  height: var(--cpa-slot-facts);
   font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
@@ -507,7 +542,7 @@
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 /* Action row: fixed height so a channel with no action buttons (ZCode) keeps
@@ -517,7 +552,7 @@
   gap: 6px;
   flex-wrap: nowrap;
   align-items: center;
-  height: 28px;
+  height: var(--cpa-slot-actions);
   overflow: hidden;
 }
 

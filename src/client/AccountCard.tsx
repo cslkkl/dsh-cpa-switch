@@ -221,20 +221,25 @@ export function AccountCard(props: AccountCardProps): ReactNode {
 
   return (
     /*
-     * 禁用卡：整卡挂一个 `isDisabled` 类做**局部降级**，而不是 `grayscale`。
+     * 禁用卡：整卡带上 `data-disabled` 做**局部降级**，而不是 `grayscale`。
      *
      * 为什么不用 `filter: grayscale(...)`：那会连**额度数字一起洗掉** ——
      * 禁用不代表这个号的余额不值得看；而且 `filter` 会新建层叠上下文，
      * 选中绿环（`box-shadow: inset`）也会被一起吃掉（2026-10-05 维护者定案）。
      *
-     * 降级只做四处（见 CSS 的 `.isDisabled` 段）：
+     * 降级只做四处（见 CSS 的 `.card[data-disabled]` 段）：
      * 昵称与数字降到 secondary、说明降到 tertiary、进度条透明度 0.5。
      * **背景、边框、选中绿环一律不动。**
      */
     <div
-      className={
-        css.card + (isSelected ? ' ' + css.selected : '') + (disabled ? ' ' + css.isDisabled : '')
-      }
+      className={css.card}
+      /*
+       * ⚠️ 条件写成 `|| undefined`，**不要**写 `data-disabled={disabled}`：
+       * `data-x={false}` 会渲染成 `data-x="false"` 并**照样命中** `[data-x]`，
+       * 这类「明明为假却生效」的错位没有任何报错（宿主自己的写法也是 `|| undefined`）。
+       */
+      data-selected={isSelected || undefined}
+      data-disabled={disabled || undefined}
     >
       {/*
        * 槽位 1 —— 头行：**昵称靠左、启用开关靠右**，一行两端对齐。

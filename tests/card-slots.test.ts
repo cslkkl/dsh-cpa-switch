@@ -86,7 +86,9 @@ describe('槽位 2 · tagRow —— 只放状态标签', () => {
 
   it('标签行定高，空着也占位（Qoder / ZCode 没有签到状态）', () => {
     const block = css.slice(css.indexOf('.tagRow {'))
-    expect(block.slice(0, block.indexOf('}'))).toMatch(/height:\s*19px/)
+    // 高度来自 `.card` 上的变量（**只有一处来源**），不再写死 19px ——
+    // 「六个槽位之和 = 卡片高度」由 tests/card-geometry.test.ts 验证。
+    expect(block.slice(0, block.indexOf('}'))).toMatch(/height:\s*var\(--cpa-slot-tag\)/)
   })
 })
 
@@ -133,7 +135,7 @@ describe('槽位 4 · meterSlot —— 只放进度条', () => {
   })
 
   it('灰底轨道画在 `.meter` 上，不画在槽位上（否则无占比的渠道露出空灰条）', () => {
-    // ⚠️ 用 `.meter {` 精确匹配 —— `.isDisabled .meter {` 也含 `.meter`，
+    // ⚠️ 用 `.meter {` 精确匹配 —— `.card[data-disabled] .meter {` 也含 `.meter`，
     // 先匹配到它就会拿到 `opacity` 而不是背景（2026-10-05 实踩）
     const slotStart = css.indexOf('.meterSlot {')
     const meterStart = css.indexOf('\n.meter {')
@@ -184,15 +186,16 @@ describe('禁用卡：降级而非擦除', () => {
   })
 
   it('只降级昵称/数字与进度条透明度', () => {
-    const block = css.slice(css.indexOf('.isDisabled'))
-    expect(block).toContain('.isDisabled .nickname')
-    expect(block).toContain('.isDisabled .value')
-    expect(block).toContain('.isDisabled .meter')
+    // 状态走 `data-*` 属性选择器（不拼类名），见 tests/card-geometry.test.ts。
+    const block = css.slice(css.indexOf('.card[data-disabled]'))
+    expect(block).toContain('.card[data-disabled] .nickname')
+    expect(block).toContain('.card[data-disabled] .value')
+    expect(block).toContain('.card[data-disabled] .meter')
     expect(block).toMatch(/opacity:\s*0\.5/)
   })
 
   it('选中绿环仍在（inset，不占布局）', () => {
-    const selected = css.slice(css.indexOf('.selected {'))
+    const selected = css.slice(css.indexOf('.card[data-selected] {'))
     expect(selected.slice(0, selected.indexOf('}'))).toContain(
       'inset 0 0 0 1px var(--dsw-alias-state-success-primary)',
     )
@@ -235,20 +238,14 @@ describe('顶部汇总：三格，单位并入额度池', () => {
 })
 
 describe('卡片等高：六槽位 + 确定高度', () => {
-  it('槽位高度之和 + 间距 + 内边距 = 卡片高度', () => {
-    const slots = [21, 19, 36, 18, 36, 28]
-    const gaps = (slots.length - 1) * 8
-    const padding = 24
-    const total = slots.reduce((a, b) => a + b, 0) + gaps + padding
-    expect(total).toBe(222)
-    const card = css.slice(css.indexOf('.card {'))
-    expect(card.slice(0, card.indexOf('}'))).toMatch(/height:\s*222px/)
-  })
-
   it('用 `height` 而非 `min-height`（min-height 是地板，四渠道内容从不低于它）', () => {
     const card = css.slice(css.indexOf('.card {'))
     const block = card.slice(0, card.indexOf('}'))
-    expect(block).toMatch(/\bheight:\s*222px/)
+    // ⚠️ 「六槽位之和 = 卡片高度」那套算式由 tests/card-geometry.test.ts 验证 ——
+    // 它从 CSS 里**读**六个 `--cpa-slot-*` 再验证 calc() 自洽。
+    // 这里从前自己重抄一份 `[21,19,36,18,36,28]`：改一个槽位高度而忘了改
+    // `.card` 时，它拿自己抄的那份算，**照样绿**。
+    expect(block).toMatch(/\bheight:\s*calc\(/)
     expect(block).not.toMatch(/min-height/)
   })
 })
