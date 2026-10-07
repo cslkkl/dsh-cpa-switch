@@ -1352,6 +1352,42 @@ describe('思考档位声明', () => {
   })
 
   /**
+   * ⚠️ **这条是「按渠道换拼写」的护栏，而且必须是路由级的。**
+   *
+   * 为什么上面那条不够：它用的是 workbuddy-only 目录，而 `offSpellingOf` 对认不出的
+   * 渠道退回 `off` —— 于是「workbuddy 的期望值」与「压根不传渠道」**完全相同**。
+   * 实测过：把 `buildCpaRouteProfile` 里的 `row.channel` 参数整个删掉（功能完全没接上），
+   * 上面那条照样绿，整个文件的 64 条用例全绿。
+   *
+   * 所以这里要的是**同一份清单里两种拼写并存** —— 只断言单一渠道的用例，断不出
+   * 接线断没断；而这条一旦红了，指向的就是「值没按行的渠道给」。
+   */
+  it('⚠️ 同一份清单里「关」按各自渠道给：zcode 是 none、workbuddy 是 off', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w1', provider: 'workbuddy' },
+        { name: 'z1', provider: 'zcode' },
+      ],
+      models: { w1: ['deepseek-v4.1-flash'], z1: ['glm-5.3'] },
+      catalog: ['deepseek-v4.1-flash', 'glm-5.3'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => true),
+    )('boot')
+
+    const effortsOf = new Map(
+      (pushed.at(-1)?.rows ?? []).map((row) => [String(row.id), row.reasoningEfforts]),
+    )
+    // 两条都在，才谈得上「逐行」——少一条就退化成「整份共用同一个值」。
+    expect([...effortsOf.keys()].sort()).toEqual(['deepseek-v4.1-flash', 'glm-5.3'])
+    expect(effortsOf.get('deepseek-v4.1-flash')).toEqual({ off: 'off', high: 'high' })
+    expect(effortsOf.get('glm-5.3')).toEqual({ off: 'none', high: 'high' })
+  })
+
+  /**
    * ⚠️ **这条钉的是「选择器里不再出现 `Default` 行」**，也就是用户实际看到的界面。
    *
    * 宿主只在**路由级 `reasoning` 有值**时才给出 `defaultEffort`，而
