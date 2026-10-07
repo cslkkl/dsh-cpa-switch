@@ -91,7 +91,7 @@
   - `plugin` 变化时整层清掉：覆盖层是渠道级状态，跟着渠道走
 - **`use-account-login.ts`** —— 「添加账号」弹窗的状态机（`idle` / `starting` / `wait` / `error`）。
   - 授权轮询也走 `useResource` 的 `pollMs`（`POLL_MS = 2500`）；还没有 `state` 时不轮询
-  - 到**终态**后 `invalidateReads('accounts:' + plugin)` 让账号列表自己刷新
+  - 到**终态**后 `invalidateReads(cacheKeys.accounts(plugin))` 让账号列表自己刷新
 - **`use-channel-actions.ts`** —— 渠道级动作（全部签到 / 任务、自动签到开关）+ 忙碌与提示。
   - 「批量在飞」与「某张卡在飞」**互相看得见**：并发点各发一次写请求会互相盖掉响应
 - **`report.tsx`** —— 操作结果提示的**唯一**组装处（文案 + 图标）。
@@ -172,6 +172,15 @@
 - **`transport.ts`** —— 传输层：一次 `/api/v1/cpa/*` 请求 + 错误收敛。
   - 导出：`api` / `post` / 类型 `ApiResult`
   - ⚠️ 任何异常收敛成 `{ ok: false, error }`，**不抛** —— 调用方只需判 `ok`
+- **`cache-keys.ts`** —— 浏览器半边**读缓存键的唯一来源**。
+  - 导出：`cacheKeys`（`status` / `setup` / `plugins` / `routing` / `accounts(plugin)` / `auth(state)`）
+  - ⚠️ 键在本侧**身兼两职**：读用它取键、写后用它当失效前缀（`invalidateReads` 按前缀清）。
+    两处各写一遍字面量时不一致**不报错** —— 只是那次作废匹配不到任何条目（空操作）、
+    界面继续拿旧值。收在一处之后「读用的键」与「作废用的前缀」同源
+  - ⚠️ **新增一个读键必须加到这里**，并在读到它的 `useResource` 里用它；判据
+    `tests/client-cache-keys.test.ts` 拦住别处手写的裸字面量（`key: '…'`）
+  - ⚠️ 这是**页面内**那套缓存，与宿主 `src/gateway.ts` 的 `cacheKeys`（**进程内**那套）
+    是两回事 —— 两边同名只是巧，不要互相 import，也不要「对齐」成一样
 - **`read-cache.ts`** —— **共享读缓存**（`ReadCache`）：新鲜 / 陈旧两档 + 按前缀作废。
   - 导出：`readCache` / `cachedGet` / `prefetch` / `invalidateReads` /
     `class ReadCache` / 类型 `CachedValue` / `ReadCacheOptions`
@@ -182,11 +191,18 @@
 - **`endpoints.ts`** —— `/api/v1/cpa/*` 的**端点与解码**：`paths` 与逐个读 / 写函数。
   - 导出：`paths`（路径的**唯一来源**，别处不许再写字面量）/ `fetchSetup` / `runSetup` /
     `fetchStatus` / `startCpa` / `act` / `selectCpaAccount` / `setAccountEnabled` /
-    `setAutoCheckin` / `startAuth` / `authStatus` / `authCancel`
+    `setAutoCheckin` / `autoCheckinOf` / `startAuth` / `authStatus` / `authCancel`
   - ⚠️ **写函数自己失效缓存**（不是让调用方记得）：`act` / `selectCpaAccount` /
-    `setAccountEnabled` → `accounts:` 前缀，`setAutoCheckin` → `autockin:` 前缀。
-    **前缀必须与宿主 `cacheKeys` 造出的键一致**（键即失效前缀）—— 对不上不报错，
-    只是界面永远显示写之前的值
+    `setAccountEnabled` / `setAutoCheckin` → 都是 `accounts:` 前缀。
+    ⚠️ **前缀必须对上「本半边真的有读者」的那个读键**，不是宿主 `cacheKeys` 的名字 ——
+    两侧是**两套独立的缓存**（宿主那套在进程里、这套在页面里），同名纯属巧合。
+    `setAutoCheckin` 曾抄了宿主的 `autockin:`：本侧没有这个读键（开关的值跟着
+    `/accounts` 回来），于是那次作废匹配不到任何条目、**等于空操作**，
+    界面切完开关又弹回旧值（2026-10-07 实机，判据 `tests/client-cache-keys.test.ts`）
+  - ⚠️ **写成功后界面值取回读**（F33）：作废缓存只让**下一次**读不命中，
+    界面要拿到新值还得有人真去读一次。`autoCheckinOf` 取的就是宿主写完自己回读出来的
+    那个值（宿主 `ops/scheduling.ts` 的 `setAutoCheckin` 特意回读一次再回），
+    不是我们请求的那个值
 - **`format.ts`** —— 千分位格式化（`fmt`）。与传输 / 缓存 / 端点**都不沾边**，
   所以分开：`amountWithUnit` 那类判据只想要一个格式化函数，不该被迫认识 HTTP
 - **`locales.ts`** —— 中英文案 + 插值。

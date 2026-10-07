@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/domain.ts'
+import { cacheKeys } from './cache-keys.ts'
 import { AccountCard } from './AccountCard.tsx'
 import { unitTextOf } from './credit-text.ts'
 import { paths } from './endpoints.ts'
@@ -123,7 +124,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
    * 而不是每次都先清空再等。`force` 只在用户主动点刷新时传。
    */
   const accountsResource = useResource<AccountsPayload>({
-    key: 'accounts:' + plugin,
+    key: cacheKeys.accounts(plugin),
     path: paths.accounts(plugin),
     select: (result) => {
       const data = result.data as { accounts?: unknown; autoCheckin?: unknown } | undefined
