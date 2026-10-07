@@ -237,7 +237,15 @@ CPA 走 `pickSingle` 而非 mixed → **绝不跨渠道**。上游文档也是�
 
 ### 2.5 补测试
 
-- [ ] `src/credentials.ts` —— 「沿用优先」三步取值（需 mock 凭据服务）
+**已完成**：`src/credentials.ts` 的「沿用优先」三步取值（已解析到的 → 托管配置里的
+明文 → 新造）由 [tests/credentials.test.ts](../tests/credentials.test.ts) 覆盖，
+连 `resolve` / `persist` / `ensureApiKey` 的静默失败面一起（托管配置走真文件，
+`DSH_HOME` 指向临时目录；凭据服务走注入 seam 的内存假实现）。
+
+判据**经变异验证**，不是「跑了就算」：把 bcrypt 过滤关掉、把「读明文」与「新造」
+两步对调、把「已解析到的优先」改成返回空串 —— 三处各自让对应用例红一次
+（bcrypt 那条尤其值钱：`tests/setup-config.test.ts` 只测到 `looksLikeBcrypt`
+本身，没人钉过 `readSecretKeyFromConfig` 真的用上它）。
 
 ### 2.6 研究方向（未立项，先记录）
 
@@ -353,8 +361,8 @@ clone 后没有这个目录；拉取方式见 [reference/README.md](../reference
 
 ### 2.7 收尾项
 
-跨模块的短条目（发布、Trusted Publishing、`icon.svg`、`providerId` 粒度、
-`credentials.ts` 测试）在根 [AGENTS.md](../AGENTS.md) 待办区 —— **不在此重复**。
+跨模块的短条目（发布、Trusted Publishing、`icon.svg`、`providerId` 粒度）
+在根 [AGENTS.md](../AGENTS.md) 待办区 —— **不在此重复**。
 以下只列不在那份的：
 
 - [ ] 按需补 `CONTRIBUTING`（若走 tag 触发的自动发布）

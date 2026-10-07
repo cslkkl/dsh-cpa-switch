@@ -165,8 +165,6 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       诉求是**可勾选**「哪些渠道 / 哪些模型出现在面板里」。
       选项：设置里多选（渠道 + 模型各一层）、或面板上加一层筛选。
       未拍板，先不动手。
-- [ ] 补测试：`src/credentials.ts` 的沿用优先三步取值（`src/setup/config.ts` 的
-      `looksLikeBcrypt` / `renderConfig` 已由 `tests/setup-config.test.ts` 覆盖）。
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 只能靠人工表，每次新模型都要补。
       ⚠️ **但「等谁」要说准**：CPA 侧**通路已存在**，缺的是**渠道插件没填值** ——
       上游 `sdk/pluginapi/types.go` 的 `PluginModel` 有 `ContextLength` /
