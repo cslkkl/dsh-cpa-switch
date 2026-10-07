@@ -15,6 +15,24 @@
 本机 `npm whoami` 返回 401（不是包所有者）—— **分工是：本机准备代码与版本号，所有者推标签**。
 OIDC 万一坏了，备用路径是所有者本机 `npm publish --access public`。
 
+## `.github/` 里有什么
+
+`.github/` 只有配置，**不放文档**（放 `README.md` 会顶掉仓库首页，见根 [AGENTS.md](../AGENTS.md) 活跃坑）。
+
+| 文件                                                                      | 职责                                                                                                                                 | 触发                                                     |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| [workflows/ci.yml](../.github/workflows/ci.yml)                           | **只读**全量门禁：typecheck ×2 → lint → 分层 → 文档路径 → format:check → build → 产物断言 → test。与本地 `pnpm check` **同一份脚本** | `push` main、`pull_request`、`workflow_dispatch`         |
+| [workflows/publish.yml](../.github/workflows/publish.yml)                 | 发布：门禁 → 校 tag 与 `package.json` 一致 → `npm publish --provenance` → 建 GitHub Release                                          | `push` 标签 `v*`、`workflow_dispatch`（显式 `tag` 输入） |
+| [workflows/release-drafter.yml](../.github/workflows/release-drafter.yml) | 每次有 PR 合并进 `main`，重算一份**草稿** Release 正文。不碰版本号、不打标签、不发布                                                 | `push` main                                              |
+| [release-drafter.yml](../.github/release-drafter.yml)                     | 草稿的**分类与标签映射**（唯一事实源）+ 三个刻意的取舍（草稿 tag 为什么是 `next`、正文里不许写解释、版本号只是建议）                 | ——                                                       |
+
+约束（改这些文件前先读）：
+
+- **逐 workflow 显式声明 `permissions`** —— 不依赖仓库默认值（那读不到：维护者 token
+  查 `actions/permissions` 返 403）。漏了声明的症状是 403，而 npm 那半可能仍然成功。
+- **`ci.yml` 不许写回仓库**（`permissions: contents: read`）。
+- ⚠️ **`release-drafter.yml` 必须用 Linux runner** —— 理由见根 [AGENTS.md](../AGENTS.md) 活跃坑。
+
 ## 版本号语义
 
 | 档位      | 什么时候                                 | 例                |
