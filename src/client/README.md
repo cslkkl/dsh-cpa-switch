@@ -109,6 +109,17 @@
   - ⚠️ 提示**故意不设时间戳**：切走期间到达的结果，切回来仍然看得到（刻意的，见决策记录）
   - 为什么单独成文件：与 `*-text.ts` 同一个理由 —— hook 那半引了 UI 包，Node 侧
     import 不到，判据留在里面等于没有判据
+- **`empty-hint.ts`** —— 空渠道的说明：0 个账号时面板该多说一句什么（纯函数，无 JSX）。
+  - 导出：`emptyHintOf` / 类型 `EmptyHintInput` / `EmptyHint`
+  - ⚠️ **一半价值在「不说」**：读失败时**不许**说「还没有账号」（我们并不知道有几个 ——
+    说了用户会去重加一个已存在的号）、加载中不说（那一段归骨架，说了会与骨架卡同屏）
+  - ⚠️ **不是失败态也不画成卡片**：`.failed` 是 failure-only（见其注释），
+    虚线加号座是**入口**不是数据 —— 所以那是**独立的一行**，在网格**之外**
+    （`.grid` 有 `grid-auto-rows: 1fr`，塞进去那一行会被拉到与卡片同高）
+  - 引导句里的按钮名走 `{action}` 占位符取 `addAccount`，不在文案里硬编
+  - 为什么单独成文件：同 `status-text.ts` —— 判定含分支，住在引了 UI 包的组件里
+    就一条判据都没有
+  - 判据 `tests/empty-hint.test.ts`
 - **`report.tsx`** —— 操作结果提示的**唯一**组装处（文案 + 图标）。
   - 导出：`reportOf` / `okReport` / `errReport` / `errorText` / 类型 `Report`
   - ⚠️ 文案里**不加** `✓` / `✗`：`Toast` 在 `tone="success"` 时自带绿勾，
@@ -389,6 +400,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [Skeleton.tsx](Skeleton.tsx)                       | 首屏骨架：容器**全部复用真实布局类**（卡高 / 列宽 / 间距因此只有一份定义）；⚠️ **只盖「还没到的数据」**（「添加账号」是真按钮、网格始终渲染，不占位、不参与卡数）；⚠️ **加载期汇总必须一起占位**；⚠️ **扫光挂在「块」上、不在骨头上**（挂骨头上时同一张卡里会同时播两种动效）。判据 `tests/skeleton.test.ts`                                                                                                                                          |
 | [skeleton-hint.ts](skeleton-hint.ts)               | 骨架卡数的**提示**：⚠️ **不能「从缓存数账号」**（骨架出现的前提就是缓存为空）；它只决定摆几张骨架卡，**不参与任何显示或判断**，读不到 / 写不进 / 脏值一律回退兜底常量。判据 `tests/skeleton-hint.test.ts`                                                                                                                                                                                                                                             |
 | [channel-action-state.ts](channel-action-state.ts) | 渠道级动作状态的**归属**：在飞与结果**都属于发起它的渠道**，不是当前显示的页签 —— 面板不随渠道重挂载，所以这条是硬要求。⚠️ **不许退回「切渠道清空」**（清空管不住切换之后才回来的响应：提示会报在别的页签上、在飞标记会丢 → 重复签到）。判据 `tests/channel-action-state.test.ts`；守卫「不许有以 `plugin` 为唯一依赖的 effect」在 `tests/client-cache-keys.test.ts`；理由见[决策记录](../../.agents/notes/2026-10-07-channel-scoped-action-state.md) |
+| [empty-hint.ts](empty-hint.ts)                     | 空渠道的说明：⚠️ **读失败不许说「还没有账号」**（那是把「读不到」讲成「没有」）。判定顺序即语义（`loading` / `error` 必须排在 `count === 0` 之前）。⚠️ 说明块必须在 `.grid` **之外**（`grid-auto-rows: 1fr` 会把塞进去的那一行拉到与卡片同高）；不与 `.failed` 共用类。判据 `tests/empty-hint.test.ts`                                                                                                                                                |
 
 > 这里只列**本目录**的行；跨模块的（`src/index.ts` 装配、`src/contracts/**` 等）在
 > [../README.md](../README.md) 的同一节。根 [AGENTS.md](../AGENTS.md) 只留跨模块行。

@@ -106,6 +106,12 @@ export const zh = {
   addAccount: '添加账号',
   startLogin: '开始登录',
   cancel: '取消',
+  /**
+   * 空渠道的说明。⚠️ 只在**读成功且确实是 0 个账号**时出现 ——
+   * 读失败时不许说这两句（我们并不知道），判定见 `empty-hint.ts`。
+   */
+  emptyNoAccounts: '这个渠道还没有账号',
+  emptyNoAccountsHint: '点下面的「{action}」，在浏览器里完成登录即可',
   loginIntro: '点「开始登录」会打开授权页，在浏览器里完成登录即可，不用手动复制链接。',
   loginHint: '已打开授权页。若没自动打开，用这个链接：',
   loginWaiting: '等待授权完成…（完成后会自动刷新）',
@@ -269,6 +275,9 @@ export const en: Record<LocaleKey, string> = {
   addAccount: 'Add account',
   startLogin: 'Sign in',
   cancel: 'Cancel',
+  /** See the Chinese table's note: shown only when the read succeeded and there really are zero accounts. */
+  emptyNoAccounts: 'No accounts in this channel yet',
+  emptyNoAccountsHint: 'Click "{action}" below and finish signing in your browser',
   loginIntro: 'Signing in opens the provider page. Finish there — no link copying needed.',
   loginHint: 'Opened the authorization page. If it did not open, use this link:',
   loginWaiting: 'Waiting for authorization… the list refreshes by itself',

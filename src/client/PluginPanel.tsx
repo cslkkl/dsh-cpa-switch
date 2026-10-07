@@ -16,6 +16,7 @@ import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/d
 import { cacheKeys } from './cache-keys.ts'
 import { AccountCard } from './AccountCard.tsx'
 import { unitTextOf } from './credit-text.ts'
+import { emptyHintOf } from './empty-hint.ts'
 import { paths } from './endpoints.ts'
 import { fmt } from './format.ts'
 import { amountWithUnit, sumCredits } from './meter-text.ts'
@@ -136,6 +137,20 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     if (accountsResource.loading) return
     rememberAccountCount(plugin, accounts.length)
   }, [plugin, accounts.length, accountsResource.loading])
+
+  /**
+   * 空渠道该多说一句什么；不该说的时候是 `undefined`。
+   *
+   * ⚠️ **判定不在这一层**：`loading` / `error` 与「0 个账号」的先后顺序就是语义
+   * （读失败时条数必然是 0，先看条数就会把「读不到」说成「没有」）。
+   * 那条判定在 `empty-hint.ts`（纯函数、Node 侧测得到），这里只把三个输入给它。
+   */
+  const emptyHint = emptyHintOf({
+    t,
+    loading: accountsResource.loading,
+    error: accountsResource.error,
+    count: accounts.length,
+  })
 
   /**
    * 合计。判据在 `sumCredits`（纯函数）—— **缺的字段不参与累加**，
@@ -285,6 +300,24 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         {/* 重验提示：安静地在末尾加四个字，不动其它任何布局 */}
         {accountsResource.revalidating && <span className={css.hint}>{t('refreshing')}</span>}
       </div>
+
+      {/*
+       * 空渠道的说明。
+       *
+       * 0 个账号时网格里只有一个虚线加号座，而**虚线只说明「这是个入口」**、
+       * 不说明「这里本该有东西、现在一个都没有」—— 真机反馈是「看着像坏了」。
+       *
+       * ⚠️ **不是失败态**：`.failed` 那条注释写明它「Failure only」，两者刻意不同名。
+       * ⚠️ 也**不画成一张卡**：虚线座是入口不是数据，不该假装是上面那些座位之一。
+       * ⚠️ 与工具栏、网格**同一条左轴**（不居中）：居中会与左边那个虚线座对不齐。
+       * 什么时候说、什么时候**不许**说（读失败时）在 `empty-hint.ts`。
+       */}
+      {emptyHint !== undefined && (
+        <div className={css.empty}>
+          <div className={css.emptyTitle}>{emptyHint.title}</div>
+          <div className={css.hint}>{emptyHint.hint}</div>
+        </div>
+      )}
 
       {/*
        * 账号网格 + 「+ 添加账号」卡片。

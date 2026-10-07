@@ -278,6 +278,34 @@
   line-height: 1;
 }
 
+/* The empty channel: the read succeeded and there really are zero accounts.
+ *
+ * Not `.failed` — that one is failure-only on purpose (see its comment), and
+ * sharing a name is what once made the same position read as "loading" on one
+ * channel and "broken" on another. Not a card either: `.addCard`'s dashed seat
+ * is an *affordance*, this line is *data about the channel*, so it must not
+ * pretend to be one of the seats above it.
+ *
+ * Left-aligned on the panel's own axis (its left edge): the only sibling below
+ * is a grid cell starting at that edge, so a centered banner would align to
+ * nothing.
+ *
+ * Two lines one tier apart — the fact at 13px (the same tier `.setupTitle` and
+ * `.noticeTitle` use), the "what to do" line reusing `.hint` at 12px tertiary.
+ * Weight stays at 500: the 600 tiers belong to the host's own headings, not to a
+ * line inside a data area. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.emptyTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* ---- Account card ------------------------------------------------------ */
 
 /* The account card is a **fixed-slot grid**.
