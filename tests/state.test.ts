@@ -220,6 +220,42 @@ describe('路由清单缓存', () => {
     expect(typeof cached?.savedAt).toBe('string')
   })
 
+  /**
+   * ⚠️ **模型条目的声明字段一个都不能丢**（2026-10-08 实踩）。
+   *
+   * 这份清单在**启动那一刻直接推给宿主**，瘦身过的条目就是静默丢声明：
+   * `maxTokens` 丢 = 输出上限回退宿主兜底、`input` 丢 = 图片被拒、
+   * `reasoningEfforts` 丢 = 档位行消失。判据：往返之后与写入时逐字段相同。
+   */
+  it('⚠️ 声明字段（maxTokens / input / reasoningEfforts）原样往返，一个不丢', () => {
+    const models = [
+      {
+        id: 'wb/glm-5.3',
+        name: 'WorkBuddy · glm-5.3',
+        contextWindow: 1_000_000,
+        input: ['text', 'image'],
+        maxTokens: 384_000,
+        reasoningEfforts: { off: 'off', high: 'high' },
+      },
+    ]
+    writeCachedRoutes(profile({ models }) as never, 8317)
+    expect(readCachedRoutes()?.profile.models).toEqual(models)
+  })
+
+  it('坏形状的声明字段只被丢掉、不作废整份缓存（宁可少声明，不丢清单）', () => {
+    writeCachedRoutes(
+      profile({
+        models: [{ id: 'x', name: 'X', maxTokens: 'big', input: 'text', reasoningEfforts: [1] }],
+      }) as never,
+      8317,
+    )
+    const models = readCachedRoutes()?.profile.models
+    expect(models).toHaveLength(1)
+    expect(models?.[0]?.maxTokens).toBeUndefined()
+    expect(models?.[0]?.input).toBeUndefined()
+    expect(models?.[0]?.reasoningEfforts).toBeUndefined()
+  })
+
   it('没有缓存文件时返回 undefined，不抛', () => {
     expect(readCachedRoutes()).toBeUndefined()
   })

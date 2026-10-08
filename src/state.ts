@@ -158,13 +158,34 @@ interface CachedRoutesFile {
   channels?: unknown
 }
 
-/** 缓存里那份清单的最小形状（只验「够不够安全地用」，不复制 provider schema）。 */
+/**
+ * 缓存里那份清单的最小形状（只验「够不够安全地用」，不复制 provider schema）。
+ *
+ * ⚠️ **模型条目的声明字段一个都不能少**（2026-10-08 实踩）：这份清单在
+ * **启动那一刻直接推给宿主**，那时后台读还没回来、**没有任何东西能纠正它** ——
+ * 丢 `maxTokens` = 输出上限回退宿主兜底、丢 `input` = 图片被拒、
+ * 丢 `reasoningEfforts` = 档位行消失。三种都是**静默**的。
+ * 推送侧（`buildCpaRouteProfile`）新增字段时，这里要同批加。
+ */
 interface CachedProfile {
   displayName: string
   api: string
   baseURL: string
   apiKeyEnv: string
-  models: { id: string; name: string; contextWindow?: number }[]
+  models: CachedModel[]
+}
+
+/** 缓存里的模型条目 —— 与 `buildCpaRouteProfile` 推出去的形状对齐。 */
+interface CachedModel {
+  id: string
+  name: string
+  contextWindow?: number
+  /** 模态声明（推送侧只会写 `['text','image']` 这种）。 */
+  input?: string[]
+  /** 输出上限（宿主字段 `maxTokens`）。 */
+  maxTokens?: number
+  /** 思考档位（档位名 → 上游拼写）。 */
+  reasoningEfforts?: Record<string, string>
 }
 
 /** 读到的缓存。 */
@@ -188,6 +209,23 @@ function channelsFrom(raw: unknown): Map<string, string> {
     if (typeof channel === 'string' && channel !== '') out.set(id, channel)
   }
   return out
+}
+
+/** 模态列表：非空字符串数组。 */
+function isModalityList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'string')
+}
+
+/** 正整数（`maxTokens` 的保底形状；推送侧的 `0` = 不声明，不会出现在条目里）。 */
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1
+}
+
+/** 档位表：非空对象、值全为字符串。 */
+function isEffortRecord(value: unknown): value is Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const pairs = Object.entries(value)
+  return pairs.length > 0 && pairs.every((pair) => typeof pair[1] === 'string')
 }
 
 /**
@@ -218,10 +256,16 @@ function parseCachedProfile(value: unknown): CachedProfile | undefined {
     const row = entry as Record<string, unknown>
     if (typeof row['id'] !== 'string' || row['id'] === '') return undefined
     if (typeof row['name'] !== 'string' || row['name'] === '') return undefined
+    const input = row['input']
+    const maxTokens = row['maxTokens']
+    const reasoningEfforts = row['reasoningEfforts']
     models.push({
       id: row['id'],
       name: row['name'],
       ...(typeof row['contextWindow'] === 'number' ? { contextWindow: row['contextWindow'] } : {}),
+      ...(isModalityList(input) ? { input: [...input] } : {}),
+      ...(isPositiveInt(maxTokens) ? { maxTokens } : {}),
+      ...(isEffortRecord(reasoningEfforts) ? { reasoningEfforts: { ...reasoningEfforts } } : {}),
     })
   }
   return {
