@@ -443,11 +443,8 @@ check(
   bundleCfg && bundleCfg.key === pkg.name,
   bundleCfg && bundleCfg.key,
 )
-check(
-  '注册了 settings.plugins.tab',
-  registered.some((r) => r.name === 'settings.plugins.tab'),
-)
 check('注册了 locale 字典', locales.includes('cpa-panel'), JSON.stringify(locales))
+check('未再注册 settings.plugins.tab', !registered.some((r) => r.name === 'settings.plugins.tab'))
 check(
   '未再注册 plugins.detail.section',
   !registered.some((r) => r.name === 'plugins.detail.section'),

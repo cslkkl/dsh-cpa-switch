@@ -5,10 +5,13 @@
 
 ## 文件
 
-- **`index.tsx`** —— 入口：注册两个槽位。
+- **`index.tsx`** —— 入口：注册**一个**槽位（插件页）。
   - 导出：`apply`（插件主体）/ `inject = ['slots', 'locale']`
   - ⚠️ `inject` **少一个插件挂不上且不报错**；构建后确认 `lib/client.js` 里有 `exports.inject`
-  - 挂载点：`plugins.bundle.config`（key = **包名**）+ `settings.plugins.tab`（次要入口）
+  - 挂载点：`plugins.bundle.config`（key = **包名**）—— 只此一处
+  - ⚠️ 曾另注册 `settings.plugins.tab` 当次要入口，**已拆**（面板是实时操作台，不是配置项）；
+    `scripts/verify-artifacts.cjs` 断言它**未注册**，加回去会当场红。
+    理由与替代方案见[决策记录](../../.agents/notes/2026-10-07-panel-single-mount-point.md)
   - 样式表在这里 `import './panel.module.css'` —— import 副作用保证样式先于渲染到位
 - **`Panel.tsx`** —— 根组件。
   - 内容：状态条（运行状态 / 启动 / 控制台链接）、**提示块**、环境准备引导、渠道页签
@@ -77,7 +80,7 @@
 - **`use-resource.ts`** —— 渠道级读资源的**统一入口**（缓存 + 竞态 + 轮询）。
   - 导出：`useResource`（含类型 `Resource` / `UseResourceOptions`）/ 纯函数 `shownValue`
   - 走 `useSyncExternalStore` 订阅 [read-cache.ts](read-cache.ts) 的 store ——
-    **别人写进去的值**（预取、另一个挂载点）也会让它重渲染，而不是「只在本次渲染
+    **别人写进去的值**（预取、其它渠道页签）也会让它重渲染，而不是「只在本次渲染
     peek 一眼」（后者要等一次无关的重渲染才生效）
   - 已取到的值**连 key 一起存**：组件不随 key 重挂载，不认 key 会把上一个渠道的
     数据画在当前页签下

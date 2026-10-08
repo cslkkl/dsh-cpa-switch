@@ -26,7 +26,7 @@ import type { LocaleKey } from './locales.ts'
  */
 import './panel.module.css'
 
-import { LOCALE_NS as NS, PKG_NAME, TAB_ID } from './ids.ts'
+import { LOCALE_NS as NS, PKG_NAME } from './ids.ts'
 
 /** 槽位注册面。 */
 interface SlotSeat {
@@ -77,7 +77,6 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     ctx.locale.register(NS, { zh, en })
   }, 'cpa-panel: dictionaries')
-  const t = makeTranslate(ctx.locale.bind(NS))
 
   /**
    * 插件自己的面板，挂在组合包页面**描述与行之间**（即「包含的组件」上方）。
@@ -92,6 +91,14 @@ export function apply(ctx: ClientContext): void {
    *
    * 本面板是实时操作面板（余额/签到/账号），不走宿主的配置表单语义，
    * 因此不消费 `form`，也就没有「保存/放弃」—— 与面板内容一致。
+   *
+   * ⚠️ **只挂这一个槽位**。曾经还往 `settings.plugins.tab` 注册同一份面板
+   * 当「次要入口」，现已拆掉（2026-10-07 维护者定案）：面板是**实时操作台**
+   * （余额 / 签到 / 账号），不是配置项，出现在设置页里属于重复入口。
+   * 理由与替代方案见[决策记录](../.agents/notes/2026-10-07-panel-single-mount-point.md)。
+   *
+   * 判据：`scripts/verify-artifacts.cjs` 断言**未注册** `settings.plugins.tab`
+   * —— 手滑加回去会当场红。`TAB_ID` 已随之删除（见 [ids.ts](ids.ts)）。
    */
   ctx.slots.inject('plugins.bundle.config', () => {
     ctx.slots.register({ name: 'plugins.bundle.config', key: PKG_NAME, locale: NS }, (seat) => {
@@ -103,26 +110,5 @@ export function apply(ctx: ClientContext): void {
         </PanelBoundary>
       )
     })
-  })
-
-  // 保留设置页标签作为次要入口（有些部署只在设置里翻插件）。
-  ctx.slots.inject('settings.plugins.tab', () => {
-    ctx.slots.register(
-      {
-        name: 'settings.plugins.tab',
-        id: TAB_ID,
-        order: 20,
-        label: () => t('tab'),
-        locale: NS,
-      },
-      (seat) => {
-        const t2 = makeTranslate(typeof seat?.t === 'function' ? seat.t : ctx.locale.bind(NS))
-        return (
-          <PanelBoundary label={t2('tab')} t={t2}>
-            <Panel t={t2} />
-          </PanelBoundary>
-        )
-      },
-    )
   })
 }

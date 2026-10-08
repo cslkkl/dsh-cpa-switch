@@ -80,7 +80,8 @@ pnpm check:doc-paths       # 退出码 0 = 通过，1 = 有死路径 / 白名单
    导出 `apply` 与 `inject`、**未混入 `process.env.NODE_ENV`**（React 被内联的信号）、
    `react` 与 primitives 是外部引用；
 3. **真实加载**：`eval` 产物、用模拟宿主 `require` 调 `factory`，再真实调用 `apply(ctx)`，
-   断言槽位注册（`plugins.bundle.config` 的 key 是包名、不再注册 `plugins.detail.section`）。
+   断言槽位注册面（`plugins.bundle.config` 的 key 是包名；**未注册**
+   `settings.plugins.tab` 与 `plugins.detail.section` —— 面板只挂插件页）。
 
 **为什么需要它**：这些形状坏了大多是**静默失败** —— 少一个 `inject`，插件挂不上却不报错；
 React 被内联，浏览器加载时抛 `process is not defined`。构建「成功」给不出这些信号。
