@@ -22,6 +22,7 @@ import { fmt } from './format.ts'
 import { amountWithUnit, sumCredits } from './meter-text.ts'
 import { rememberAccountCount } from './skeleton-hint.ts'
 import { SkeletonCards, SkeletonStatus, SkeletonSummary } from './Skeleton.tsx'
+import { summaryViewOf } from './summary-hint.ts'
 import { useAccountLogin } from './use-account-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
@@ -125,7 +126,23 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const unitText = unitTextOf(t, meta.unit)
 
   const accounts = overrides.accounts
-  const showSummary = capabilities.credits && accounts.some((a) => a.credits !== null)
+
+  /**
+   * 汇总三格的呈现 —— **判定不在这里**，在 `summary-hint.ts`（纯函数、Node 侧测得到）。
+   *
+   * ⚠️ 这里原先的写法是「**有任何一个账号读到额度**才画三格」——
+   * 一个都没读到时**整块不渲染**，于是「读不到」与「本来就没这三格」长得一样，
+   * 而**没有任何报错**（真机：骨架消失后什么都没有，用户以为面板坏了）。
+   * 现在改成「有账号就画」，三格自己填 `—`（缺数据仍要占位，见架构 F40），
+   * 并在读不到时**说一句**。
+   */
+  const summary = summaryViewOf({
+    t,
+    hasCredits: capabilities.credits,
+    loading: accountsResource.loading,
+    error: accountsResource.error,
+    accounts,
+  })
   const cycles = useMemo(() => upcomingCycles(accounts, Date.now()), [accounts])
 
   /**
@@ -201,11 +218,11 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        *
        * ⚠️ 加载期这一块要**占位**：它和下面的卡片网格是同一份数据、一起出现，
        * 只占位卡片的话，汇总行插进来会把下面整块顶下去（见 `Skeleton.tsx`）。
-       * 加载期 `showSummary` 本来就是 false（账号列表还空），所以两段不会同屏。
+       * 加载期 `summary.show` 本来就是 false（账号列表还空），所以两段不会同屏。
        */}
       {accountsResource.loading && <SkeletonSummary />}
 
-      {showSummary && (
+      {summary.show && (
         <div className={css.summary}>
           <div className={css.summaryCell}>
             <span className={css.label}>{t('totalRemain')}</span>
@@ -237,6 +254,27 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               {amountParts(totals.sizeCount > 0 ? totals.size : null, unitText)}
             </span>
           </div>
+        </div>
+      )}
+
+      {/*
+       * 额度读不到的说明。
+       *
+       * ⚠️ **三个「没数据」的块刻意不同名、也不同时出现**：
+       * - `.failed` —— 「整个列表都没读到」，自带原因，**Failure only**；
+       * - `.empty`（`empty-hint`）—— 读成功、**确实 0 个账号**；
+       * - 本块 —— 账号读到了，**额度**没读到。
+       * 共用名字正是历史上「同一位置时而是加载、时而是坏了」的成因（见 `.failed` 注释）。
+       *
+       * ⚠️ 不复用 `.notice` —— 那个是**状态条下方的警示横幅**（3px 严重度边条、
+       * 底色分组），说的是「端口被占」这类**站着的故障**；这里是数据区里的一句说明，
+       * 与 `.empty` 同一角色（左轴对齐、不是卡片、不是横幅）。
+       * 判定（含「什么时候必须闭嘴」）在 `summary-hint.ts`。
+       */}
+      {summary.notice !== undefined && (
+        <div className={css.summaryNotice}>
+          <div className={css.emptyTitle}>{summary.notice.title}</div>
+          <div className={css.hint}>{summary.notice.hint}</div>
         </div>
       )}
 

@@ -146,6 +146,19 @@ export const zh = {
   refreshing: '刷新中…',
   loadFailed: '读取失败',
   loadFailedWith: '读取失败：{reason}',
+  /**
+   * 汇总三格在**额度读不到**时的那两句话。
+   *
+   * ⚠️ **不说原因** —— 我们并不知道为什么（网络 / 凭据 / 上游抖动都可能），
+   * 编一个就是在把猜测当事实。判定与「什么时候不许说」见 `summary-hint.ts`。
+   *
+   * ⚠️ 「部分读不到」与「全部读不到」是**两句不同的话**：前者要提醒
+   * 上面的合计**不含**那几个号（否则那个偏小的数是假数）。
+   */
+  creditsUnreadable: '额度读不到',
+  creditsUnreadableHint: '点工具栏的「{action}」重试；若一直如此，去 CPA 里看该渠道的账号状态',
+  creditsPartlyUnreadable: '有 {count} 个账号的额度读不到',
+  creditsPartlyUnreadableHint: '上面的合计不含它们；点「{action}」可重试',
   failedWith: '{action}失败：{reason}',
   checkedIn: '已签到',
   notCheckedIn: '未签到',
@@ -316,6 +329,11 @@ export const en: Record<LocaleKey, string> = {
   refreshing: 'Refreshing…',
   loadFailed: 'Could not load',
   loadFailedWith: 'Could not load: {reason}',
+  creditsUnreadable: 'Credits unavailable',
+  creditsUnreadableHint:
+    'Click "{action}" in the toolbar to retry; if it keeps happening, check the account status for this channel in CPA',
+  creditsPartlyUnreadable: 'Credits unavailable for {count} account(s)',
+  creditsPartlyUnreadableHint: 'The totals above exclude them; click "{action}" to retry',
   failedWith: '{action} failed: {reason}',
   checkedIn: 'Checked in',
   notCheckedIn: 'Not checked in',

@@ -379,6 +379,24 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* The "credits unreadable" sentence under the summary tiles.
+ *
+ * Same role as `.empty` — a plain two-line sentence in the data area, on the
+ * panel's own left axis, **not** a card and **not** the status-bar banner
+ * (`.notice`, which carries a 3px severity edge and a tinted background for
+ * standing port/config failures). Its own name because the two say different
+ * things: `.empty` states a fact about the channel (no accounts), this one
+ * states that a read did not come back.
+ *
+ * Sits directly **under** `.summary` so the three tiles keep their slots and
+ * read `—` when nothing came back — omitting them made the block vanish and
+ * the panel look broken (2026-10-07 real machine). */
+.summaryNotice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* ---- Account card ------------------------------------------------------ */
 
 /* The account card is a **fixed-slot grid**.

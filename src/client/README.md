@@ -128,6 +128,19 @@
   - 为什么单独成文件：同 `status-text.ts` —— 判定含分支，住在引了 UI 包的组件里
     就一条判据都没有
   - 判据 `tests/empty-hint.test.ts`
+- **`summary-hint.ts`** —— 汇总三格**额度读不到**时该怎么呈现（纯函数，无 JSX）。
+  - 导出：`summaryViewOf` / 类型 `SummaryViewInput` / `SummaryView` / `CreditedAccount`
+  - ⚠️ **守的是一条静默失败**：原先的渲染条件是「**有任何一个账号读到额度**」，
+    一个都没读到时**整块不渲染** —— 于是「读不到」与「本来就没这三格」长得一样，
+    且**没有任何报错**（真机：骨架消失后什么都没有，用户以为面板坏了）。
+    现在「有没有这个能力」与「读没读到」分开判：有能力就画，缺数填 `—`
+    （架构 F40：缺数据仍要占位），读不到时**说一句**。
+  - ⚠️ **顺序即语义**：`hasCredits` / `loading` / `error` / 0 个账号 都必须排在
+    「有没有读到额度」**之前** —— 读失败时账号数必然是 0、额度必然为空
+  - ⚠️ **「部分读不到」也要说**：合计只累加读到的那些账号（`sumCredits`），
+    丢一个号就会显示一个**偏小却看起来正常的数** —— 不说就是假数
+  - ⚠️ **不说原因**：网络 / 凭据 / 上游抖动都可能，编一个就是把猜测当事实
+  - 判据 `tests/summary-hint.test.ts`
 - **`report.tsx`** —— 操作结果提示的**唯一**组装处（文案 + 图标）。
   - 导出：`reportOf` / `okReport` / `errReport` / `errorText` / 类型 `Report`
   - ⚠️ 文案里**不加** `✓` / `✗`：`Toast` 在 `tone="success"` 时自带绿勾，
@@ -409,6 +422,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [skeleton-hint.ts](skeleton-hint.ts)               | 骨架卡数的**提示**：⚠️ **不能「从缓存数账号」**（骨架出现的前提就是缓存为空）；它只决定摆几张骨架卡，**不参与任何显示或判断**，读不到 / 写不进 / 脏值一律回退兜底常量。判据 `tests/skeleton-hint.test.ts`                                                                                                                                                                                                                                             |
 | [channel-action-state.ts](channel-action-state.ts) | 渠道级动作状态的**归属**：在飞与结果**都属于发起它的渠道**，不是当前显示的页签 —— 面板不随渠道重挂载，所以这条是硬要求。⚠️ **不许退回「切渠道清空」**（清空管不住切换之后才回来的响应：提示会报在别的页签上、在飞标记会丢 → 重复签到）。判据 `tests/channel-action-state.test.ts`；守卫「不许有以 `plugin` 为唯一依赖的 effect」在 `tests/client-cache-keys.test.ts`；理由见[决策记录](../../.agents/notes/2026-10-07-channel-scoped-action-state.md) |
 | [empty-hint.ts](empty-hint.ts)                     | 空渠道的说明：⚠️ **读失败不许说「还没有账号」**（那是把「读不到」讲成「没有」）。判定顺序即语义（`loading` / `error` 必须排在 `count === 0` 之前）。⚠️ 说明块必须在 `.grid` **之外**（`grid-auto-rows: 1fr` 会把塞进去的那一行拉到与卡片同高）；不与 `.failed` 共用类。判据 `tests/empty-hint.test.ts`                                                                                                                                                |
+| [summary-hint.ts](summary-hint.ts)                 | 汇总三格「额度读不到」的呈现：⚠️ **一个额度都没读到时要照画三格（填 `—`）+ 说一句**，不许整块消失（原先就是那样，且不报错）。「有没有这个能力」与「读没读到」分开判；**部分读不到也要说**（合计不含它们，不说就是假数）。⚠️ 顺序即语义，且**不说原因**（我们不知道）。判据 `tests/summary-hint.test.ts`                                                                                                                                               |
 
 > 这里只列**本目录**的行；跨模块的（`src/index.ts` 装配、`src/contracts/**` 等）在
 > [../README.md](../README.md) 的同一节。根 [AGENTS.md](../AGENTS.md) 只留跨模块行。
