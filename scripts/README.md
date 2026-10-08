@@ -2,13 +2,14 @@
 
 ## 文件
 
-| 脚本                    | 作用                                                                                        | 何时跑                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `verify-artifacts.cjs`  | 用宿主加载器协议加载 `lib/` 产物，断言关键契约                                              | `pnpm build` 之后；`pnpm check` 与 CI 都会跑        |
-| `check-layering.cjs`    | 按分层矩阵检查 `src/` 的 import 方向                                                        | 改动跨模块依赖后；`pnpm check` 与 CI 都会跑         |
-| `check-doc-paths.cjs`   | 文档里提到的 `src/**` / `tests/**` / `scripts/**` 路径必须存在                              | 搬文件 / 改名 / 删模块后；`pnpm check` 与 CI 都会跑 |
-| `verify-alias-yaml.mts` | 核对 `oauth.model-alias` 段的 YAML 形状                                                     | 改了别名渲染之后                                    |
-| `snapshot-catalog.mjs`  | **只读观测探针**：把宿主侧模型目录打成快照（切语言前后对比用）；不进门禁，由 agent 在本机跑 | 排查模型路由 / 选择器问题时                         |
+| 脚本                    | 作用                                                                                                                   | 何时跑                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `verify-artifacts.cjs`  | 用宿主加载器协议加载 `lib/` 产物，断言关键契约                                                                         | `pnpm build` 之后；`pnpm check` 与 CI 都会跑        |
+| `check-layering.cjs`    | 按分层矩阵检查 `src/` 的 import 方向                                                                                   | 改动跨模块依赖后；`pnpm check` 与 CI 都会跑         |
+| `check-doc-paths.cjs`   | 文档里提到的 `src/**` / `tests/**` / `scripts/**` 路径必须存在                                                         | 搬文件 / 改名 / 删模块后；`pnpm check` 与 CI 都会跑 |
+| `verify-alias-yaml.mts` | 核对 `oauth.model-alias` 段的 YAML 形状                                                                                | 改了别名渲染之后                                    |
+| `snapshot-catalog.mjs`  | **只读观测探针**：把宿主侧模型目录打成快照（切语言前后对比用）；不进门禁，由 agent 在本机跑                            | 排查模型路由 / 选择器问题时                         |
+| `probe-cpa-stream.mjs`  | **输出链路探针**：对本地 CPA 直发 chat 请求，原样抓 SSE / 原始响应并做帧级判读；**发真实请求、消耗渠道额度**，不进门禁 | 排查「思考去了哪 / DSML 泄漏 / 回放 400」类问题时   |
 
 ### check-layering.cjs
 
@@ -107,6 +108,28 @@ node --experimental-strip-types scripts/verify-alias-yaml.mts   # 退出码 0 = 
 ```
 
 它会把渲染结果落到 `%TEMP%\alias-shape-check.yaml`，可直接拿 YAML 解析器复核。
+
+### probe-cpa-stream.mjs
+
+**输出链路探针**（不是门禁）：把「DSH 链路里模型输出到底长什么样」摊开 —— 对本地 CPA
+（默认 `127.0.0.1:8317`）直发 chat 请求，原样抓 SSE 帧与原始响应落盘到 `.probe/`（已 gitignore），
+并做帧级判读：各 reasoning 字段的字符数、同帧双字段重复、`DSML` / `<think>` 类标记是否漏进 `content`。
+
+三类 case：
+
+- `think` —— 单轮无 tools：判「思考走独立 `reasoning_*` 字段，还是混进 `content`」；
+- `tools` —— 带一个简单函数：判「工具调用是结构化 `tool_calls`，还是 DSML 文本漏出」；
+- `replay` —— 多轮历史 + tools 的六个变体（不带 `reasoning_content` / 补空串 / 带内容 / 空正文 /
+  工具调用轮不带 / 工具调用轮补空串），比状态码判「上游是否强制回传该字段」。
+
+⚠️ **它会发真实请求、消耗渠道额度**，只在需要时人工跑。退出码：`0` = 探针跑完
+（4xx 与检出异常都是数据），`1` = 链路不可用，`2` = 用法错误。
+
+```powershell
+node scripts/probe-cpa-stream.mjs --models
+node scripts/probe-cpa-stream.mjs --case think  --model wb/deepseek-v4.1-flash --repeat 2
+node scripts/probe-cpa-stream.mjs --case replay --model wb/deepseek-v4.1-flash
+```
 
 ## 归属与依赖
 
