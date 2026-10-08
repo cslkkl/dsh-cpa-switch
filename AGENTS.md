@@ -135,6 +135,10 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       以及把 `config.example.yaml` 的代际改成别的数时应出现「配置代际不符」。
       本轮真机只验到**命令行一级**（真日志行认出 `port-in-use`、本机两侧都是 8 不误报）。
 
+- [ ] **重启 DSH 复验「输出上限声明」真机生效**（宿主半端改动不随页面刷新加载）：
+      推送的模型条目带 `maxTokens: 384000`、请求带 `max_completion_tokens: 384000`；
+      面板把 `maxOutputTokens` 置 `0` 应回到「不声明」（宿主回退 32768）。
+
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
 - [ ] **`providerId` 粒度裁决** —— 现在是按**渠道**（四个），要考虑是否该细化到

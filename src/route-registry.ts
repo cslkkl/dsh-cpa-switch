@@ -194,6 +194,15 @@ export interface RouteRegistryDeps {
    * 每个请求都带档位，抽风时就会**每次会话都中招**；关掉即回到不声明。
    */
   readonly reasoningEffortsEnabled?: (() => boolean) | undefined
+  /**
+   * 推给每个模型的输出上限（`maxTokens`）；`0` 或不传 = 不声明（宿主回退
+   * `DEFAULT_MAX_TOKENS = 32768`）。**现读、不缓存**。
+   *
+   * ⚠️ 生效范围只限**会把值送进上游**的渠道：实测 workbuddy 真按它截断，
+   * qoder / trae 的客户端值到不了上游（见
+   * docs/audits/2026-10-08-cpa-stream-probe.md 的附录）。
+   */
+  readonly maxOutputTokens?: (() => number) | undefined
 }
 
 /** `auth-files` 里一个凭据的形状（归属识别 + 健康度判据用）。 */
@@ -613,6 +622,15 @@ function buildCpaRouteProfile(
    * 这件界面事，而选择器是路由级的。取值理由见 `model-caps.ts` 的 `REASONING_DEFAULT`。
    */
   const reasoning = reasoningDefaultOf(effortsEnabled)
+  /**
+   * 输出上限的**路由级默认**：逐行落成该行的 `maxTokens`（模型级例外见
+   * `model-caps.ts` 的 `ModelCaps.maxOutputTokens`）。
+   *
+   * ⚠️ **非正整数一律不写**：宿主把 `maxTokens` 当描述符校验（必须是正整数），
+   * 写错值会让**整个 provider 注册失败、全部模型消失** —— 与 `reasoningEfforts`
+   * 的形状坑同类。`0` 是「不声明」的开关值，不是要写出去的值。
+   */
+  const routeMaxOutputTokens = deps.maxOutputTokens?.() ?? 0
   return {
     profile: {
       displayName: 'CPA Switch',
@@ -624,10 +642,22 @@ function buildCpaRouteProfile(
         // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
         const caps = capsOf(row.channel, row.bare)
         const reasoningEfforts = reasoningEffortsOf(effortsEnabled, row.channel)
+        // 模型级例外优先于路由级默认；`0` / 非法值都落到「不写」。
+        const maxOutputTokens = caps?.maxOutputTokens ?? routeMaxOutputTokens
         return {
           id: row.id,
           name: `${row.label} · ${row.bare}`,
           ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
+          /**
+           * 输出上限：**只在正整数时写**（`0` = 用户关掉了声明）。
+           *
+           * 宿主没读到时回退 `DEFAULT_MAX_TOKENS = 32768`；声明只对会把值送进
+           * 上游的渠道生效（实测 workbuddy 真截断，qoder / trae 到不了上游）。
+           * 判据见 `tests/route-registry.test.ts`「输出上限声明」。
+           */
+          ...(Number.isInteger(maxOutputTokens) && maxOutputTokens >= 1
+            ? { maxTokens: maxOutputTokens }
+            : {}),
           /**
            * 模态走 `input`（pi-ai 的字段名；直连 DeepSeek 适配器才用 `inputModalities`）。
            *

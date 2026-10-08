@@ -127,7 +127,18 @@ or shows as "not running", see the active pitfalls in [AGENTS.md](AGENTS.md).
 | `autoCheckinOnStart`  | `true`          | Run one catch-up check-in at startup                          |
 | `openControlPanel`    | `false`         | Also open CPA's own web console when it starts                |
 | `reasoningEfforts`    | `true`          | Whether models expose a thinking level (off / on)             |
+| `maxOutputTokens`     | `384000`        | Per-model output cap pushed to the host; `0` = don't declare  |
 | `startTimeoutSeconds` | `30`            | Longest wait for CPA to become ready                          |
+
+⚠️ **Output cap**: the plugin pushes `maxOutputTokens` into every model entry (host field
+`maxTokens`) so requests are no longer cut short by DSH's 32768 fallback. Measured: it
+currently **takes effect on WorkBuddy only** — qoder serves its own server-side template cap
+and never sees the client value, and trae drops the field and injects its own large value;
+declaring it for those two is future-proofing. The 384000 default is the current ceiling of
+the DeepSeek V4 series and leans **high on purpose**: the upstream does not reject an
+oversized cap (384000 sent to a model whose real cap is 128k returned fine), so truncation
+stays the upstream's job. See the appendix of the
+[probe report](docs/audits/2026-10-08-cpa-stream-probe.md).
 
 ## Models for the conversation
 

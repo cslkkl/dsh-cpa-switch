@@ -194,6 +194,8 @@ interface PushRecord {
     name?: unknown
     input?: unknown
     contextWindow?: unknown
+    /** 推给宿主的输出上限（`maxTokens`）；不声明时为 `undefined`。 */
+    maxTokens?: unknown
     reasoningEfforts?: unknown
   }[]
 }
@@ -1707,6 +1709,137 @@ describe('思考档位声明', () => {
     emit('app-boot/config-reload')
     await until(() => {
       expect(pushed.at(-1)?.rows[0]?.reasoningEfforts).toEqual({ off: 'off', high: 'high' })
+    })
+  })
+})
+
+/**
+ * 输出上限：**声明必须真的落到推出去的清单里**（2026-10-08）。
+ *
+ * 治的是「未声明的模型被宿主按 `DEFAULT_MAX_TOKENS = 32768` 兜底、长输出被提前
+ * 截断」——链路与实测（含「只有 workbuddy 真按它截断」）见
+ * [实测报告](../docs/audits/2026-10-08-cpa-stream-probe.md) 的附录。
+ *
+ * 三条缺一不可：「带值」「0 = 不声明（形状回退到旧版）」「现读」。只测「带值」
+ * 的话，面板关掉不生效、或把 0 写出去（宿主判非法会让**整个 provider 注册失败**）
+ * 这两类回归都没有判据。
+ */
+describe('输出上限声明', () => {
+  let home = ''
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-maxtokens-'))
+    process.env.DSH_HOME = home
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  // 一份最小可用目录：一个渠道、一条凭据、一个模型。
+  const FILES = [{ name: 'w1', provider: 'workbuddy' }]
+  const MODELS = { w1: ['deepseek-v4.1-flash'] }
+  const CATALOG = ['deepseek-v4.1-flash']
+
+  /** 与 `depsFor` 同形，只多一个取值函数。 */
+  function withMaxOutputTokens(cpa: FakeCpa, value: () => number): RouteRegistryDeps {
+    return { ...depsFor(cpa), maxOutputTokens: value }
+  }
+
+  it('取值时每个模型都带上 maxTokens', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withMaxOutputTokens(cpa, () => 384000),
+    )('boot')
+
+    const rows = pushed.at(-1)?.rows ?? []
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row.maxTokens).toBe(384000)
+    }
+  })
+
+  it('⚠️ 值为 0 时一个都不带（回退宿主 32768，形状与旧版一致）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withMaxOutputTokens(cpa, () => 0),
+    )('boot')
+
+    const rows = pushed.at(-1)?.rows ?? []
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row.maxTokens).toBeUndefined()
+    }
+  })
+
+  it('不传这个依赖时按「不声明」处理（不改变既有行为）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    // depsFor 不带该字段 —— 与改动前的调用方一致
+    await attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))('boot')
+
+    const rows = pushed.at(-1)?.rows ?? []
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((row) => row.maxTokens === undefined)).toBe(true)
+  })
+
+  /**
+   * ⚠️ **非法值不许写出去** —— 宿主把 `maxTokens` 当描述符校验（必须是正整数），
+   * 写进去就是**整个 provider 注册失败、全部模型消失**（与 `reasoningEfforts`
+   * 形状坑同类）。
+   */
+  it('⚠️ 非法值（负数 / 小数 / NaN）一律不写', async () => {
+    for (const bad of [-1, 1.5, Number.NaN]) {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+
+      await attachRouteRegistry(
+        fakeHost(entry).host,
+        withMaxOutputTokens(cpa, () => bad),
+      )('boot')
+
+      const rows = pushed.at(-1)?.rows ?? []
+      expect(rows.length).toBeGreaterThan(0)
+      expect(rows.every((row) => row.maxTokens === undefined)).toBe(true)
+    }
+  })
+
+  it('⚠️ 值是**现读**的：重推时按当时的值决定（不是启动时焊死）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host, emit } = fakeHost(entry)
+
+    let value = 0
+    const refresh = attachRouteRegistry(
+      host,
+      withMaxOutputTokens(cpa, () => value),
+    )
+    await refresh('boot')
+    expect(pushed.at(-1)?.rows[0]?.maxTokens).toBeUndefined()
+
+    // 面板上改成 64k —— 下一次重推就该带上
+    value = 64000
+    await refresh('config-reload')
+    expect(pushed.at(-1)?.rows[0]?.maxTokens).toBe(64000)
+
+    // 关回去（0）同样立刻生效
+    value = 0
+    await refresh('config-reload')
+    expect(pushed.at(-1)?.rows[0]?.maxTokens).toBeUndefined()
+
+    // 走事件路径同样现读（面板改完由 config-reload 触发）
+    value = 80000
+    emit('app-boot/config-reload')
+    await until(() => {
+      expect(pushed.at(-1)?.rows[0]?.maxTokens).toBe(80000)
     })
   })
 })

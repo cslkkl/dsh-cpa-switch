@@ -126,6 +126,20 @@ export interface ModelCaps {
    * 「`false` 是确认不支持还是没查」的歧义。
    */
   readonly supportsImages?: boolean
+  /**
+   * 输出上限（token）—— 推给宿主的 `maxTokens`；不写就落路由级默认
+   * （插件配置 `maxOutputTokens`，默认 384000）。
+   *
+   * 这里只放**逐模型的例外**（值须有渠道侧出处，如 WorkBuddy 目录的
+   * `maxOutputTokens` 字段）；默认值在插件配置里，不在这张表。
+   *
+   * ⚠️ **只对会把值送进上游的渠道生效**：实测仅 workbuddy 真按它截断；
+   * qoder 的请求由模板自带上限、客户端值不进请求；trae 会丢弃该字段并
+   * 自行补大值。见[实测报告](../docs/audits/2026-10-08-cpa-stream-probe.md) 附录。
+   * ⚠️ **报大安全、报小截断**：上游对超报值不拒绝（384k 实测 200），
+   * 不确定时宁可报大。
+   */
+  readonly maxOutputTokens?: number
 }
 
 /**
