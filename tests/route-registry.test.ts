@@ -2077,7 +2077,7 @@ describe('目录护栏与有限重读', () => {
 
   /** 往缓存文件里种一份「上次完整成功过」的清单（含行归属表）。 */
   function seedCache(
-    models: { id: string; name: string }[],
+    models: { id: string; name: string; maxTokens?: number }[],
     channels: Record<string, string>,
   ): void {
     mkdirSync(join(home, 'storages'), { recursive: true })
@@ -2181,6 +2181,33 @@ describe('目录护栏与有限重读', () => {
     const refresh = attachRouteRegistry(host, { ...depsFor(cpa), clock: gate.clock })
     return { refresh, pushed, gate }
   }
+
+  /**
+   * ⚠️ **缓存里的声明字段随快路径原样推回**（2026-10-08 实踩）。
+   *
+   * 缓存是「上次完整成功过的那份」的**忠实镜像**：它在启动那一刻直接推给宿主，
+   * 瘦身过的条目 = 启动窗口静默丢声明（`maxTokens` → 上限回退宿主兜底、
+   * `input` → 图片被拒、`reasoningEfforts` → 档位行消失），而那时没人能纠正它。
+   * 判据：种一份带 `maxTokens` 的缓存 → 装配后的**第一推**（`boot:cache`）带它。
+   */
+  it('⚠️ 缓存里的声明字段随快路径原样推回（maxTokens 不丢）', async () => {
+    seedCache(
+      [
+        { id: 'dfmodel', name: 'Qoder · dfmodel', maxTokens: 384000 },
+        { id: 'wb/glm-5.3', name: 'WorkBuddy · glm-5.3', maxTokens: 64000 },
+      ],
+      { dfmodel: 'qoder', 'wb/glm-5.3': 'workbuddy' },
+    )
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { pushed } = attach(cpa)
+
+    await until(() => {
+      expect(pushed.length).toBeGreaterThan(0)
+    })
+    const byId = new Map((pushed[0]?.rows ?? []).map((row) => [String(row.id), row.maxTokens]))
+    expect(byId.get('dfmodel')).toBe(384000)
+    expect(byId.get('wb/glm-5.3')).toBe(64000)
+  })
 
   /**
    * **判据 1：有残缺迹象 → 会排重读。**
