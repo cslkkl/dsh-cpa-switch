@@ -40,6 +40,20 @@ export const Config = z.object({
    * 为什么只有两档、值怎么定的，见 `model-caps.ts` 的 `REASONING_EFFORTS`。
    */
   reasoningEfforts: z.boolean().default(true).volatile(),
+  /**
+   * 推给宿主的每模型输出上限（`maxTokens`，token）；`0` = 不声明。
+   *
+   * 宿主对未声明的模型回退 32768（`dsh-llm-pi-ai` 的 `DEFAULT_MAX_TOKENS`），
+   * 不声明就是把长输出提前截断。默认取 **384000** —— 当前 DeepSeek V4 系列的
+   * 输出上限天花板（维护者口径，2026-10-08），也足以覆盖其余模型。
+   * **报大是安全方向**：实测上游对超报值不拒绝（384000 发给真实上限 128k
+   * 的模型也返 200），截断职责仍在上游；报小才会提前截断。
+   *
+   * ⚠️ **声明目前只在 WorkBuddy 渠道实际生效**：qoder 的请求由模板自带
+   * `max_tokens`、客户端值不进请求；trae 会丢弃该字段并自行补大值。出处与
+   * 实测见 [实测报告](../docs/audits/2026-10-08-cpa-stream-probe.md) 的附录。
+   */
+  maxOutputTokens: z.natural().max(1_000_000).default(384_000).volatile(),
   startTimeoutSeconds: z.natural().min(3).max(180).default(30).volatile(),
 })
 
@@ -53,6 +67,7 @@ export interface ConfigRefs {
   autoCheckinOnStart: { get: () => boolean }
   openControlPanel: { get: () => boolean }
   reasoningEfforts: { get: () => boolean }
+  maxOutputTokens: { get: () => number }
   startTimeoutSeconds: { get: () => number }
 }
 
@@ -87,6 +102,7 @@ export function makeReadConfig(refs: ConfigRefs): () => PluginConfig {
     autoCheckinOnStart: refs.autoCheckinOnStart.get(),
     openControlPanel: refs.openControlPanel.get(),
     reasoningEfforts: refs.reasoningEfforts.get(),
+    maxOutputTokens: refs.maxOutputTokens.get(),
     startTimeoutSeconds: refs.startTimeoutSeconds.get(),
   })
 }

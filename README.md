@@ -110,7 +110,16 @@ dsh plugin --profile web add .
 | `autoCheckinOnStart`  | `true`          | 启动时补一次漏掉的签到                   |
 | `openControlPanel`    | `false`         | CPA 启动时是否同时打开它自带的网页控制台 |
 | `reasoningEfforts`    | `true`          | 是否让模型可切思考档位（关 / 开两档）    |
+| `maxOutputTokens`     | `384000`        | 推给宿主的每模型输出上限；`0` = 不声明   |
 | `startTimeoutSeconds` | `30`            | 等待 CPA 就绪的最长秒数                  |
+
+⚠️ **输出上限**：插件把 `maxOutputTokens` 推给宿主的每个模型（宿主字段 `maxTokens`），
+让请求不再被 DSH 兜底的 32768 提前截断。实测它**目前只在 WorkBuddy 渠道真正生效** ——
+qoder 由服务端模板自带上限、客户端值不进请求，trae 会丢弃该字段并自行补大值；给这两家
+声明是为渠道侧支持后自动生效。默认值 384000（DeepSeek V4 系列的输出上限天花板）是
+**报大**方向：上游对超报值不拒绝（实测 384000 发给真实上限 128k 的模型也正常返回），
+截断职责仍在上游。链路与实测见
+[实测报告](docs/audits/2026-10-08-cpa-stream-probe.md) 的附录。
 
 ## 对话模型
 

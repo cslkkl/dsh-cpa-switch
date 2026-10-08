@@ -304,6 +304,11 @@
   - ⚠️ **必须订阅 `app-boot/config-reload`**：宿主每次重建 profile 都 emit 它，
     而重建会抹掉运行时注入的 volatile 值（`app-boot/src/index.ts:289` → `:300`）。
     不订阅 = 路由在第一次设置写入后永久消失，2026-10-04 实测（[issue #9](https://github.com/cslkkl/dsh-cpa-switch/issues/9)）
+  - ⚠️ **输出上限逐行声明**（2026-10-08）：每行按配置 `maxOutputTokens`（`0` = 不声明）
+    与校准表的 `ModelCaps.maxOutputTokens` 落出 `maxTokens`；**只写正整数** —— 写 0 / 非法值
+    会让**整个 provider 注册失败**。声明**只对会把值送进上游的渠道生效**（实测 workbuddy；
+    qoder / trae 到不了上游），判据在 `tests/route-registry.test.ts` 的「输出上限声明」，
+    出处见[实测报告](../docs/audits/2026-10-08-cpa-stream-probe.md)附录
   - 恢复挂在「配置可能变」这个**语义**上，不是挂在 boot / setup / oauth 这些**时机**上
 - **`model-alias.ts`** —— 同名模型的「渠道 / 模型」唯一别名。
   - 导出：`buildAliasTable` / `aliasFor` / `channelPrefix` / `renderAliasYaml` / 类型 `AliasTable`

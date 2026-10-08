@@ -57,6 +57,7 @@ describe('runBoot', () => {
     autoCheckinOnStart: true,
     openControlPanel: false,
     reasoningEfforts: true,
+    maxOutputTokens: 384000,
     startTimeoutSeconds: 30,
   })
 

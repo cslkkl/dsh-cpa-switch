@@ -137,6 +137,8 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
      * 面板一改就要在**下一次重推**生效，不能把启动时的值焊死在这里。
      */
     reasoningEffortsEnabled: () => readConfig().reasoningEfforts,
+    /** 每模型的输出上限（推 `maxTokens`）；`0` = 不声明。与开关同规矩：现读。 */
+    maxOutputTokens: () => readConfig().maxOutputTokens,
   })
 
   const ops = createOperations({
