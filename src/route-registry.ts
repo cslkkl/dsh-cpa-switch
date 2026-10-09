@@ -641,7 +641,13 @@ function buildCpaRouteProfile(
       models: rows.map((row) => {
         // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
         const caps = capsOf(row.channel, row.bare)
-        const reasoningEfforts = reasoningEffortsOf(effortsEnabled, row.channel)
+        // 逐模型省略：校准表标了 `reasoningEfforts: false`（实测反证：两档都无思考）
+        // 的模型不发档位声明 —— 宿主落 `reasoning: false`，界面不给 Effort 行。
+        // 其余模型照常按渠道给。判据见 tests/route-registry.test.ts「思考档位声明」。
+        const reasoningEfforts =
+          caps?.reasoningEfforts === false
+            ? undefined
+            : reasoningEffortsOf(effortsEnabled, row.channel)
         // 模型级例外优先于路由级默认；`0` / 非法值都落到「不写」。
         const maxOutputTokens = caps?.maxOutputTokens ?? routeMaxOutputTokens
         return {
@@ -670,9 +676,10 @@ function buildCpaRouteProfile(
           /**
            * 思考档位：**逐模型带上、值按该行的渠道给**（开关打开时）。
            *
-           * ⚠️ **这是「乐观默认」，不是逐模型实测过的**：有些模型可能压根不产思考，
-           * 标了也只表现为「开了开关却看不到思考」，不会崩。这与
-           * `supportsImages`（多标会卡死会话）的方向**相反**，所以这里可以宽。
+           * ⚠️ 这里对多数模型仍是「乐观默认」：没实测过的模型标了也只表现为
+           * 「开了开关却看不到思考」，不会崩。**实测反证的模型不在此列** ——
+           * 校准表标 `reasoningEfforts: false` 的（现为 `hunyuan-chat`，两档都 0 思考）
+           * 直接省略声明、不出现 Effort 行，见上面的逐模型省略分支。
            *
            * ⚠️ 但**「关」的拼写不能宽** —— 写错是硬错误、炸整轮对话（实测 `1210`）。
            * 逃生通道仍是面板上的总开关。

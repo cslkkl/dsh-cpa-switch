@@ -1652,6 +1652,38 @@ describe('思考档位声明', () => {
   })
 
   /**
+   * 逐模型省略（2026-10-10）：**有实测反证的模型不给 Effort 行**。
+   *
+   * 宿主对省略 `reasoningEfforts` 的模型条目落 `reasoning: false`
+   * （`resolveModelReasoning` 的 `efforts === void 0` 分支），界面不给该模型档位列。
+   * 依据：`hunyuan-chat` 实测两档都完全不思考，开关纯属误导
+   * （[实测报告](../docs/audits/2026-10-06-reasoning-effort-off-vs-high.md)、
+   * [决策记录](../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)）。
+   *
+   * 两条都要钉：只断言「省略的那条没有」挡不住「把别人的也省了」——
+   * 省略必须是**逐模型**的，同清单其余模型照常带档位。
+   */
+  it('⚠️ 有实测反证的模型省略档位声明，同清单其余模型不受影响', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: { w1: ['deepseek-v4.1-flash', 'hunyuan-chat'] },
+      catalog: ['deepseek-v4.1-flash', 'hunyuan-chat'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => true),
+    )('boot')
+
+    const effortsOf = new Map(
+      (pushed.at(-1)?.rows ?? []).map((row) => [String(row.id), row.reasoningEfforts]),
+    )
+    expect(effortsOf.get('hunyuan-chat')).toBeUndefined()
+    expect(effortsOf.get('deepseek-v4.1-flash')).toEqual({ off: 'off', high: 'high' })
+  })
+
+  /**
    * ⚠️ **关掉开关必须连默认一起撤** —— 留下 `reasoning` 就是个半截状态：
    * 界面没有 Effort 行，而每个请求仍被钉在 `high` 上，正是这个开关要逃开的东西。
    */
