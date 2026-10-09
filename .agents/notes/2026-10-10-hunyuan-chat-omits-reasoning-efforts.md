@@ -50,8 +50,8 @@
 
 - 表位置：`model-caps.ts` 的 `CALIBRATED.workbuddy['hunyuan-chat']`，**一处**。
   将来实测出新的「两档都无思考」模型，同处加标记即可。
-- ⚠️ **真机复验待做**（属「重启 DSH 复验」那条待办，宿主半端不随页面刷新加载）：
-  重启后 `hunyuan-chat` 的选择器里应**没有 Effort 行**，且选择器分组
-  **不出现重复条目**（PLAN §2.9 第三条判据，本仓测试够不到宿主 UI）。
+- ✅ **真机复验已完成（2026-10-10）**：重启后推送清单里该行无 `reasoningEfforts`、
+  同清单其余 95 行照常（zcode 仍 `none`）；维护者在选择器确认该模型**没有 Effort 行**、
+  分组无重复条目 —— 三条判据全部过。
 - 判据：`tests/model-caps.test.ts`（标记只落有反证的模型）+
   `tests/route-registry.test.ts`（省略落到推送的清单里，且逐模型、不误伤同行）。

@@ -134,9 +134,6 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       端口被外部实例占用（应显示**琥珀**点 + 提示块，而不是绿色「运行中」）、
       以及把 `config.example.yaml` 的代际改成别的数时应出现「配置代际不符」。
       本轮真机只验到**命令行一级**（真日志行认出 `port-in-use`、本机两侧都是 8 不误报）。
-      同一次重启**顺手复验**：`hunyuan-chat` 的选择器里应**没有 Effort 行**、
-      其余模型照常、分组不出现重复条目（逐模型省略档位声明的第三条判据，本仓测试够不到
-      宿主 UI，见[决策记录](.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)）。
 
 - [ ] **`icon.svg` 为过渡版，非最终设计** —— 方向「人物 + 环绕切换箭头」；几何已对齐官方
       36 格配方（`viewBox="0 0 36 36"` + 内层 transform 把墨迹放在 7–29），视觉待迭代。
