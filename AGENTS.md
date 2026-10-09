@@ -194,12 +194,14 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 
 - **`lib/` 不入库，但它才是宿主读的东西** —— clone 后先 `pnpm install && pnpm build`；
   改完源码也必须重建，否则跑的是旧产物。产物断言的坑见 [scripts/AGENTS.md](scripts/AGENTS.md)。
-- **本机 DSH 加载的不是本仓 `lib/`，是 profiles 下的独立拷贝** ——
-  `~\.dsh\profiles\desktop\node_modules\dsh-cpa-switch`（**快照复制**，非链接；
-  2026-10-10 实踩：重建 + 重启后插件仍在跑 0.3.0 旧代码，零报错）。
-  改完源码的正确顺序：`pnpm build` → 把 `lib/`、`locale/`、`icon.svg`、`package.json`
-  **同步进那份拷贝** → 再重启 DSH。判据：拷贝里 `lib/index.js` 的字节数与
-  本仓一致。装回 npm 版或改 `link:` 装法可消掉这个坑（见 [PUBLISHING.md](docs/PUBLISHING.md)）。
+- **本机 DSH 加载的不是本仓 `lib/`，是 profiles 下的独立快照拷贝（两份）** ——
+  `~\.dsh\profiles\{desktop,web}\node_modules\dsh-cpa-switch`（**目录复制**，非链接；
+  各 profile 的 `package.json` 声明 `link:` 但目标目录已消失，物化内容是历史快照；
+  `dsh web` 跑的是 **web** 那份 —— 2026-10-10 实踩：重建 + 重启两次都在跑旧代码，
+  零报错）。改完源码的正确顺序：`pnpm build` → 把 `lib/`、`locale/`、`icon.svg`、
+  `package.json` **同步进两份拷贝** → 再重启 DSH。判据：拷贝里 `lib/index.js`
+  的字节数与本仓一致。装 npm 新版或改 `link:` 装法指回本仓可消掉这个坑
+  （见 [PUBLISHING.md](docs/PUBLISHING.md)）。
 - **路径不许自己拼 `homedir()/.dsh`** —— 走 [src/paths.ts](src/paths.ts)。
   `DSH_HOME` 覆盖被忽略时**零报错**：状态与 40MB 运行时会落到另一个目录，
   用户看到的是「设置老是不生效」。
