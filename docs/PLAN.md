@@ -351,11 +351,14 @@ clone 后没有这个目录；拉取方式见 [reference/README.md](../reference
   剩下的才是真约束：宿主的硬校验要求「除 `off` 外至少一个档位」，所以**不能**把某个
   模型的档位删成空对象或只剩 `off` —— 那是**整个 provider 注册失败、该渠道所有模型
   一起消失**（判据 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)）。
-  **疑似可行但尚未实测**的路子：**逐模型省略 `reasoningEfforts`** —— 宿主此时落
-  `reasoning: false`（`resolveModelReasoning` 的 `efforts === void 0` 分支），
-  界面直接不给该模型档位列（`reasoningInfo` 见 `!model.reasoning` 即不暴露），
-  正是维护者要的「关不掉就删掉这一栏」。要先补的判据：
-  **省略后该模型确实没有 Effort 行、同清单其余模型不受影响、选择器分组不出现重复条目**。
+  **「逐模型省略 `reasoningEfforts`」的路子已按 `hunyuan-chat` 落地验证（2026-10-10）**：
+  宿主对省略该字段的条目落 `reasoning: false`，界面不给该模型档位列 ——
+  [决策记录](../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)。
+  三条判据里可测的两条已钉（省略只落该模型、同行不受影响，
+  `tests/route-registry.test.ts`）；第三条（选择器分组不出现重复条目）
+  属宿主 UI，待重启 DSH 真机复验。
+  **仍未做**：关不掉的 9 个（`ALWAYS_THINKS`）与方向相反的 23 个（`INVERTED`）
+  怎么处置 —— 它们仍能思考，摘开关是功能倒退，待维护者定夺后再动；
   与根 [AGENTS.md](../AGENTS.md) 待办区那条「`providerId` 粒度裁决」是同一件事。
 
 **已完成**：

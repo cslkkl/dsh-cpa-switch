@@ -339,6 +339,9 @@
   - ⚠️ **`supportsImages` 只在确认支持时写 `true`，没有 `false`** ——
     判定方向与窗口**相反**（不写＝保守），理由见
     [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)
+  - **`reasoningEfforts: false` 逐模型省略档位声明** —— 只在有实测反证
+    （该模型两档都无思考，现为 `hunyuan-chat`）时写；省略后宿主不显示该模型的
+    Effort 行：[决策记录](../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)
   - 改后必测：`tests/model-caps.test.ts`
 
 ## 子目录

@@ -1,7 +1,8 @@
 # 思考档位实测：`off` 与 `high` 到底有没有区别（2026-10-06）
 
-状态：**检测结论，未改代码**。本文件只陈述实测事实与它暴露的问题，
-处置方案待维护者定夺（见文末「结论与建议」）。
+状态：检测结论。**`hunyuan-chat` 一条已处置**（2026-10-10，逐模型省略档位声明，
+见[决策记录](../../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)）；
+其余类别仍待定夺（见文末「结论与建议」）。
 
 ## 一句话结论
 
@@ -89,6 +90,9 @@ wb/kimi-k2.6 · wb/minimax-m3
 两档都**没有思考块**（0/3、0/3），三条 token 路径全为 0。
 给它档位开关是**完全没有意义**的。
 
+✅ **已处置（2026-10-10）**：逐模型省略档位声明，该模型不再出现 Effort 行 ——
+[决策记录](../../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)。
+
 ### 30 个调不通的（`REJECTED`）—— 与档位无关
 
 四个互不相同的根因，**都属于上游/凭据问题，不是档位问题**：
@@ -170,7 +174,10 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8317/v1/chat/completions" -Method POST 
 不需要动结构的部分有两条，可单独做：
 
 - **`zcode` 的 `off` → `none`**：按渠道换拼写，消掉那个 400 硬错误。
+  ✅ **已落地**（见[决策记录](../../.agents/notes/2026-10-06-reasoning-off-spelling-per-channel.md)）。
 - **`hunyuan-chat`**：唯一真·假 high，给它档位开关纯属误导。
+  ✅ **已落地（2026-10-10）**：逐模型省略声明 ——
+  [决策记录](../../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)。
 
 ### 本次测量的边界（不许当成结论）
 
