@@ -191,14 +191,14 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 
 - **`lib/` 不入库，但它才是宿主读的东西** —— clone 后先 `pnpm install && pnpm build`；
   改完源码也必须重建，否则跑的是旧产物。产物断言的坑见 [scripts/AGENTS.md](scripts/AGENTS.md)。
-- **本机 DSH 加载的不是本仓 `lib/`，是 profiles 下的独立快照拷贝（两份）** ——
-  `~\.dsh\profiles\{desktop,web}\node_modules\dsh-cpa-switch`（**目录复制**，非链接；
-  各 profile 的 `package.json` 声明 `link:` 但目标目录已消失，物化内容是历史快照；
-  `dsh web` 跑的是 **web** 那份 —— 2026-10-10 实踩：重建 + 重启两次都在跑旧代码，
-  零报错）。改完源码的正确顺序：`pnpm build` → 把 `lib/`、`locale/`、`icon.svg`、
-  `package.json` **同步进两份拷贝** → 再重启 DSH。判据：拷贝里 `lib/index.js`
-  的字节数与本仓一致。装 npm 新版或改 `link:` 装法指回本仓可消掉这个坑
-  （见 [PUBLISHING.md](docs/PUBLISHING.md)）。
+- **DSH 从 profile 的 node_modules 装载插件，不是工作区路径** —— 两个 profile 各有
+  一份 `dsh-cpa-switch`；改完源码后 `pnpm build` **还不够**，得让 profile 拿到新产物。
+  2026-10-10 实踩：profile 的 `link:` 声明指向已消失的旧目录，物化出**快照拷贝**
+  （web 那份还是 npm 旧版），重建 + 重启两次都在跑旧代码，**零报错**。
+  已根治：两份 profile 的依赖都改成 `link:` 指回本仓，`pnpm build` 即生效、
+  无需再同步。判据：`~\.dsh\profiles\{desktop,web}\node_modules\dsh-cpa-switch`
+  是 **Junction** 且指向本仓；若哪天又变回实体目录（重新安装插件等），先查 link。
+  ⚠️ 根治后仍需**重启 DSH**（宿主半端不随页面刷新加载）。
 - **路径不许自己拼 `homedir()/.dsh`** —— 走 [src/paths.ts](src/paths.ts)。
   `DSH_HOME` 覆盖被忽略时**零报错**：状态与 40MB 运行时会落到另一个目录，
   用户看到的是「设置老是不生效」。
