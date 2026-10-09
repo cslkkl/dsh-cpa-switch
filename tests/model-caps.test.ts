@@ -134,6 +134,27 @@ describe('supportsImages', () => {
 })
 
 /**
+ * 逐模型**省略**思考档位声明（2026-10-10）—— 方向与 `supportsImages` 相反：
+ * 这里的标记是**消极的**（有实测反证才写，写 false = 摘掉开关）。
+ *
+ * 依据：全量实测里 `hunyuan-chat` 是唯一「两档都完全不思考」的模型
+ * （0/3、0/3，三条 token 路径全 0，真·假 high）——
+ * 给它档位开关是误导，[实测报告](../docs/audits/2026-10-06-reasoning-effort-off-vs-high.md)。
+ * ⚠️ **只认实测反证，不认印象**：没测过的模型不写这条标记。
+ */
+describe('reasoningEfforts 逐模型省略', () => {
+  it('hunyuan-chat 带省略标记 —— 实测两档都完全不思考（真·假 high）', () => {
+    expect(capsOf('workbuddy', 'hunyuan-chat')?.reasoningEfforts).toBe(false)
+  })
+
+  it('⚠️ 没有反证的模型不标（照常声明档位）', () => {
+    // 同渠道、同校准表的其它模型不跟着省略 —— 省略是逐模型的，不是逐渠道的
+    expect(capsOf('workbuddy', 'deepseek-v4.1-flash')?.reasoningEfforts).toBeUndefined()
+    expect(capsOf('workbuddy', 'hunyuan-2.0-thinking')?.reasoningEfforts).toBeUndefined()
+  })
+})
+
+/**
  * 三档出处分级（2026-10-06 定）：官方 / 第三方 / 无来源填 1M。
  * 分级只在 [model-caps.ts](../src/model-caps.ts) 的表里维护，判据只钉**结构性质**：
  * 每一档各自可查、且分档本身不会被静默抹平成一张大表。

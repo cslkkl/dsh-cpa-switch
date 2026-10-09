@@ -140,6 +140,24 @@ export interface ModelCaps {
    * 不确定时宁可报大。
    */
   readonly maxOutputTokens?: number
+  /**
+   * **省略**该模型的思考档位声明 —— 宿主侧该模型不出现 Effort 行。
+   *
+   * ⚠️ **方向与 `supportsImages` 相反，且只认实测反证**：
+   * 只在**实测过**「该模型两档都不产出思考」（真·假 high，开关纯属误导）时写 `false`；
+   * 不写 == 照常按渠道声明 `off`/`high`。没有 `true` 这个值 ——
+   * 「声明档位」是默认行为，没有需要标记的场合。
+   *
+   * 宿主对省略 `reasoningEfforts` 的模型条目落 `reasoning: false`
+   * （`dsh-llm-pi-ai` 的 `resolveModelReasoning`，`efforts === void 0` 分支），
+   * 界面不给该模型档位列 —— 正是「假旋钮就摘掉」。路由级默认档位
+   * （{@link REASONING_DEFAULT}）不受影响，其余模型照常。
+   *
+   * 依据与取舍见[决策记录](../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)；
+   * 判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts) +
+   * [tests/route-registry.test.ts](../tests/route-registry.test.ts)。
+   */
+  readonly reasoningEfforts?: false
 }
 
 /**
@@ -175,6 +193,10 @@ export interface ModelCaps {
  *
  * 两档都不是「模型能力」而是「请求参数」—— 所以**不逐模型标注**，
  * 由 {@link reasoningEffortsOf} 按总开关 + 渠道给出。
+ *
+ * **唯一例外**：有实测反证（两档都完全不思考）的模型由
+ * {@link ModelCaps.reasoningEfforts} 逐模型**省略**声明 —— 那不是「逐模型标档位」，
+ * 是把误导用户的假开关摘掉（2026-10-10，`hunyuan-chat`）。
  */
 export const REASONING_EFFORTS = { off: 'off', high: 'high' } as const
 
@@ -378,7 +400,10 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     // ── 以下无来源，按口径填 1M（见头注「无来源为什么填 1M」）──
     auto: { contextWindow: 1_000_000, supportsImages: true },
     default: { contextWindow: 1_000_000 },
-    'hunyuan-chat': { contextWindow: 1_000_000 },
+    // hunyuan-chat：实测两档都完全不思考（真·假 high，0/3、0/3，三条 token 路径全 0）
+    // —— 档位开关纯属误导，逐模型省略声明（不省渠道里其它模型的）。
+    // 依据见 docs/audits/2026-10-06-reasoning-effort-off-vs-high.md 与决策记录。
+    'hunyuan-chat': { contextWindow: 1_000_000, reasoningEfforts: false },
     'space-bunny': { contextWindow: 1_000_000, supportsImages: true },
   },
   zcode: {
