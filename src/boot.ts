@@ -17,7 +17,7 @@ import type { PluginConfig } from './config.ts'
 import type { CpaRuntime } from './runtime.ts'
 import type { Operations } from './ops/index.ts'
 import type { SyncResult } from './route-registry.ts'
-import { inspect } from './setup/index.ts'
+import { inspect, patchServerHost } from './setup/index.ts'
 import type { SetupSession } from './setup/index.ts'
 
 /** 生命周期流程的依赖。 */
@@ -75,6 +75,26 @@ export async function runBoot(deps: BootDeps): Promise<void> {
   const preflight = readConfig()
   const portBusy = (await runtime.status()).running
   const missing = inspect({ port: preflight.port }).missing
+  if (!portBusy) {
+    /**
+     * **安全默认的补齐**：老机器的托管配置缺 `server.host` 时 CPA 监听所有网卡，
+     * 局域网不带鉴权就能调 `/v1/*`。生成逻辑只在「配置不存在」时写，救不了它们。
+     *
+     * ⚠️ **必须在 `runtime.ensure()` 之前、且仅当 CPA 未运行时**：
+     * CPA 运行中持有该文件且保存时会回写，运行中改它与它抢写是竞态；
+     * 起动前补，CPA 一开始就监听对。
+     * 函数自身保守（只补缺失 / 锚点找不到就放弃），异常不冒泡 —— 与补装同级。
+     */
+    try {
+      if (patchServerHost()) {
+        deps.logger?.warn?.(
+          'cpa-panel: 托管配置缺 server.host，已补 "127.0.0.1"（原配置对外暴露，安全默认）',
+        )
+      }
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: server.host 补齐失败（不影响启动）: %o', error)
+    }
+  }
   if (!portBusy && preflight.manageLifecycle && missing.length > 0) {
     deps.logger?.info?.('cpa-panel: environment incomplete (%o), preparing before start', missing)
     await setup.autoInstall()

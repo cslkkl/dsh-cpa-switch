@@ -36,6 +36,7 @@ export {
   generateSecretKey,
   looksLikeBcrypt,
   patchModelAlias,
+  patchServerHost,
   readConfigVersion,
   readSecretKeyFromConfig,
   renderConfig,
