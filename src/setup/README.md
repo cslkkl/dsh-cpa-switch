@@ -22,8 +22,8 @@
   - ⚠️ `SOURCES.cpa` **绝不能指向没有 Release 的仓库**（没有兜底）
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
   - 导出：`CONFIG_VERSION` / `readConfigVersion` / `renderConfig` / `patchModelAlias` /
-    `writeConfig` / `generateSecretKey` / `generateApiKey` / `looksLikeBcrypt` /
-    `readSecretKeyFromConfig`
+    `patchServerHost` / `writeConfig` / `generateSecretKey` / `generateApiKey` /
+    `looksLikeBcrypt` / `readSecretKeyFromConfig`
   - ⚠️ `CONFIG_VERSION` 是上游的**硬校验**值（不是 `8` 就拒绝启动，没有降级兼容）。
     它与 CPA 的**软件版本号没有映射关系** —— 上游不存在「版本 → 代际」的表，
     所以代际只能**读对端声明的那个数**，推不出来。`readConfigVersion` 就是那个读法
@@ -33,6 +33,9 @@
   - ⚠️ `readSecretKeyFromConfig` **必须挡掉 bcrypt 哈希** —— 那是校验用的，拿去当 Bearer 必然 401
   - ⚠️ 别名表只能在 **CPA 起来之后**才算得出，所以 `renderConfig` 写的那份没有别名；
     `patchModelAlias` 是起来之后补写的那条路（只追加、找不到 `oauth:` 段就放弃）
+  - ⚠️ `patchServerHost` 是**老机器安全默认**的补齐路（`boot` 在 CPA 未运行时调）：
+    只补缺失的 `host`、已有 host 一律不动、无 `server:` 段放弃不改文件 ——
+    [决策记录](../../.agents/notes/2026-10-10-server-host-autopatch.md)
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
   - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
     `listPluginIds` / `removeDir` / `inspect` / `humanSize` / 类型

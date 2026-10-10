@@ -84,8 +84,13 @@
 本机已手动补写 `host: "127.0.0.1"` 并复验（只监听 127.0.0.1）；其他旧装机器要靠升级逻辑补。
 本轮只改了生成逻辑，未动用户已有配置。
 
-- [ ] 补写缺失安全项的修补路径：检测已有配置缺 `server.host` / `access.api-keys`
-      时提示或自动补齐（升级逻辑，属 §2.1 收口的一部分）
+- ✅ **缺 `server.host` 的自动补齐已落地（2026-10-10）**：`boot` 里、CPA 未运行时
+  调 `patchServerHost()` 外科手术式补一行（只补缺失 / 已有 host 一律不动 /
+  无 `server:` 段放弃不改文件）。三个板与一处对原设想的推翻
+  （`autoInstall` 在老机器上不跑，挂 ensure 修不到目标人群）见
+  [决策记录](../.agents/notes/2026-10-10-server-host-autopatch.md)、
+  判据 `tests/setup-config.test.ts` 的 `patchServerHost` 组。
+  `access.api-keys` 收口仍待做（上面三步的第一步，属改行为、要走 §2.9）。
 
       #### 前置调查：可做，且机制已存在（2026-10-06 查证）
 
