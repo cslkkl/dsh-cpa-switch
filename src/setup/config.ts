@@ -173,6 +173,73 @@ export function patchModelAlias(aliases: AliasTable): boolean {
 }
 
 /**
+ * 把 `server.host: "127.0.0.1"` 补写进**已有**的配置。
+ *
+ * 为什么需要单独一条路：`renderConfig` 只在「配置文件不存在」时写 ——
+ * 已经跑过一次的老机器配置里没有这行，CPA 监听 `::`，局域网内不带任何鉴权
+ * 就能调 `/v1/*`（2026-10-04 实测）。升级插件救不了它们：生成逻辑不碰已存在的配置。
+ *
+ * **拍板（维护者 2026-10-10）：自动补、只补「缺失」** ——
+ * 已有 `host` 是用户自己的决定（显式写 `0.0.0.0` 是知情选择），一律不动；
+ * 没有 `server:` 段的配置是**看不懂的形状**，放弃且不改文件。
+ *
+ * 与 {@link patchModelAlias} 同款纪律：只动一个片段、找不到锚点就放弃、
+ * **绝不重写整份文件**（那会连密钥哈希带注释一起冲掉）。
+ *
+ * ⚠️ **调用时机是「CPA 未运行时」**（`boot` 在 `runtime.ensure()` 之前调它）——
+ * CPA 运行中持有该文件且会在保存时回写，运行中改它与它抢写是竞态。
+ *
+ * @returns 是否真的改写了文件。
+ */
+export function patchServerHost(): boolean {
+  let content: string
+  try {
+    content = readFileSync(managedConfigPath(), 'utf8')
+  } catch {
+    return false
+  }
+  const SERVER_HEAD = /^server:[ \t]*$/mu
+  if (!SERVER_HEAD.test(content)) return false
+
+  /**
+   * `server:` 段的范围：从头行到下一个顶层键（列 0 的非注释行）或文件尾。
+   * 段内找不到 `host:` 才补 —— 已有任何 host（哪怕注释外它是别的值）都不动。
+   */
+  const lines = content.split('\n')
+  const head = lines.findIndex((line) => SERVER_HEAD.test(line))
+  let sectionEnd = lines.length
+  for (let i = head + 1; i < lines.length; i++) {
+    if (/^[^\s#]/.test(lines[i] ?? '')) {
+      sectionEnd = i
+      break
+    }
+  }
+  const hasHost = lines.slice(head + 1, sectionEnd).some((line) => /^[ \t]+host:[ \t]/.test(line))
+  if (hasHost) return false
+
+  /**
+   * ⚠️ **缩进必须跟随段内既有键，不能写死** —— CPA 保存配置时用 **4 空格**
+   * （它自带的 `config.example.yaml` 就是 4 空格），而 `renderConfig` 写的是 2 空格；
+   * 被 CPA 回写过的托管配置因此整份是 4 空格。
+   *
+   * 写死 2 空格会在 `host` 与 `port` 之间造出**缩进跳变**（2 → 4）：YAML 里
+   * `host: "..."` 已是标量，紧跟其后的更深缩进键无处可挂 ⇒ **整份配置非法、
+   * CPA 拒绝启动**（2026-10-10 实踩：`yaml: line 19: did not find expected key`）。
+   * 症状是「面板全空、CPA 连不上」，而坏掉的那份配置看起来**只是缩进不一样** ——
+   * 零信号，所以这条不变量必须有判据（`tests/setup-config.test.ts`）。
+   *
+   * 取段内**第一个非注释键**的缩进；段是空的（没有既有键）时退回 2 空格。
+   */
+  const indent =
+    lines
+      .slice(head + 1, sectionEnd)
+      .map((line) => /^([ \t]+)(?![ \t]*#)\S/.exec(line)?.[1])
+      .find((value) => value !== undefined) ?? '  '
+  lines.splice(head + 1, 0, `${indent}host: "127.0.0.1"`)
+  return writeConfig(lines.join('\n'))
+}
+
+/**
  * 生成管理密钥。
  *
  * 首次自动安装时用 —— 用户什么都不知道，插件得自己造一个能用的密钥出来。

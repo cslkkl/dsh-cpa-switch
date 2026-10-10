@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildAliasTable } from '../src/model-alias.ts'
 import {
   CONFIG_VERSION,
   looksLikeBcrypt,
+  patchServerHost,
   readConfigVersion,
   renderConfig,
 } from '../src/setup/config.ts'
@@ -168,5 +172,149 @@ describe('looksLikeBcrypt', () => {
     expect(looksLikeBcrypt('')).toBe(false)
     expect(looksLikeBcrypt(undefined)).toBe(false)
     expect(looksLikeBcrypt(null)).toBe(false)
+  })
+})
+
+/**
+ * 老机器的配置补齐：`server.host` 是**安全边界**，但生成逻辑只在「配置不存在」时写 ——
+ * 已经跑过一次的机器配置里没有这行，CPA 就监听 `::`（2026-10-04 实测局域网不带鉴权
+ * 返回 200）。补丁走 {@link patchServerHost} 的外科手术式路子（与 `patchModelAlias`
+ * 同款纪律）：只动一个片段，锚点找不到就放弃，**绝不重写整份文件**。
+ *
+ * 拍板（维护者 2026-10-10）：自动补、只补「缺失」；已有 host 是用户自己的决定，不动。
+ */
+describe('patchServerHost', () => {
+  let home: string
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
+
+  beforeEach(() => {
+    home = mkdtemp()
+    mkdirSync(join(home, 'cpa-panel', 'runtime', 'cpa'), { recursive: true })
+  })
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 隔离 DSH_HOME（现读）并返回临时目录。 */
+  function mkdtemp(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'cpa-setup-host-'))
+    process.env.DSH_HOME = dir
+    return dir
+  }
+
+  const BASE = [
+    'config-version: 8',
+    'server:',
+    '  port: 8317',
+    '',
+    'management:',
+    '  secret-key: "plain-secret"',
+    '',
+    'oauth:',
+    '  auth-dir: "~/.cli-proxy-api"',
+    '',
+  ].join('\n')
+
+  const seed = (content: string): void => {
+    writeFileSync(configPath(), content, 'utf8')
+  }
+
+  it('⚠️ server 段缺 host 时补上 127.0.0.1，且只加这一行', () => {
+    seed(BASE)
+    expect(patchServerHost()).toBe(true)
+    const after = readFileSync(configPath(), 'utf8')
+    const lines = after.split('\n')
+    const serverIndex = lines.indexOf('server:')
+    expect(lines[serverIndex + 1]).toBe('  host: "127.0.0.1"')
+    expect(lines[serverIndex + 2]).toBe('  port: 8317')
+    // 其余内容原样 —— 外科手术，不是重写
+    expect(after).toContain('secret-key: "plain-secret"')
+    expect(after).toContain('auth-dir: "~/.cli-proxy-api"')
+  })
+
+  it('⚠️ 已有 host 时一字节不动（哪怕值不是 127.0.0.1 —— 那是用户的决定）', () => {
+    const withHost = BASE.replace('  port: 8317', '  host: "0.0.0.0"\n  port: 8317')
+    seed(withHost)
+    expect(patchServerHost()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(withHost)
+  })
+
+  it('host 已经是 127.0.0.1 时同样不写（无写动作）', () => {
+    const safe = BASE.replace('  port: 8317', '  host: "127.0.0.1"\n  port: 8317')
+    seed(safe)
+    expect(patchServerHost()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(safe)
+  })
+
+  it('⚠️ 没有 server: 段时放弃且不改文件（看不懂的配置绝不重写）', () => {
+    const noServer = 'config-version: 8\nmanagement:\n  secret-key: "x"\n'
+    seed(noServer)
+    expect(patchServerHost()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(noServer)
+  })
+
+  it('⚠️ 配置文件不存在时不创建（那是全新安装路径的事，有守卫管）', () => {
+    expect(patchServerHost()).toBe(false)
+    expect(() => readFileSync(configPath(), 'utf8')).toThrow()
+  })
+
+  it('⚠️ host 锚定在 server 段内 —— 别的段下的同名键不算数', () => {
+    const tricky = BASE.replace(
+      '  auth-dir: "~/.cli-proxy-api"',
+      '  auth-dir: "~/.cli-proxy-api"\n  host: "somewhere"',
+    )
+    seed(tricky)
+    expect(patchServerHost()).toBe(true)
+    const lines = readFileSync(configPath(), 'utf8').split('\n')
+    const serverIndex = lines.indexOf('server:')
+    expect(lines[serverIndex + 1]).toBe('  host: "127.0.0.1"')
+    // oauth 段里那个别的 host 原样保留
+    expect(lines.join('\n')).toContain('host: "somewhere"')
+  })
+
+  it('server: 头带行内内容时放弃（朴素正则不猜结构）', () => {
+    const inline = BASE.replace('server:', 'server: # main')
+    seed(inline)
+    expect(patchServerHost()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(inline)
+  })
+
+  /**
+   * ⚠️ **这条钉的是 2026-10-10 的真机事故**：CPA 保存配置时用 **4 空格**缩进
+   * （它自带的 `config.example.yaml` 就是 4 空格），而 `renderConfig` 写 2 空格 ——
+   * 被 CPA 回写过的托管配置整份是 4 空格。补丁若写死 2 空格，就在 `host` 与 `port`
+   * 之间造出**缩进跳变**（2 → 4）：`host: "..."` 已是标量，紧跟其后的更深缩进键
+   * 无处可挂 ⇒ **整份配置非法、CPA 拒绝启动**（`yaml: line 19: did not find expected key`）。
+   * 症状是「面板全空、CPA 连不上」，而坏掉的那份配置**只是缩进不一样** —— 零信号。
+   */
+  it('⚠️ 段内既有键是 4 空格时，补进去的那行也必须是 4 空格（否则整份配置非法）', () => {
+    const fourSpace = [
+      'config-version: 8',
+      'server:',
+      '    port: 8317',
+      '',
+      'management:',
+      '    secret-key: "plain-secret"',
+      '',
+    ].join('\n')
+    seed(fourSpace)
+    expect(patchServerHost()).toBe(true)
+    const after = readFileSync(configPath(), 'utf8')
+    const lines = after.split('\n')
+    const serverIndex = lines.indexOf('server:')
+    expect(lines[serverIndex + 1]).toBe('    host: "127.0.0.1"')
+    expect(lines[serverIndex + 2]).toBe('    port: 8317')
+    // 段内缩进必须唯一 —— 跳变就是非法 YAML
+    expect(new Set([lines[serverIndex + 1], lines[serverIndex + 2]])).toEqual(
+      new Set(['    host: "127.0.0.1"', '    port: 8317']),
+    )
+  })
+
+  it('段内没有既有键时退回 2 空格（空段没有可跟随的缩进）', () => {
+    const emptySection = 'config-version: 8\nserver:\nmanagement:\n  secret-key: "x"\n'
+    seed(emptySection)
+    expect(patchServerHost()).toBe(true)
+    expect(readFileSync(configPath(), 'utf8')).toContain('server:\n  host: "127.0.0.1"\n')
   })
 })
