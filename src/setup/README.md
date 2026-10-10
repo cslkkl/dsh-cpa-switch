@@ -34,7 +34,10 @@
   - ⚠️ 别名表只能在 **CPA 起来之后**才算得出，所以 `renderConfig` 写的那份没有别名；
     `patchModelAlias` 是起来之后补写的那条路（只追加、找不到 `oauth:` 段就放弃）
   - ⚠️ `patchServerHost` 是**老机器安全默认**的补齐路（`boot` 在 CPA 未运行时调）：
-    只补缺失的 `host`、已有 host 一律不动、无 `server:` 段放弃不改文件 ——
+    只补缺失的 `host`、已有 host 一律不动、无 `server:` 段放弃不改文件；
+    **插进去的行跟随段内既有键的缩进** —— CPA 回写用 4 空格、`renderConfig` 用 2 空格，
+    写死会在段内造出缩进跳变（2 → 4）⇒ 整份配置非法、CPA 拒绝启动
+    （2026-10-10 实踩「CPA 连不上」）——
     [决策记录](../../.agents/notes/2026-10-10-server-host-autopatch.md)
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
   - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
