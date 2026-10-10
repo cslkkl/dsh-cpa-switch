@@ -13,6 +13,7 @@
 | [PUBLISHING.md](PUBLISHING.md)     | 怎么发版（现状 / `.github/` 索引 / 版本号语义 / 发版步骤 / 正文来源 / 发布后复核） | 执行发布的人  | 改 [.github/workflows/](../.github/workflows/) 任一文件后必须同步它                           |
 | [releases/](releases/)             | 各版本发布正文存档，文件名 = tag（`v0.8.0.md`）                                    | 使用者 / 历史 | **可选覆盖**：放一份就用它，不放就用 Release Drafter 草稿。旧文件是历史存档，**不再要求补建** |
 | [audits/](audits/)                 | 实测报告：一次测量得到的、与代码无关的事实                                         | 维护者        | 只增不改（测量有时间点）；被新测量推翻时**新增一份**并在旧的注明                              |
+| [postmortem/](postmortem/)         | 事故复盘：坏过什么、时间线、根因、防再犯                                           | 维护者        | 按需建，无事不建；触发条件见 [AGENTS.md](AGENTS.md)                                           |
 
 ## 变更影响路由
 
