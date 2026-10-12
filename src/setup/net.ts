@@ -108,6 +108,20 @@ export function detectProxy(options: { refresh?: boolean } = {}): ProxyInfo | nu
  *
  * `https.Agent` 的 `createConnection` 契约要求回调一个**已完成 TLS 握手**的
  * socket，所以这里在 CONNECT 拿到 200 之后再 `tls.connect`。
+ *
+ * ⚠️ **`createConnection` 必须返回 `null`，不许 `return socket`**（2026-10-12 实踩）。
+ *
+ * 两者都做是致命的：`Agent.prototype.createSocket` 里是
+ * `if (newSocket) oncreate(null, newSocket)` —— 只要拿到**非空返回值**，Node 就
+ * 直接把它当成「已就绪的连接」用掉，于是那条 TLS 隧道白建、**明文 HTTP 打到了代理**。
+ *
+ * 症状：`api.github.com` 回 `HTTP 400`（代理拿一个绝对 URL 的明文请求没脾气），
+ * 或者 `read ECONNRESET`；而**同一个代理用 curl 走是 200**，极易误判成网络问题。
+ * 实测 A/B（除返回值外一字不差）：`return socket` → 400 / `return null` → 200。
+ *
+ * ⚠️ 只在**检测到代理**时触发：直连路径不走本类，所以没开代理的机器看不出问题。
+ * 判据：`tests/net-proxy.test.ts`（本地假代理，只看隧道之后的字节形态 ——
+ * 不需要自签证书，因为我们要判的正是「握手有没有开始」）。
  */
 class ProxyAgent extends HttpsAgent {
   readonly #proxy: URL
@@ -170,7 +184,11 @@ class ProxyAgent extends HttpsAgent {
       secure.once('error', fail)
     }
     socket.on('data', onData)
-    return socket
+    /**
+     * ⚠️ 这里**必须** `return null` —— 见类注释：返回 socket 会让 `https.Agent`
+     * 跳过 TLS 握手，把明文请求打到代理上（实测 400 / ECONNRESET）。
+     */
+    return null
   }
 }
 
