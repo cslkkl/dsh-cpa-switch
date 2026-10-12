@@ -22,7 +22,7 @@
  * @module dsh-cpa-switch/ops/model-visibility
  */
 
-import { channelPrefix } from '../model-alias.ts'
+import { bareModelNameOf } from '../model-alias.ts'
 import { CHANNEL_IDS } from '../channels/registry.ts'
 import { readHiddenModels, updateHiddenModels } from '../state.ts'
 import type { OpsResult } from './result.ts'
@@ -55,21 +55,13 @@ export interface ModelVisibilityOps {
 }
 
 /**
- * 把一个渠道报的模型 id 规范化成**裸名**。
+ * 把一个渠道报的模型 id 规范化成**裸名** —— **实现只有一份**，在
+ * [model-alias.ts](../model-alias.ts) 的 `bareModelNameOf`。
  *
- * ⚠️ 这必须与路由侧的键口径一致（`route-registry` 用 `row.bare`）：
- * 渠道报的 id 可能是别名形态（`wb/glm-5.3`），而裸名是 `glm-5.3`。
- * 两边不一致的后果是**静默的** —— 用户勾了隐藏，清单里那一行照样在。
- *
- * 只剥**渠道自己的**别名前缀（`channelPrefix` 来自注册表）：其它斜杠 id
- * （`vendor/xxx`）原样保留，与 `channelOfPrefix` 的「认不出就不当别名」同一条纪律。
+ * 这里只是转出给判据用（`tests/ops-model-visibility.test.ts` 直接测它），
+ * 免得两处各写一份、口径漂开后**静默失效**（用户勾了隐藏但清单不动）。
  */
-export function bareModelNameOf(channel: string, id: string): string {
-  const name = String(id ?? '').trim()
-  const prefix = `${channelPrefix(channel)}/`
-  if (name.toLowerCase().startsWith(prefix.toLowerCase())) return name.slice(prefix.length)
-  return name
-}
+export { bareModelNameOf }
 
 /** 组装模型可见性域。 */
 export function createModelVisibilityOps(deps: ModelVisibilityDeps = {}): ModelVisibilityOps {

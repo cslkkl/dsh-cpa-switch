@@ -8,6 +8,7 @@
  */
 
 import { accountsPathOf, channelOf } from '../channels/registry.ts'
+import { bareModelNameOf } from '../model-alias.ts'
 import { normalizeAccounts } from '../channels/normalize.ts'
 import { applyLedger } from '../checkin-ledger.ts'
 import { cacheKeys, type CpaGateway } from '../gateway.ts'
@@ -140,7 +141,18 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
         groups: groups.map((group) => ({
           label: group.label,
           count: Number(group.count ?? (group.models ?? []).length),
-          models: (group.models ?? []).map((model) => ({ id: model.id, name: model.name })),
+          models: (group.models ?? []).map((model) => ({
+            id: model.id,
+            name: model.name,
+            /**
+             * ⚠️ **裸名由宿主算好给界面**（2026-10-13）：面板要拿它跟「被隐藏的模型」
+             * 比（那张表按裸名存），而规范化逻辑在 `model-alias.ts` ——
+             * 浏览器半边**不许**引宿主模块，所以不能让界面自己算一遍。
+             * 让界面算的后果是两处口径漂开，表现为「勾了隐藏但那个模型还在选择器里」，
+             * 且**没有任何报错**。
+             */
+            bare: bareModelNameOf(plugin, String(model.id ?? '')),
+          })),
         })),
       }
     } catch (error) {

@@ -59,6 +59,28 @@ export function aliasFor(model: string, channel: string): string {
 }
 
 /**
+ * 把一个**渠道报的模型 id** 规范化成**裸名**（别名前缀剥掉）。
+ *
+ * ⚠️ **两处必须用同一个实现**（2026-10-13）：
+ * - 路由侧的行身份是**裸名**（`route-registry` 的 `row.bare`）；
+ * - 面板勾选「隐藏哪个模型」时，渠道报给它的可能是**别名形态**（`wb/glm-5.3`）。
+ *
+ * 两边口径不一致的后果是**静默的**：用户勾了隐藏，清单里那一行照样在 ——
+ * 所以这个函数只有一份，宿主的两处（路由 / 可见性域）都从**这里**派生。
+ *
+ * 只剥**本渠道自己的**别名前缀（`aliasPrefixOf` 来自注册表）：其它斜杠 id
+ * （第三方自带的 `vendor/xxx`）原样保留 —— 与 `channelOfPrefix` 的
+ * 「认不出就不当我们的别名」是同一条纪律。
+ *
+ * 大小写不敏感：上游实测报过 `Trae/...` 这种大写前缀。
+ */
+export function bareModelNameOf(channel: string, id: string): string {
+  const name = String(id ?? '').trim()
+  const prefix = `${channelPrefix(channel)}/`.toLowerCase()
+  return name.toLowerCase().startsWith(prefix) ? name.slice(prefix.length) : name
+}
+
+/**
  * 由「模型 → 供给渠道」现算出别名表。
  *
  * ⚠️ **必须用实时数据**：渠道目录随账号增减变动（2026-10-04 实测
