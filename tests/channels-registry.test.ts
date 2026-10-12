@@ -14,12 +14,15 @@ import {
   AUTO_CHECKIN_PATHS,
   CHANNEL_IDS,
   CHANNEL_SPECS,
+  PROVIDER_PREFIX,
   ROUTE_PREFIXES,
   aliasPrefixOf,
   channelLabel,
   channelOf,
   channelOrder,
   configPathOf,
+  providerIdOf,
+  providerLabelOf,
 } from '../src/channels/registry.ts'
 
 describe('注册表自身', () => {
@@ -153,5 +156,55 @@ describe('托管渠道与非托管渠道', () => {
     expect(ROUTE_PREFIXES).not.toContain('wb')
     // 逐条相等 —— 防止将来有人往里加渠道而判据放行
     expect([...ROUTE_PREFIXES].sort()).toEqual([...CHANNEL_IDS].sort())
+  })
+})
+
+/**
+ * 模型选择器的**分组身份**（2026-10-12 立项：选择器按渠道分组）。
+ *
+ * 背景：模型选择器按 provider 分组，而四个渠道的模型原先**全挂在同一个 provider**
+ * （`cpa`）下 —— 96 个模型平铺成一层，翻起来很长。改成「一个渠道一个 provider」
+ * 之后组数 = 渠道数，组顺序跟面板页签一致。
+ *
+ * ⚠️ **三件事必须成立**（错了都**不报错、只是界面变样**）：
+ *
+ * 1. **id 里不能有 `/`** —— 选择器的行键是 `${providerId}/${modelId}` 拼出来的，
+ *    provider id 带斜杠会让「哪个是 provider、哪个是 model」不再可分；
+ * 2. **一个渠道一个 id、互不相同** —— 撞了就是两个渠道的模型挤进同一组；
+ * 3. **认不出渠道时不许编 id** —— 与 `channelLabel` 的「非托管有展示名」不同，
+ *    provider 是**路由身份**，非托管渠道根本不进模型路由，给它编一个 id 等于
+ *    造出一个空组（或把别人的模型挂错组）。
+ */
+describe('模型选择器的分组身份', () => {
+  it('每个托管渠道一个 provider id，且互不相同', () => {
+    const ids = CHANNEL_IDS.map((id) => providerIdOf(id))
+    for (const id of ids) expect(id).toBeDefined()
+    expect(new Set(ids).size).toBe(CHANNEL_IDS.length)
+  })
+
+  it('⚠️ provider id 不含 `/`（行键是 `providerId/modelId`，带斜杠就分不清边界）', () => {
+    for (const id of CHANNEL_IDS) {
+      expect(providerIdOf(id)).not.toContain('/')
+    }
+  })
+
+  it('provider id 稳定可读：前缀 + 渠道 id（改前缀 = 已保存的选择全失效，故钉住）', () => {
+    for (const id of CHANNEL_IDS) {
+      expect(providerIdOf(id)).toBe(`${PROVIDER_PREFIX}-${id}`)
+    }
+  })
+
+  it('分组名跟着渠道展示名走，不另抄一份', () => {
+    for (const id of CHANNEL_IDS) {
+      expect(providerLabelOf(id)).toContain(channelLabel(id))
+      expect(providerLabelOf(id)).not.toBe('')
+    }
+  })
+
+  it('认不出的渠道：provider 身份一律查不到（不猜，也不给空组）', () => {
+    for (const unknown of ['kimi', 'mimo', 'brand-new', '']) {
+      expect(providerIdOf(unknown)).toBeUndefined()
+      expect(providerLabelOf(unknown)).toBeUndefined()
+    }
   })
 })

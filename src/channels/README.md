@@ -68,12 +68,19 @@ WorkBuddy 侧 id 叫 `kimi-k2.7`、name 是 `Kimi-K2.7-Code`）。**归属表必
 - **`registry.ts`** —— 唯一查询入口 + 全部派生表。
   - 导出：`CHANNELS` / `CHANNEL_IDS` / `channelOf` / `channelLabel` / `channelOrder` /
     `aliasPrefixOf` / `accountsPathOf` / `configPathOf` / `ACTION_PATHS` / `AUTO_CHECKIN_PATHS` /
-    `ROUTE_PREFIXES` / `SCHEDULER_MODE` / 类型 `ChannelId`
+    `ROUTE_PREFIXES` / `SCHEDULER_MODE` / `PROVIDER_PREFIX` / `PROVIDER_NAME` /
+    `providerIdOf` / `providerLabelOf` / 类型 `ChannelId`
   - **托管渠道**：有 spec、进面板、进模型路由；**非托管渠道**（kimi / mimo）只登记展示名，
     且**不进模型路由** —— 供给面与 `ROUTE_PREFIXES` 都只认托管渠道，
     判据是「有没有 spec」，CPA 以后新增渠道自动被挡
     （[决策记录](../../.agents/notes/2026-10-07-model-routes-managed-healthy-only.md)）
   - ⚠️ 别名前缀的兜底是「原样小写」：不能被猜一个缩写出来
+  - `providerIdOf` / `providerLabelOf` 是**模型选择器的分组身份**（一个渠道一个 provider）：
+    组名取「`PROVIDER_NAME` · 渠道展示名」，组顺序跟 {@link channelOrder}；
+    ⚠️ id **不含 `/`**（行键是 `providerId/modelId`），且**非托管渠道返回 `undefined`** ——
+    provider 是路由身份，给不进路由的渠道编 id 只会造出空组
+  - ⚠️ **改 `PROVIDER_PREFIX` = 移民事**：已保存的模型选择是 `providerId/modelId`，
+    改前缀会让**所有会话的选择一次性失效**（需重选）
 - **`normalize.ts`** —— 上游 payload → `NormalizedAccount`。
   - 导出：`normalizeAccounts`
   - 显示名兜底链：`nickname`（非空）→ `label`（且不是渠道名）→ `auth_id` 去 `.json` → `auth_index`

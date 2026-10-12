@@ -43,6 +43,51 @@ export const CHANNEL_SPECS: readonly ChannelSpec[] = CHANNELS
 export const CHANNEL_IDS: readonly ChannelId[] = CHANNELS.map((channel) => channel.id)
 
 /**
+ * 模型选择器里 provider id 的前缀。
+ *
+ * ⚠️ **它是「已保存的模型选择」的一部分**：选择器的行键是
+ * `providerId/modelId`，会话里存的就是这两个字段。改这个前缀
+ * ⇒ **用户所有会话已保存的选择一次性失效**（界面退化成显示保存的
+ * `provider/model` 并停用输入框，直到重选一次）。所以要改就得当移民事办。
+ */
+export const PROVIDER_PREFIX = 'cpa'
+
+/**
+ * 某渠道在模型选择器里的 **provider id**（分组身份）。
+ *
+ * 为什么一个渠道一个 provider：选择器**按 provider 分组**，而四个渠道的模型
+ * 原先全挂在同一个 provider 下 —— 实测 96 个模型平铺成一层，翻起来很长。
+ * 拆开之后组数 = 渠道数，组顺序与面板页签一致（见 {@link channelOrder}）。
+ *
+ * ⚠️ **不含 `/`**：选择器的行键是 `${providerId}/${modelId}` 拼的，
+ * provider id 带斜杠会让边界分不清（模型 id 本身就有斜杠，如 `wb/glm-5.3`）。
+ *
+ * ⚠️ **非托管渠道返回 `undefined`，不编 id**：provider 是**路由身份**，
+ * 而 kimi / mimo 这类渠道根本不进模型路由（见 {@link ROUTE_PREFIXES}）——
+ * 给它们编 id 只会造出空组，或让别的渠道的模型挂错组。
+ * 用 `undefined` 逼调用方显式处理，而不是静默落进某个兜底组。
+ */
+export function providerIdOf(channel: string): string | undefined {
+  const spec = channelOf(channel)
+  return spec === undefined ? undefined : `${PROVIDER_PREFIX}-${spec.id}`
+}
+
+/**
+ * 某渠道的 provider **展示名**（选择器里的组标题）。
+ *
+ * 组名取「插件名 · 渠道展示名」而不是只写渠道名：模型行的展示名已经是
+ * `WorkBuddy · glm-5.3`（渠道已出现在行里），组标题只写渠道名会与行重复，
+ * 而只写插件名则四个组全同名。两段合起来才既区分得开、又不丢归属。
+ */
+export function providerLabelOf(channel: string): string | undefined {
+  const spec = channelOf(channel)
+  return spec === undefined ? undefined : `${PROVIDER_NAME} · ${spec.label}`
+}
+
+/** provider 展示名里的插件名部分（与 `cordis.patch.yml` 的骨架同名）。 */
+export const PROVIDER_NAME = 'CPA Switch'
+
+/**
  * 非托管渠道的展示名。
  *
  * 这些渠道不由本插件管理（没有 spec、没有面板、没有能力声明）。
