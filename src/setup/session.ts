@@ -20,8 +20,11 @@ import { writeExeMemory } from '../state.ts'
 import { inspect } from './download.ts'
 import type { SetupStatus } from './download.ts'
 import { managedExePath } from './paths.ts'
+import type { SourceKey } from './paths.ts'
+import { installSource } from './install.ts'
+import type { InstallDeps, InstallOutcome, SetupStep } from './install.ts'
 import { prepare } from './prepare.ts'
-import type { PrepareResult, SetupStep } from './prepare.ts'
+import type { PrepareResult } from './prepare.ts'
 
 /** 一键准备的结果：成功给 `PrepareResult`，抛出物收敛成 `{ok:false, error}`。 */
 export type SetupRunResult = PrepareResult | { readonly ok: false; readonly error: string }
@@ -40,6 +43,8 @@ export interface SetupSessionDeps {
    */
   readonly apiKey: () => Promise<string>
   readonly logger?: LoggerLike | undefined
+  /** 安装用的注入点（判据用假实现；生产不传）。 */
+  readonly install?: InstallDeps | undefined
   /**
    * **用户显式触发**的准备成功之后调用（CPA 可能是这次拉起的）—— 推模型路由用。
    *
@@ -91,6 +96,42 @@ export class SetupSession {
         this.#progress = step
       })
       if (result.ok) this.#deps.onPrepared('setup')
+      return result
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    } finally {
+      this.#running = false
+      this.#progress = undefined
+    }
+  }
+
+  /**
+   * 更新某个来源到上游最新版 —— **用户显式触发**，与 {@link run} 共用一把运行态锁。
+   *
+   * ⚠️ **共用 `#running` / `#progress` 是有意的**：两条路都是「下载 17–22 MB」的
+   * 同一种长活，允许并发只会让进度互相覆盖，最后谁也说不清界面那行字是哪一次的。
+   *
+   * ⚠️ **本方法只管替换文件，不管 CPA 的进程**（停 CPA 需要 `runtime`，而本层
+   * 不许依赖它）—— 调用方先把 CPA 停下来再进来，见 `ops/plugin-update.ts`。
+   */
+  async update(key: SourceKey): Promise<InstallOutcome> {
+    if (this.#running) return { ok: false, error: 'already-running' }
+
+    this.#running = true
+    this.#progress = { phase: 'starting' }
+    try {
+      const result = await installSource(key, {
+        force: true,
+        onStep: (step) => {
+          this.#progress = step
+        },
+        ...(this.#deps.install ?? {}),
+      })
+      if (result.ok) {
+        // 渠道换了就可能带来新模型；让宿主重推一次清单
+        writeExeMemory(managedExePath())
+        this.#deps.onPrepared('plugin-update')
+      }
       return result
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }

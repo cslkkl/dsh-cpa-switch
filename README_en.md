@@ -86,6 +86,11 @@ the machine is reused, never overwritten.
 Downloading needs access to GitHub Releases; configure a proxy where a direct connection does
 not work.
 
+**Channel plugins are never upgraded automatically** (upstream can change behaviour at any
+release, so a silent swap is too risky). The panel shows "channel plugins a → b", and
+"Update channel plugins" swaps them when you click it: CPA is stopped first, the previous
+version is kept until the swap succeeds, and it is not started again for you.
+
 ## Install
 
 From npm:

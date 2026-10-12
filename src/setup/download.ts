@@ -184,6 +184,20 @@ export function countDlls(dir: string): number {
   return listPluginIds(dir).length
 }
 
+/**
+ * 某个来源的产物**在不在磁盘上**。
+ *
+ * ⚠️ **这是这条判据的唯一 home** —— 它原先在 `inspect()` 与安装流程里各写一遍，
+ * 两处一旦分叉就是「探测说齐了、安装说缺件」这种自相矛盾的结论。
+ *
+ * ⚠️ 判据刻意**宽松**（exe 在 / dll 数 > 0），不比对版本：这张表只回答
+ * 「要不要去下一个」，不回答「你那份旧不旧」—— 后者归安装记录
+ * （[state.ts](../state.ts) 的 `readInstalled`），两条问题各有各的源。
+ */
+export function sourcePresent(key: SourceKey): boolean {
+  return key === 'cpa' ? existsSync(managedExePath()) : countDlls(managedPluginsDir()) > 0
+}
+
 /** 删目录（用于重装）。 */
 export function removeDir(path: string): boolean {
   try {
@@ -257,13 +271,13 @@ export function inspect(input: { port?: number; secretKey?: string } = {}): Setu
   const exe = managedExePath()
   const plugins = managedPluginsDir()
   const config = managedConfigPath()
-  const hasExe = existsSync(exe)
+  const hasExe = sourcePresent('cpa')
   const dllCount = countDlls(plugins)
   const hasConfig = existsSync(config)
 
   const missing: string[] = []
   if (!hasExe) missing.push('cpa')
-  if (dllCount === 0) missing.push('plugins')
+  if (!sourcePresent('plugins')) missing.push('plugins')
   if (hasExe && !hasConfig) missing.push('config')
 
   /**

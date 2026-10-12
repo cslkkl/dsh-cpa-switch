@@ -29,7 +29,7 @@ import { CHANNEL_SPECS } from '../src/channels/registry.ts'
 import { CHANNEL_WIDE } from '../src/checkin-ledger.ts'
 import type { AccountIntent } from '../src/state.ts'
 import type { CpaGateway } from '../src/gateway.ts'
-import { createOperations } from '../src/ops/index.ts'
+import { opsFor } from './ops-deps.ts'
 import {
   localDay,
   readAccountIntent,
@@ -123,7 +123,7 @@ describe('状态文件的并发写', () => {
    */
   it('开机补签与手动签到重叠时，两条记录都要留下', async () => {
     const gate = makeGate()
-    const ops = createOperations({ gateway: gate.gateway })
+    const ops = opsFor(gate.gateway)
     const day = localDay()
 
     const startup = ops.actions.startupCheckin({ enabled: true })
@@ -142,7 +142,7 @@ describe('状态文件的并发写', () => {
   /** 两个手动签到重叠：各自读到的都是当下的文件，两条都该在。 */
   it('两个号的签到重叠时，两条记录都要留下', async () => {
     const gate = makeGate()
-    const ops = createOperations({ gateway: gate.gateway })
+    const ops = opsFor(gate.gateway)
     const day = localDay()
 
     // 第一个请求卡住，第二个（同一渠道、另一个号）照常完成，再放行第一个
@@ -168,7 +168,7 @@ describe('状态文件的并发写', () => {
     )
 
     const gate = makeGate()
-    const ops = createOperations({ gateway: gate.gateway })
+    const ops = opsFor(gate.gateway)
     const startup = ops.actions.startupCheckin({ enabled: true })
     await gate.sent
     gate.release()

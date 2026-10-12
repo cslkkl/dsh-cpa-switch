@@ -20,8 +20,12 @@ src/ 特有约束：
   漏了不报错，只是用户点完看到的还是旧值。判据在 `tests/ops-write-paths.test.ts`。
 - **对 CPA 只有一个通道**：读写一律 `gateway.fetch(path, init)`，
   不要自己拼 `cpaFetch(options(), …)`；就绪前置用 `requireRunning` / `requireReady`。
-- **「CPA 在不在跑」只有两个名字**：只是想知道用 `runtime.status()`（**绝不起进程**），
-  要确保可用用 `runtime.ensure()`。别再自己 `probePort` —— 那会另开一条探活路径。
+- **「CPA 在不在跑」只有三个名字**：只是想知道用 `runtime.status()`（**绝不起进程**），
+  要确保可用用 `runtime.ensure()`，要停掉**自己启的**那个用 `runtime.stop()`。
+  别再自己 `probePort`（那会另开一条探活路径），也别自己拿 `CpaProcess` ——
+  `stop()` 的三条拒绝理由（`lifecycle-disabled` / `not-running` / `not-owned`）
+  是「不许越权」这条口径的落点。换渠道插件 dll 之前必须停 CPA（Windows 上被加载的
+  dll 改不了名），这条序列在 `ops/plugin-update.ts`。
 - **`index.ts` 只做装配**：业务逻辑写进 `ops/`，不要堆在路由 handler 里。
 - **新增路由必须进 `route-table.ts` 的表**（`RouteSpec` 形状见 `routes.ts`），
   不要在 `index.ts` 里直接调宿主 `register`；同批回填 [README.md](README.md) 的路由表。

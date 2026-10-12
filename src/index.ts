@@ -141,14 +141,13 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     maxOutputTokens: () => readConfig().maxOutputTokens,
   })
 
-  const ops = createOperations({
-    gateway,
-    logger: ctx.logger,
-    /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */
-    onAccountsChanged: () => void ensureRoutesFresh('oauth').catch(() => {}),
-  })
-
-  /** 环境准备的运行态 —— 路由与 boot 都只经它，装配层不再自己管进度。 */
+  /**
+   * 环境准备的运行态 —— 路由与 boot 都只经它，装配层不再自己管进度。
+   *
+   * ⚠️ **必须在 `createOperations` 之前建**：更新域要经它换文件
+   * （「停 CPA → 覆盖替换」这条序列需要 runtime 与 setup 同时在手，
+   * 而 `setup/` 层不许依赖 runtime —— 组装点因此在这里）。
+   */
   const setup = new SetupSession({
     readConfig,
     adminKey,
@@ -157,6 +156,15 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     logger: ctx.logger,
     /** 用户点「一键准备」成功后，CPA 可能刚被拉起 —— 立刻推模型路由。 */
     onPrepared: (trigger) => void ensureRoutesFresh(trigger).catch(() => {}),
+  })
+
+  const ops = createOperations({
+    gateway,
+    logger: ctx.logger,
+    /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */
+    onAccountsChanged: () => void ensureRoutesFresh('oauth').catch(() => {}),
+    runtime,
+    setup,
   })
 
   // ── 生命周期 effect ────────────────────────────────────────────────────

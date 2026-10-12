@@ -346,7 +346,7 @@
 
 ## 子目录
 
-- `ops/` —— 业务层五个域 → [ops/README.md](ops/README.md)
+- `ops/` —— 业务层六个域 → [ops/README.md](ops/README.md)
 - `setup/` —— 环境准备（下载 / 校验 / 解压 / 写配置）→ [setup/README.md](setup/README.md)
 - `client/` —— 浏览器半边 → [client/README.md](client/README.md)
 
@@ -357,6 +357,7 @@
 | 路由                           | 方法     | 作用                                                                |
 | ------------------------------ | -------- | ------------------------------------------------------------------- |
 | `/api/v1/cpa/setup`            | GET/POST | 环境状态 / 一键下载 CPA 与渠道插件                                  |
+| `/api/v1/cpa/plugins-update`   | GET/POST | 渠道插件查版本（`?key=`）/ 更新（停 CPA → 覆盖替换）                |
 | `/api/v1/cpa/status`           | GET      | CPA 运行状态、端口、是否已配密钥                                    |
 | `/api/v1/cpa/plugins`          | GET      | 已装渠道列表与能力                                                  |
 | `/api/v1/cpa/accounts?plugin=` | GET      | 账号 + 余额（`&fresh=1` 跳过缓存）                                  |

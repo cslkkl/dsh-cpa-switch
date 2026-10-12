@@ -131,6 +131,29 @@ export const zh = {
   setupStepVerify: '正在校验完整性',
   setupStepExtract: '正在解压',
   setupNote: '不会覆盖你自己装的 CPA。想用它，就在插件设置里把 exePath 指过去。',
+  /**
+   * 渠道插件版本那一行。
+   *
+   * ⚠️ 三句**互不替代**，因为三种事实不同：
+   * `pluginUpdateCurrent` = 知道装的是哪版且与上游相同；
+   * `pluginUpdateAvailable` = 知道差多少（显示两个号，谁新谁旧由人看）；
+   * `pluginUpdateUnknown` = **磁盘上没有安装记录**（老机器升上来的就是这样）——
+   * 「不知道」不许说成「有新版」，也不许说成「已是最新」。
+   */
+  pluginUpdateCurrent: '渠道插件 {tag} 已是最新',
+  pluginUpdateAvailable: '渠道插件 {installed} → {latest}',
+  pluginUpdateUnknown: '渠道插件已装版本未知（本版未记录）· 上游当前 {latest}',
+  pluginUpdateCheckFailedWith: '查不到上游版本：{reason}',
+  pluginUpdateRun: '更新渠道插件',
+  /**
+   * ⚠️ **是「重试」不是「重新检测」**：后者是提示块上那个按钮的词，它重读的是
+   * `/status` + `/setup`；这里重查的是上游版本。两者会在同一屏出现，
+   * 同名不同义用户没法分辨（2026-10-12 实机截图）。
+   */
+  pluginUpdateRetry: '重试',
+  pluginUpdateDone: '渠道插件已更新到 {tag}',
+  pluginUpdateDoneStopped: '渠道插件已更新到 {tag}。CPA 已停止，需要时手动重新启动',
+  pluginUpdateRunFailed: '更新失败，已还原到上一版',
   exhausted: '已耗尽',
   remain: '可用',
   used: '已用',
@@ -316,6 +339,17 @@ export const en: Record<LocaleKey, string> = {
   setupStepExtract: 'Extracting',
   setupNote:
     'An existing CPA install is never overwritten. To use one, point exePath at it in settings.',
+  pluginUpdateCurrent: 'Channel plugins {tag} are up to date',
+  pluginUpdateAvailable: 'Channel plugins {installed} → {latest}',
+  pluginUpdateUnknown: 'Installed version unknown (not recorded) · upstream has {latest}',
+  pluginUpdateCheckFailedWith: 'Could not check upstream: {reason}',
+  pluginUpdateRun: 'Update channel plugins',
+  /** ⚠️ 「重试」与提示块那个「重新检测」不是一件事，见中文表。 */
+  pluginUpdateRetry: 'Retry',
+  pluginUpdateDone: 'Channel plugins updated to {tag}',
+  pluginUpdateDoneStopped:
+    'Channel plugins updated to {tag}. CPA is stopped — start it again when you need it',
+  pluginUpdateRunFailed: 'Update failed; the previous version was restored',
   exhausted: 'Exhausted',
   remain: 'Available',
   used: 'Used',

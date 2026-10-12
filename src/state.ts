@@ -28,6 +28,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { CheckinLedger } from './checkin-ledger.ts'
 import { storagesDir } from './paths.ts'
+import type { SourceKey } from './setup/paths.ts'
 
 /** 本地日期串 `YYYY-MM-DD`。按本地时区算，不是 UTC —— 用户看到的「今天」。 */
 export function localDay(): string {
@@ -81,6 +82,84 @@ export function readExeMemory(): string {
 /** 记住这次找到的路径。 */
 export function writeExeMemory(path: string): void {
   writeJson(exeMemoryPath(), { path, at: new Date().toISOString() })
+}
+
+/* ── 安装记录（装了哪个 tag） ─────────────────────────────────────────── */
+
+/**
+ * 「这个来源装的是上游哪个 tag」的落地文件。
+ *
+ * **为什么需要它**：上游 release 的 tag 是判断「有没有新版」的唯一依据，而
+ * **磁盘上没有任何地方记着它** —— dll 不带版本资源（实测 `FileVersion` 为空）、
+ * CPA 的 `/v0/management/plugins` 也不返回版本。于是不记这一笔就永远答不出
+ * 「你手上这份是不是上游现在发的那份」。
+ *
+ * ⚠️ **记的是「安装时上游最新是哪个 tag」，不是「这个包的语义版本」**：
+ * 上游可能重打包同一个 tag —— 那时这份记录说「已是最新」，而内容其实换了。
+ * 判据的边界就写在这里，不假装它比 tag 更准。
+ */
+function installRecordPath(): string {
+  return join(storagesDir(), 'cpa-panel-install.json')
+}
+
+/** 一个来源的安装记录。 */
+export interface InstallEntry {
+  /** 安装那一刻上游 release 的 tag（原样，含前导 `v`）。 */
+  readonly tag: string
+  /** 当时那个资产的文件名（诊断用；读不到时缺省）。 */
+  readonly name?: string
+  /** 写入时刻（ISO 串）；仅供展示。 */
+  readonly at: string
+}
+
+/** 解析一个安装记录条目；形状不对就当没记过。 */
+function installEntryFrom(raw: unknown): InstallEntry | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const entry = raw as Record<string, unknown>
+  if (typeof entry.tag !== 'string' || entry.tag === '') return undefined
+  return {
+    tag: entry.tag,
+    ...(typeof entry.name === 'string' && entry.name !== '' ? { name: entry.name } : {}),
+    at: typeof entry.at === 'string' ? entry.at : '',
+  }
+}
+
+/**
+ * 读某个来源的安装记录。
+ *
+ * @returns 没记过、文件坏了、或形状不对时是 `undefined` —— **如实说「不知道」**，
+ * 不拿一个编出来的版本号顶上（界面据此显示「未知」，而不是假装已是最新）。
+ */
+export function readInstalled(key: SourceKey): InstallEntry | undefined {
+  const parsed = readJson<{ sources?: unknown }>(installRecordPath())
+  const sources = parsed?.sources
+  if (typeof sources !== 'object' || sources === null) return undefined
+  return installEntryFrom((sources as Record<string, unknown>)[key])
+}
+
+/**
+ * 记下这次装的是哪个 tag。
+ *
+ * ⚠️ **读改写、同步完成、中间没有 `await`** —— 与签到账本同一条不变量（见文件头）：
+ * 两个来源各占一格，整份覆盖的写法会让「刚更新完 cpa」把「plugins 的记录」抹掉。
+ */
+export function rememberInstall(key: SourceKey, entry: { tag: string; name?: string }): void {
+  const path = installRecordPath()
+  const parsed = readJson<{ sources?: unknown }>(path)
+  const current =
+    typeof parsed?.sources === 'object' && parsed.sources !== null
+      ? (parsed.sources as Record<string, unknown>)
+      : {}
+  writeJson(path, {
+    sources: {
+      ...current,
+      [key]: {
+        tag: entry.tag,
+        ...(entry.name === undefined ? {} : { name: entry.name }),
+        at: new Date().toISOString(),
+      },
+    },
+  })
 }
 
 /* ── 最近一次拉起的 CPA 进程 ─────────────────────────────────────────── */

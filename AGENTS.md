@@ -194,6 +194,23 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 
 **跨模块的静默失败**
 
+- **「磁盘上有 dll」被当成「装好了」，而它也可能是三周前的包** —— 2026-10-12 实测：
+  渠道插件停在 10-04 的构建（qoder ~0.8.45），上游当天已是 v0.8.66，而
+  **你踩的那个「`developer` 角色被上游拒」正是 0.8.64 修的**（上游
+  `f496983 … normalize the developer role, fixes #34`）。旧的判据只看
+  `countDlls > 0`，所以「一键准备环境」点一百次也不会换版本，**零报错**。
+  现在有条路可走：面板上的「渠道插件 a → b」+ 你点了才换（`ops/plugin-update.ts`），
+  已装版本记在 `~/.dsh/storages/cpa-panel-install.json`。
+  ⚠️ **判「有没有新版」用 tag 相等，不解析版本号**；**没记过 tag 时什么都不说**（不许编）。
+  ⚠️ 换文件**必须先停 CPA**（Windows 上被加载的 dll 改不了名；外部实例一律拒绝、
+  只停自己启的），失败自动还原到上一版。判据 `tests/plugin-update.test.ts`。
+- **`upstream served model "auto"` 是上游的自我标注，不是「它换了模型」** ——
+  qoder 对**每个**模型都这么回（实测 5/5，更新到 v0.8.66 后照旧），
+  而同一批模型实际都能正常工作、宿主的「模型已切换」也逐次出现。
+  把这句话读成「模型被静默替换」会得出**与事实相反**的结论
+  （2026-10-12 我自己就这么读过一次）。它只说明「上游没说清自己跑了哪个」，
+  要判真实服务模型得看上游计费或让渠道插件暴露，别拿这句告警当证据。
+  见[依据记录](.agents/notes/2026-10-12-qoder-reports-auto-in-response.md)。
 - **`lib/` 不入库，但它才是宿主读的东西** —— clone 后先 `pnpm install && pnpm build`；
   改完源码也必须重建，否则跑的是旧产物。产物断言的坑见 [scripts/AGENTS.md](scripts/AGENTS.md)。
 - **DSH 从 profile 的 node_modules 装载插件，不是工作区路径** —— 两个 profile 各有

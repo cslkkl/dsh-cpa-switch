@@ -220,6 +220,17 @@
   - 失败明细**逐个点名**（账号名 + 原因），超过 3 条截断并说明还剩几个
   - ⚠️ 分隔符与冒号都取自文案表（`actionListSep` / `colon`）——
     硬编码 `：` 会让英文下变成 `Check-in failed：zlz`（F28）
+- **`update-text.ts`** —— 渠道插件版本那一行 + 跑完那一次的结果。**不含 JSX**，同 `status-text.ts`。
+  - 导出：`updateView` / `updateResultLine` / 类型 `PluginUpdateInfo` / `UpdateView` / `UpdateAction`
+  - ⚠️ 三句话**互不替代**：`已是最新`（记过且与上游相同）/ `a → b`（记过且不同）/
+    `未知`（**没记过**安装版本 —— 老机器升上来就是这样）。把「未知」说成「有新版」或
+    「已是最新」都是替后端撒谎
+  - ⚠️ **查不到上游**说的是「查不到」，不是「已是最新」；响应认不出时**什么都不说**
+    （返回空串让调用方不渲染那一行）
+  - 动作只有三档：`update`（有新版 / 未知）/ `retry`（查不到上游）/ `none`
+  - ⚠️ **「已是最新」是 `none`，不给按钮**：陈述句不需要动作；而同屏的提示块上已经有一个
+    「重新检测」，两者做的是不同的事（这里重查上游版本、那里重读 `/status` + `/setup`），
+    同名不同义用户没法分辨（2026-10-12 实机截图）。所以失败态给的是**「重试」**，不叫「重新检测」
 - **`status-text.ts`** —— 状态条该怎么说：圆点语义、主句、要不要挂提示块。**不含 JSX**。
   - 导出：`statusView` / 类型 `StatusInput` / `StatusView` / `NoticeView` / `StatusDot` / `NoticeAction`
   - 回答两件事：**端口的归属**（在跑但不是自己启的 ⇒ 琥珀点 + 提示块，
@@ -253,8 +264,11 @@
   - `prefetch` 失败**不算错**（只是优化）；判据是缓存里真的有值，不是「没报错」
 - **`endpoints.ts`** —— `/api/v1/cpa/*` 的**端点与解码**：`paths` 与逐个读 / 写函数。
   - 导出：`paths`（路径的**唯一来源**，别处不许再写字面量）/ `fetchSetup` / `runSetup` /
-    `fetchStatus` / `startCpa` / `act` / `selectCpaAccount` / `setAccountEnabled` /
-    `setAutoCheckin` / `autoCheckinOf` / `startAuth` / `authStatus` / `authCancel`
+    `fetchStatus` / `startCpa` / `runPluginUpdate` / `act` / `selectCpaAccount` /
+    `setAccountEnabled` / `setAutoCheckin` / `autoCheckinOf` / `startAuth` / `authStatus` /
+    `authCancel`
+  - 查渠道插件版本那条**没有** fetcher：读走 `useResource` + `paths.pluginsUpdate`，
+    不为对称再造一个没人调用的导出
   - ⚠️ **写函数自己失效缓存**（不是让调用方记得）：`act` / `selectCpaAccount` /
     `setAccountEnabled` / `setAutoCheckin` → 都是 `accounts:` 前缀。
     ⚠️ **前缀必须对上「本半边真的有读者」的那个读键**，不是宿主 `cacheKeys` 的名字 ——
@@ -408,6 +422,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | 外部依赖                                           | `tsdown.config.ts` 的 externals 同步（漏了 React 会被**内联**进浏览器产物）                                                                                                                                                                                                                                                                                                                                                                           |
 | 样式 token                                         | [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §4.10                                                                                                                                                                                                                                                                                                                                                                                        |
 | [status-text.ts](status-text.ts)                   | 圆点语义与提示块**全在这里判**（不含 JSX，所以 Node 侧测得到）：优先级「占用 > 起不来 > 正常」；**两个版本号缺一个就不提数字**。同步 `tests/status-text.test.ts`                                                                                                                                                                                                                                                                                      |
+| [update-text.ts](update-text.ts)                   | 渠道插件版本那一行的判定（不含 JSX）：**「未知 / 有新版 / 已是最新」三态不许互相冒充**；**查不到上游**说「查不到」；认不出就什么都不说。CPA 被停掉时那行话必须说出来。同步 `tests/update-text.test.ts`                                                                                                                                                                                                                                                |
 | [transport.ts](transport.ts)                       | 一次请求 + 异常**一律收敛成 `{ ok: false, error }`、不抛** —— 调用方只判 `ok`                                                                                                                                                                                                                                                                                                                                                                         |
 | [cache-keys.ts](cache-keys.ts)                     | 浏览器半边**读缓存键的唯一来源**：键身兼两职（读用它取键、写后当失效前缀）。⚠️ **新增读键必须加到这里**；它与宿主 `gateway.cacheKeys` 是**两套独立缓存**，同名只是巧，**不要互相 import**。判据 `tests/client-cache-keys.test.ts` 拦住别处手写的 `key: '…'`                                                                                                                                                                                           |
 | [read-cache.ts](read-cache.ts)                     | 读缓存（新鲜 / 陈旧两档 + **按前缀作废**）与可订阅 store；语义改动同步 [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                                                                                                                                                                                                          |
