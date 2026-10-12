@@ -1,50 +1,30 @@
 /**
- * 环境准备的主流程：下载 → 校验 → 解压 → 写配置。
+ * 环境准备的主流程：逐来源安装 → 写配置 → 探一次就位情况。
  *
  * 从 `index.ts` 拆出来：那里原本既是**再导出桶**又是**实现**，两件事混在一个文件里，
  * 于是「谁在用 prepare」要读完整份文件才知道。现在 `index.ts` 只做转出。
+ *
+ * ⚠️ **「要不要跳过」不在这里** —— 它在 [install.ts](install.ts) 的 `installSource`
+ * 里，作为 `force` 参数。本文件只管**顺序**（先本体、后渠道）与**配置**。
  *
  * @module dsh-cpa-switch/setup/prepare
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
 
-import {
-  SOURCES,
-  managedConfigPath,
-  managedCpaDir,
-  managedExePath,
-  managedPluginsDir,
-} from './paths.ts'
-import {
-  countDlls,
-  download,
-  extract,
-  findAsset,
-  inspect,
-  listPluginIds,
-  verify,
-} from './download.ts'
+import { SOURCE_KEYS, managedCpaDir, managedConfigPath, managedPluginsDir } from './paths.ts'
+import { inspect, listPluginIds } from './download.ts'
+import { installSource } from './install.ts'
+import type { InstallDeps, SetupStep } from './install.ts'
 import { renderConfig, writeConfig } from './config.ts'
-import type { SourceKey } from './paths.ts'
-
-/** 进度回调收到的单步事件。 */
-export interface SetupStep {
-  readonly phase: string
-  readonly key?: string
-  readonly label?: string
-  readonly name?: string
-  readonly size?: number
-  readonly received?: number
-  readonly total?: number
-  readonly state?: unknown
-}
 
 /** `prepare` 的入参。 */
 export interface PrepareInput {
   readonly port: number
   readonly secretKey: string
   readonly onStep?: (step: SetupStep) => void
+  /** 安装用的注入点（判据用假实现；生产不传）。 */
+  readonly install?: InstallDeps | undefined
 }
 
 /** `prepare` 的结果。 */
@@ -73,58 +53,30 @@ export async function prepare(input: PrepareInput): Promise<PrepareResult> {
   mkdirSync(managedCpaDir(), { recursive: true })
   const done: Record<string, unknown> = {}
 
-  for (const key of ['cpa', 'plugins'] as const satisfies readonly SourceKey[]) {
-    const source = SOURCES[key]
-
-    /**
-     * **已有就跳过 —— 只补缺件，绝不重下。**
-     *
-     * 没有这条时，只要配置缺一次就会把 exe 与渠道插件**整包重下**：
-     * 40 MB 白流量、几十秒白等，而且会把用户手上正跑着的那份 exe
-     * 覆盖成刚下载的版本 —— 一次「补配置」变成一次静默升级。
-     *
-     * 判据刻意宽松（exe 存在 / dll 数 > 0）而不是比对版本：
-     * 插件无权替用户决定「你那份旧了该换」，那需要用户显式点重装。
-     */
-    const alreadyPresent =
-      key === 'cpa' ? existsSync(managedExePath()) : countDlls(managedPluginsDir()) > 0
-    if (alreadyPresent) {
-      step('reuse', { key, label: source.label })
-      done[key] = { reused: true }
-      continue
-    }
-
-    step('query', { key, label: source.label })
-    const asset = await findAsset(source)
-    step('download', { key, label: source.label, name: asset.name, size: asset.size })
-
-    let downloaded
-    try {
-      downloaded = await download(asset, (received, total) => {
-        step('progress', { key, label: source.label, received, total })
-      })
-    } catch (error) {
-      return { ok: false, phase: 'download', key, error: String((error as Error).message) }
-    }
-
-    const check = verify(downloaded, asset.digest)
-    if (!check.ok) {
+  /**
+   * 顺序即依赖：渠道插件解压进 `cpa/plugins/`，先有目录再谈别的；
+   * 而用户看到的是「本体 → 渠道」这个顺序（`SOURCE_KEYS`）。
+   *
+   * 失败时把 `phase` / `key` / `error` 原样带出，路由回给面板 ——
+   * 「哪一步失败」是用户唯一能动手的依据，一句「准备失败」等于没说。
+   */
+  for (const key of SOURCE_KEYS) {
+    const outcome = await installSource(key, {
+      ...(input.onStep === undefined ? {} : { onStep: input.onStep }),
+      ...(input.install ?? {}),
+    })
+    if (!outcome.ok) {
       return {
         ok: false,
-        phase: 'verify',
+        ...(outcome.phase === undefined ? {} : { phase: outcome.phase }),
         key,
-        error: `sha256 不匹配（期望 ${check.expected}，实际 ${check.actual}）`,
+        error: outcome.error ?? 'unknown',
       }
     }
-
-    // CPA 本体解压进 cpa/；渠道插件解压进 cpa/plugins/
-    const dest = key === 'cpa' ? managedCpaDir() : managedPluginsDir()
-    step('extract', { key, label: source.label })
-    const extracted = await extract(downloaded.path, dest)
-    if (!extracted.ok) {
-      return { ok: false, phase: 'extract', key, error: String(extracted.error) }
-    }
-    done[key] = { name: asset.name, tag: asset.tag, verified: check.skipped !== true }
+    done[key] =
+      outcome.reused === true
+        ? { reused: true }
+        : { name: outcome.name, tag: outcome.tag, verified: outcome.verified }
   }
 
   /**

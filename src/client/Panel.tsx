@@ -8,7 +8,7 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { cacheKeys } from './cache-keys.ts'
-import { paths, runSetup, startCpa } from './endpoints.ts'
+import { paths, runPluginUpdate, runSetup, startCpa } from './endpoints.ts'
 import { prefetch } from './read-cache.ts'
 import { PluginPanel } from './PluginPanel.tsx'
 import { progressLine } from './progress-text.ts'
@@ -17,6 +17,8 @@ import { RoutingSection } from './RoutingSection.tsx'
 import { SkeletonPanel } from './Skeleton.tsx'
 import { statusView } from './status-text.ts'
 import type { StatusInput, StatusView } from './status-text.ts'
+import { updateResultLine, updateView } from './update-text.ts'
+import type { PluginUpdateInfo } from './update-text.ts'
 import { useResource } from './use-resource.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
@@ -58,6 +60,18 @@ interface SetupInfo {
  */
 type SetupAction =
   { readonly phase: 'working' } | { readonly phase: 'error'; readonly error: string } | null
+
+/**
+ * 更新渠道插件的**本地状态**：跑完那一次的结果（成败 + CPA 有没有被停）。
+ *
+ * 与 `SetupAction` 分开：那个描述的是「环境还没装好」这条引导流程，
+ * 这个描述的是「装好了、但想换一批渠道插件」——两件事的界面位置也不同。
+ */
+type PluginUpdateAction =
+  | { readonly phase: 'working' }
+  | { readonly phase: 'done'; readonly tag: string; readonly stopped: boolean }
+  | { readonly phase: 'error' }
+  | null
 
 /** `Panel` 的入参。 */
 export interface PanelProps {
@@ -126,6 +140,54 @@ export function Panel(props: PanelProps): ReactNode {
     // 服务端已经落地了新状态，重读一次拿真值（不拿 POST 的返回猜）
     await setupResource.reload({ force: true })
   }, [setupResource])
+
+  /**
+   * 渠道插件的版本查询。
+   *
+   * ⚠️ **不轮询**：它每次都要打一次 GitHub API（未认证限流 60 次/小时）。
+   * 只在面板挂载时读一次，用户点「重新检测」才再读。
+   */
+  const updateResource = useResource<PluginUpdateInfo>({
+    key: cacheKeys.pluginUpdate('plugins'),
+    path: paths.pluginsUpdate('plugins'),
+    select: (result) => result as PluginUpdateInfo,
+  })
+  const [updateAction, setUpdateAction] = useState<PluginUpdateAction>(null)
+
+  const update = updateView(updateResource.data, t)
+  const updateResult = updateResultLine(
+    updateAction?.phase === 'done'
+      ? { ok: true, stopped: updateAction.stopped, tag: updateAction.tag }
+      : updateAction?.phase === 'error'
+        ? { ok: false }
+        : null,
+    t,
+  )
+
+  /**
+   * 更新渠道插件：宿主先停 CPA，再覆盖替换。
+   *
+   * ⚠️ 期间轮询 **`/setup`**（不是这条）：长活（约 17 MB）的进度挂在
+   * `SetupSession` 上，宿主两条路共用同一把运行态锁与同一份 progress。
+   */
+  const updatePlugins = useCallback(async (): Promise<void> => {
+    setUpdateAction({ phase: 'working' })
+    const result = await runPluginUpdate('plugins')
+    const data = result as { tag?: unknown; stopped?: unknown; error?: unknown }
+    setUpdateAction(
+      result.ok
+        ? {
+            phase: 'done',
+            tag: typeof data.tag === 'string' ? data.tag : '',
+            stopped: data.stopped === true,
+          }
+        : { phase: 'error' },
+    )
+    // F33：写成功后真去读一次，不拿 POST 的返回猜
+    await updateResource.reload({ force: true })
+    await setupResource.reload({ force: true })
+    await statusResource.reload({ force: true })
+  }, [updateResource, setupResource, statusResource])
 
   /** 渠道清单。它是**静态**的（四条渠道写死在 `channels/registry.ts`）。 */
   const pluginsResource = useResource<readonly PluginMeta[]>({
@@ -258,6 +320,53 @@ export function Panel(props: PanelProps): ReactNode {
           )}
         </div>
       )}
+
+      {/*
+       * 渠道插件版本一行。
+       *
+       * 只在**环境已就绪**时出现：环境还缺东西时这一行没有意义 —— 那条路由
+       * 「一键准备环境」负责，它会装上游当前的版本。
+       *
+       * 为什么放在状态条下面而不是「环境准备」块里：后者只在**缺东西**时渲染
+       * （`ok !== true`），而更新恰恰是「东西都齐了、但想换一批」的场景。
+       *
+       * ⚠️ 状态条那一栏也要**同时**看到 CPA 是否被停掉（更新前会停），
+       * 所以两块的相邻关系是有意的。
+       */}
+      {setupReady && update.line !== '' && (
+        <div className={css.updateRow}>
+          <span className={css.updateText}>{update.line}</span>
+          {update.action === 'update' && (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={updateAction?.phase === 'working'}
+              onClick={() => void updatePlugins()}
+            >
+              {t('pluginUpdateRun')}
+            </Button>
+          )}
+          {update.action === 'recheck' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={updateAction?.phase === 'working'}
+              onClick={() => void updateResource.reload({ force: true })}
+            >
+              {t('pluginUpdateRecheck')}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/*
+       * 更新跑完那一次的结果。
+       *
+       * ⚠️ 文案里**不提**「点哪个按钮」：那种交叉引用会让这句模板反过来依赖
+       * 状态条上按钮的文案键（两处对不上，用户就会去找一个不存在的按钮）。
+       * 那个「启动」按钮本来就在上面一行，说清事实就够。
+       */}
+      {updateResult !== '' && <div className={css.hint}>{updateResult}</div>}
 
       {/*
        * 提示块：状态条说「是什么状态」，这里说「那意味着什么、能做什么」。

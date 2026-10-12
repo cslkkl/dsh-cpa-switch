@@ -10,6 +10,7 @@
 
 export {
   SOURCES,
+  SOURCE_KEYS,
   managedCpaDir,
   managedExePath,
   managedConfigPath,
@@ -27,9 +28,12 @@ export {
   inspect,
   listPluginIds,
   removeDir,
+  sourcePresent,
   verify,
 } from './download.ts'
 export type { Asset, Downloaded, SetupStatus, VerifyResult } from './download.ts'
+export { installSource } from './install.ts'
+export type { InstallDeps, InstallOutcome, SetupStep } from './install.ts'
 export {
   CONFIG_VERSION,
   generateApiKey,
@@ -43,6 +47,6 @@ export {
   writeConfig,
 } from './config.ts'
 export { prepare } from './prepare.ts'
-export type { PrepareInput, PrepareResult, SetupStep } from './prepare.ts'
+export type { PrepareInput, PrepareResult } from './prepare.ts'
 export { SetupSession } from './session.ts'
 export type { SetupRunResult, SetupSessionDeps } from './session.ts'

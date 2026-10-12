@@ -26,7 +26,8 @@ vi.mock('node:os', async (importOriginal) => {
 import type { CpaRequestInit } from '../src/cpa.ts'
 import { CHANNEL_WIDE, isRecordedToday } from '../src/checkin-ledger.ts'
 import type { CpaGateway } from '../src/gateway.ts'
-import { createOperations, type Operations, type OpsResult } from '../src/ops/index.ts'
+import type { Operations, OpsResult } from '../src/ops/index.ts'
+import { opsFor } from './ops-deps.ts'
 import { localDay, readAccountIntent, readCheckinLedger } from '../src/state.ts'
 
 /** 一次 `gateway.fetch` 的记录。 */
@@ -260,7 +261,7 @@ describe('写成功必须作废读缓存', () => {
       const cpa = makeCpa()
       item.setup?.(cpa)
 
-      const result = await item.run(createOperations({ gateway: cpa.gateway }))
+      const result = await item.run(opsFor(cpa.gateway))
       expect(result.ok, `写操作没成功：${JSON.stringify(result)}`).toBe(true)
 
       expect(cpa.invalidations).toEqual([item.invalidates])
@@ -338,7 +339,7 @@ describe('读路径不许作废缓存', () => {
       const cpa = makeCpa()
       item.setup(cpa)
 
-      const result = await item.run(createOperations({ gateway: cpa.gateway }))
+      const result = await item.run(opsFor(cpa.gateway))
       expect(result.ok).toBe(true)
       expect(cpa.invalidations).toEqual([])
     })
@@ -364,7 +365,7 @@ describe('签到记账本', () => {
     isRecordedToday(readCheckinLedger(), plugin, authIndex, localDay())
 
   it('单号签到记在该号上', async () => {
-    const ops = createOperations({ gateway: checkinCpa().gateway })
+    const ops = opsFor(checkinCpa().gateway)
     await ops.actions.run('workbuddy', 'checkin', '0')
 
     expect(recorded('workbuddy', '0')).toBe(true)
@@ -373,7 +374,7 @@ describe('签到记账本', () => {
   })
 
   it('渠道级签到记在保留键上，该渠道任意账号都算今天签过', async () => {
-    const ops = createOperations({ gateway: checkinCpa().gateway })
+    const ops = opsFor(checkinCpa().gateway)
     await ops.actions.run('workbuddy', 'checkin', undefined)
 
     expect(recorded('workbuddy', CHANNEL_WIDE)).toBe(true)
@@ -386,7 +387,7 @@ describe('签到记账本', () => {
   })
 
   it('跑任务**不记账**（任务不是按天的事实）', async () => {
-    const ops = createOperations({ gateway: checkinCpa().gateway })
+    const ops = opsFor(checkinCpa().gateway)
     await ops.actions.run('workbuddy', 'tasks', '0')
 
     expect(recorded('workbuddy', '0')).toBe(false)
@@ -396,7 +397,7 @@ describe('签到记账本', () => {
   it('别的渠道的签到不记到本渠道', async () => {
     const cpa = makeCpa()
     cpa.reply('/v0/management/plugins/trae/checkin', { summary: {} })
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
     await ops.actions.run('trae', 'checkin', '0')
 
     expect(recorded('trae', '0')).toBe(true)
@@ -426,7 +427,7 @@ describe('启用态：回读说了算', () => {
     // 回读永远说「还禁用着」（写没生效，或写之后被别的东西改回去了）
     cpa.reply(AUTH_FILES, oneAccount(true))
     cpa.reply(AUTH_STATUS, {})
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
 
     const result = mustOk(await ops.enable.setEnabled('workbuddy', '0', true))
 
@@ -437,7 +438,7 @@ describe('启用态：回读说了算', () => {
     const cpa = makeCpa()
     cpa.reply(AUTH_FILES, oneAccount(false))
     cpa.reply(AUTH_STATUS, {})
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
 
     const result = mustOk(await ops.enable.setEnabled('workbuddy', '0', true))
 
@@ -455,7 +456,7 @@ describe('启用态：回读说了算', () => {
       return oneAccount(true)
     })
     cpa.reply(AUTH_STATUS, {})
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
 
     const result = mustOk(await ops.enable.setEnabled('workbuddy', '0', true))
 
@@ -467,7 +468,7 @@ describe('启用态：回读说了算', () => {
     const cpa = makeCpa()
     cpa.reply(AUTH_FILES, oneAccount(true))
     cpa.reply(AUTH_STATUS, {})
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
 
     const result = await ops.enable.select('workbuddy', '0')
 
@@ -485,7 +486,7 @@ describe('启用态：回读说了算', () => {
       ],
     })
     cpa.fail('/v0/management/auth-files/status', new Error('patch-refused'))
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
 
     const result = mustOk(await ops.enable.select('workbuddy', '0'))
 
@@ -513,7 +514,7 @@ describe('启用态：回读说了算', () => {
     })
     // 写 b.json 会被拒（计划里它该被禁用），回读如实说它**仍启用**
     cpa.fail('/v0/management/auth-files/status', new Error('patch-refused'))
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
 
     await ops.enable.select('workbuddy', '0')
 
@@ -538,7 +539,7 @@ describe('启用态：回读说了算', () => {
         : { files: [{ name: 'a.json', provider: 'workbuddy', auth_index: '0', disabled: false }] }
     })
     cpa.reply('/v0/management/auth-files/status', {})
-    const ops = createOperations({ gateway: cpa.gateway })
+    const ops = opsFor(cpa.gateway)
 
     const result = mustOk(await ops.enable.select('workbuddy', '0'))
 

@@ -86,6 +86,34 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       },
     },
     {
+      /**
+       * 渠道插件的**版本查询与更新**。
+       *
+       * - `GET` —— 查「已装的 tag」与「上游最新的 tag」（打 GitHub，不碰 CPA）；
+       * - `POST` —— 更新：停 CPA → 覆盖替换 → 报告。
+       *
+       * ⚠️ **与 `/setup` 分开是有意的**：查版本要打一次 GitHub API，而 `/setup`
+       * 在面板挂载、进度轮询里被反复调用 —— 合在一起等于每次轮询都去问一次上游
+       * （未认证限流 60 次/小时），既不礼貌也会让面板偶尔无故报错。
+       *
+       * ⚠️ **更新是覆盖替换、不是补缺件**：`/setup` 的 POST 永远不会重下已有的东西，
+       * 这条会。它只由用户显式点击触发，从不自动跑。
+       *
+       * `?key=` 空着取默认来源（渠道插件）。CPA 本体**不在界面暴露**，但机制通用 ——
+       * 见 `ops/plugin-update.ts` 的 `DEFAULT_KEY`。
+       */
+      path: '/api/v1/cpa/plugins-update',
+      methods: ['GET', 'POST'],
+      handle: async (request) => {
+        if (request.method === 'POST') {
+          const body = await readBody(request)
+          return json(await ops.pluginUpdate.update(typeof body.key === 'string' ? body.key : ''))
+        }
+        const url = new URL(request.url)
+        return json(await ops.pluginUpdate.check(url.searchParams.get('key') ?? ''))
+      },
+    },
+    {
       path: '/api/v1/cpa/status',
       methods: ['GET'],
       handle: async () => {

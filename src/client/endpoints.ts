@@ -26,6 +26,9 @@ import { api, post, type ApiResult } from './transport.ts'
 export const paths = {
   /** 环境状态 / 一键准备（`GET` 查、`POST` 装）。 */
   setup: '/api/v1/cpa/setup',
+  /** 渠道插件查版本 / 更新（`GET` 查、`POST` 更新）。 */
+  pluginsUpdate: (key: string): string =>
+    '/api/v1/cpa/plugins-update?key=' + encodeURIComponent(key),
   /** CPA 运行状态。 */
   status: '/api/v1/cpa/status',
   /** 已装渠道清单（静态）。 */
@@ -61,6 +64,27 @@ export function fetchSetup(): Promise<ApiResult> {
 /** 一键准备环境：下载 + 校验 + 解压 + 写配置。 */
 export function runSetup(): Promise<ApiResult> {
   return api(paths.setup, { method: 'POST' })
+}
+
+/**
+ * 更新渠道插件：宿主会先停 CPA，再覆盖替换。
+ *
+ * ⚠️ 成功后作废两处读：**版本**（下次读要拿到新 tag）与 **`status`** ——
+ * 后者是因为 CPA 此刻可能刚被停掉（`stopped` 字段在响应里）。漏了它，
+ * 状态条会继续显示「运行中」直到新鲜窗口过期，而用户已经连不上了。
+ *
+ * ⚠️ 查版本那条**没有**对应的 fetcher：读走 `useResource` + `paths.pluginsUpdate`
+ * （它需要缓存的键与路径，而不是一个已经发出去的请求）。别为了对称再造一个
+ * 没人调用的导出。
+ */
+export function runPluginUpdate(key: string): Promise<ApiResult> {
+  return post(paths.pluginsUpdate(key), { key }).then((result) => {
+    if (result.ok) {
+      invalidateReads(cacheKeys.pluginUpdate(key))
+      invalidateReads(cacheKeys.status)
+    }
+    return result
+  })
 }
 
 /** 查 CPA 运行状态。 */

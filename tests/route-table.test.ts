@@ -65,8 +65,8 @@ function makeDeps(): RouteDeps {
     cpaFetch: async () => ({}),
     runtime,
   })
-  const ops = createOperations({ gateway })
   const setup = new SetupSession({ readConfig, adminKey, onPrepared: () => {} })
+  const ops = createOperations({ gateway, runtime, setup })
   return { ops, adminKey, readConfig, setup, runtime }
 }
 

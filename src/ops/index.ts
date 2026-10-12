@@ -15,10 +15,13 @@
 
 import type { LoggerLike } from '../credentials.ts'
 import type { CpaGateway } from '../gateway.ts'
+import type { CpaRuntime } from '../runtime.ts'
+import type { InstallDeps, SetupSession } from '../setup/index.ts'
 import { createAccountsOps, type AccountsOps } from './accounts.ts'
 import { createActionsOps, type ActionsOps } from './actions.ts'
 import { createEnableOps, type EnableOps } from './enable.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
+import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
 import { createSchedulingOps, type SchedulingOps } from './scheduling.ts'
 
 export type { OpsFailure, OpsResult, OpsSuccess } from './result.ts'
@@ -39,6 +42,22 @@ export interface OpsDeps {
    * 模型路由依赖账号集合，宿主用它安排一次重推。
    */
   readonly onAccountsChanged?: (() => void) | undefined
+  /**
+   * 运行态：只有更新域用（换 dll 前要停 CPA）。其余各域一律经 `gateway`。
+   *
+   * ⚠️ 这里**没有** `process` / `processOptions` —— 那两个名字在 `CpaRuntime`
+   * 后面，「会不会动手」这件事只该有一个回答者（见 [../runtime.ts](../runtime.ts)）。
+   */
+  readonly runtime: CpaRuntime
+  /**
+   * 环境准备的运行态：更新域经它换文件（下载 / 校验 / 解压 / 备份 / 记录）。
+   *
+   * ⚠️ 更新域拿它，是因为「停 CPA」需要 `runtime`，而 `setup/` 层不许依赖它 ——
+   * 序列因此只能在这一层组装（理由见 [plugin-update.ts](plugin-update.ts)）。
+   */
+  readonly setup: SetupSession
+  /** 安装的注入点（判据用假实现；生产不传）。 */
+  readonly install?: InstallDeps | undefined
 }
 
 /** 业务层的全部能力，按域分组。 */
@@ -53,6 +72,8 @@ export interface Operations {
   readonly oauth: OauthOps
   /** 路由策略、调度模式、自动签到开关。 */
   readonly scheduling: SchedulingOps
+  /** 渠道插件查版本 / 更新（**唯一不碰 CPA API 的域**）。 */
+  readonly pluginUpdate: PluginUpdateOps
 }
 
 /** 按域组装业务层。 */
@@ -63,5 +84,6 @@ export function createOperations(deps: OpsDeps): Operations {
     enable: createEnableOps(deps),
     oauth: createOauthOps(deps),
     scheduling: createSchedulingOps(deps),
+    pluginUpdate: createPluginUpdateOps(deps),
   }
 }

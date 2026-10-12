@@ -1,14 +1,19 @@
 /**
- * CPA 运行时的两个显式语义：**看**（{@link CpaRuntime.status}）与
- * **要**（{@link CpaRuntime.ensure}）。
+ * CPA 运行时的三个显式语义：**看**（{@link CpaRuntime.status}）、
+ * **要**（{@link CpaRuntime.ensure}）、**停**（{@link CpaRuntime.stop}）。
  *
- * 为什么要把它们摆成两个名字：`CpaProcess` 上 `isListening` 与 `ensure` 挨着放，
+ * 为什么要把它们摆成三个名字：`CpaProcess` 上 `isListening` 与 `ensure` 挨着放，
  * 调用方很容易在「只想知道在不在跑」的地方顺手写 `ensure` —— 那会**悄悄拉起
  * 一个子进程**（用户没点任何东西，端口上就多了一个服务）。反过来，在「必须确保
  * 可用」的地方写 `isListening` 又会漏掉拉起，表现为「面板永远报 CPA 不可用」。
  * 名字各自说明会不会动手，读代码的人不用回头翻 `process.ts`。
  *
- * 两者共用 `CpaProcess` 的探活记忆层，所以面板挂载时 `/status` 与 `/accounts`
+ * `stop` 是第三个名字而不是让调用方直接拿 `CpaProcess`：换了 dll 之后必须重启 CPA
+ * （Windows 上被加载的 dll 改不了名），这件事只该从**一个**地方发生 ——
+ * 见 `ops/plugin-update.ts`。它同样受 `manageLifecycle` 约束：用户显式不要
+ * 这个能力时，连停都不许。
+ *
+ * 三者共用 `CpaProcess` 的探活记忆层，所以面板挂载时 `/status` 与 `/accounts`
  * 不会给出**相反**的答案（状态条说「运行中」、账号列表报 `cpa-unavailable`）——
  * 那正是绕开记忆层直接 `probePort` 会踩的坑。
  *
@@ -40,6 +45,13 @@ export interface RuntimeStatus {
   readonly issue?: StartupIssue | undefined
   /** 「代际被拒」时对端要求的那一代，供界面把话说具体。 */
   readonly issueExpectedConfigVersion?: number | undefined
+}
+
+/** 「停」的结论。拒绝也是结论，所以带 `reason` 而不是抛。 */
+export interface RuntimeStop {
+  readonly stopped: boolean
+  /** 没停成的原因。 */
+  readonly reason?: 'lifecycle-disabled' | 'not-running' | 'not-owned'
 }
 
 /** 运行时门面的依赖。 */
@@ -91,5 +103,27 @@ export class CpaRuntime {
    */
   async ensure(): Promise<EnsureResult> {
     return await this.#deps.process.ensure(this.#deps.processOptions())
+  }
+
+  /**
+   * 停掉**本插件自己启的** CPA。
+   *
+   * 三条拒绝理由都是**如实拒绝**，不是失败：
+   * - `lifecycle-disabled`：配置里关掉了生命周期管理，连停也不许（与 `ensure` 同口径）；
+   * - `not-running`：本来就没在跑，没什么可停的；
+   * - `not-owned`：端口上那个是**外部实例**（用户自己起的、或另一个 DSH），
+   *   杀自己的进程与杀别人的是两件事 —— 这里只做前者。
+   *
+   * 调用点：替换渠道插件 dll 之前（Windows 上被加载的 dll 改不了名）。
+   */
+  async stop(): Promise<RuntimeStop> {
+    const options = this.#deps.processOptions()
+    if (!options.manageLifecycle) return { stopped: false, reason: 'lifecycle-disabled' }
+    const process = this.#deps.process
+    const state = await process.portState(options)
+    if (!state.running) return { stopped: false, reason: 'not-running' }
+    if (!state.owned) return { stopped: false, reason: 'not-owned' }
+    process.stopIfOwned()
+    return { stopped: true }
   }
 }

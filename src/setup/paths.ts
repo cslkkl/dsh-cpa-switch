@@ -35,17 +35,42 @@ export const SOURCES = {
     /** 解压后要找的可执行文件名。 */
     exeName: 'cli-proxy-api.exe',
     label: 'CLIProxyAPI 本体',
+    /** 解压落点。 */
+    targetDir: managedCpaDir,
+    /**
+     * ⚠️ **替换时不许清空这个目录** —— `config.yaml` 与 `plugins/` 与 exe **同层**
+     * （见文件头），它们不属于这个来源。清空等于顺手删掉用户的配置与渠道插件。
+     * 所以本来源只覆盖 zip 里带的东西，不做整目录替换。
+     */
+    wipeOnReplace: false,
   },
   plugins: {
     repo: 'mmqz/cpa-multi-plugins',
     latestApi: 'https://api.github.com/repos/mmqz/cpa-multi-plugins/releases/latest',
     assetPattern: /^cpa-multi-plugins-windows-amd64\.zip$/u,
     label: '渠道插件（workbuddy / trae / qoder / zcode / mimo）',
+    /** 解压落点。 */
+    targetDir: managedPluginsDir,
+    /**
+     * **本来源独占这个目录**（配置里的 `plugins.dir` 只指它）。
+     *
+     * ⚠️ 替换必须**先清空再解压**：上游若删掉某个渠道，直接覆盖解压会留下上一版的
+     * 那个 dll，而 `listPluginIds` 按「磁盘上有什么就启用什么」生成启用清单 ——
+     * 于是 CPA 会去加载一个上游已经撤掉的渠道插件。
+     */
+    wipeOnReplace: true,
   },
 } as const
 
 /** 下载源的两个类别。 */
 export type SourceKey = keyof typeof SOURCES
+
+/**
+ * 全部来源，**顺序即安装顺序**。
+ *
+ * 与 `SOURCES` 同处一处：新增一个来源只改这一个文件，不必去流程里补一行。
+ */
+export const SOURCE_KEYS = ['cpa', 'plugins'] as const satisfies readonly SourceKey[]
 
 /**
  * 托管 CPA 的工作目录（exe / `config.yaml` / `plugins` 同层）。

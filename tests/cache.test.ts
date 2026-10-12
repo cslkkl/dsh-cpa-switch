@@ -9,7 +9,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CpaCache, ProbeCache } from '../src/cache.ts'
 import { CpaGateway } from '../src/gateway.ts'
-import { createOperations, type Operations } from '../src/ops/index.ts'
+import type { Operations } from '../src/ops/index.ts'
+import { opsFor } from './ops-deps.ts'
 import type { CpaRuntime } from '../src/runtime.ts'
 
 describe('CpaCache', () => {
@@ -188,7 +189,7 @@ describe('业务层读路径与作废覆盖', () => {
         ensure: async () => ({ running: true, owned: false }),
       } as unknown as CpaRuntime,
     })
-    const ops = createOperations({ gateway })
+    const ops = opsFor(gateway)
     return { ops, gateway, cpaFetch }
   }
 

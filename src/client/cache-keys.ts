@@ -35,6 +35,12 @@ export const cacheKeys = {
   status: 'status',
   /** 宿主 `GET /setup`（环境准备）。 */
   setup: 'setup',
+  /**
+   * 宿主 `GET /plugins-update?key=`（渠道插件的版本查询）。
+   *
+   * ⚠️ 键里带来源：换来源就是另一次读，旧那条自然不会再被取到。
+   */
+  pluginUpdate: (key: string): string => `plugin-update:${key}`,
   /** 宿主 `GET /plugins`（渠道清单，静态）。 */
   plugins: 'plugins',
   /** 宿主 `GET /routing`（路由策略）。 */

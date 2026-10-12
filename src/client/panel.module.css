@@ -139,6 +139,22 @@
   margin-top: 2px;
 }
 
+/* ---- Channel-plugin update row ----------------------------------------- */
+
+/* Sits directly under the status bar on purpose: the update stops CPA, so the
+   run-state and this row must be readable together. */
+.updateRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.updateText {
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* ---- Totals ------------------------------------------------------------ */
 
 /* Four equal tiles. `flex: 1` + `min-width` lets them wrap to two rows on a
