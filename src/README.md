@@ -336,7 +336,8 @@
     [决策记录](../.agents/notes/2026-10-06-alias-identity-vs-generation.md)
   - 改后必测：`tests/model-alias.test.ts`、`tests/route-registry.test.ts`
 - **`model-caps.ts`** —— 模型能力（上下文窗口 + 图像输入）校准表。
-  - 导出：`capsOf` / `calibratedChannels` / `capSources` / 类型 `ModelCaps` / `CapSources`
+  - 导出：`capsOf` / `calibratedChannels` / `calibratedTable` / `capSources` /
+    `reasoningEffortsOf` / `reasoningDefaultOf` / `offSpellingOf` / 类型 `ModelCaps` / `CapSources`
   - ⚠️ **262144 是宿主 `dsh-llm-pi-ai` 的兜底值，不是模型真实能力**；
     CPA 的 `/v1/models` 实测只给 `id` / `object` / `owned_by`
   - ⚠️ **但「不报容量」的原因不是 CPA 不支持透出** —— 上游 `openai` handler 会在
@@ -350,10 +351,19 @@
   - ⚠️ **`supportsImages` 只在确认支持时写 `true`，没有 `false`** ——
     判定方向与窗口**相反**（不写＝保守），理由见
     [决策记录](../.agents/notes/2026-10-06-model-ownership-and-image-capability.md)
-  - **`reasoningEfforts: false` 逐模型省略档位声明** —— 只在有实测反证
-    （该模型两档都无思考，现为 `hunyuan-chat`）时写；省略后宿主不显示该模型的
-    Effort 行：[决策记录](../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)
-  - 改后必测：`tests/model-caps.test.ts`
+  - ⚠️ **`contextWindow` 可以缺**（2026-10-12 起）：档位与窗口是**两条独立的证据轴**，
+    Trae 平台模型按渠道口径窗口不填（走宿主兜底 262144）却可能需要档位标记 ——
+    缺省时推送侧**一个字段都不写**，所以「只有档位标记」与「压根没条目」行为逐字相同
+  - **档位有两种逐模型标记**（都只在**多次重复实测**后写，单次会翻类）：
+    - `reasoningEfforts: false` —— **摘掉档位**（关那一档照样思考的「关不掉」、
+      两档都 0 思考的「真·假 high」）。省略后宿主不显示该模型的 Effort 行
+    - `reasoningEffortsSwapped: true` —— **对调两个档位的值**（方向相反的模型：
+      关比开想得多）。界面仍是关/开两个键，只把发出去的词换过来。
+      ⚠️ 它**只修方向**，不保证「关 = 0 思考」
+    - 两者**互斥**，且「测不准」（两档区间重叠）的**一律不标**
+  - 判据 `tests/model-caps.test.ts`（含全表不变量：互斥、只认 `true`、窗口写成正整数）；
+    分类口径与清单见[决策记录](../.agents/notes/2026-10-12-reasoning-effort-retriage.md)
+  - 改后必测：`tests/model-caps.test.ts` + `tests/model-reasoning.test.ts`
 
 ## 子目录
 
