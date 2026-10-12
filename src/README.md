@@ -72,6 +72,10 @@
     静默丢声明（`maxTokens` → 上限回退 32768、`input` → 图片被拒、`reasoningEfforts` →
     档位行消失），而那一刻后台读还没回来、没有东西能纠正它。推送侧新增字段时同批加这里；
     判据 `tests/state.test.ts` 的往返用例
+    ⚠️ **v2 起存的是「按渠道分组的一组」**（`providers: [{ id, profile }]`，v1 是单份
+    `profile`）：v1 会被误读成**某一个渠道**的清单，所以版本号已 bump、老缓存一律不认
+    （退回正常读一轮，自愈）。分组 id 必须唯一 —— 重复的组会让**一个渠道整组消失**
+    且不报错，写盘前就挡掉
   - 改后必测：账号意图的 `source !== 'panel'` 拒绝、`ignored` 剥离（读与写**两头**都要）、
     并发写的丢更新（`tests/state-lost-update.test.ts`）、缓存的四条约束（`tests/state.test.ts`）
 - **`select-plan.ts`** —— 「设为唯一」的**目标状态计算 + 回读验证**（纯函数，不碰 IO）。
@@ -213,6 +217,13 @@
   - 导出：`attachRouteRegistry` / `readStableCatalog` / `shrunkRows` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `RouteRefresher` / `Clock` / `SyncResult` / `systemClock`
   - 一条链：**查 CPA 目录 → 算别名 → 补写配置 → 推 models**
   - 骨架在 `cordis.patch.yml`（随包发布），清单走 volatile —— **两层缺一不可**
+  - **一个渠道一个 provider 键**（`cpa-<渠道>`，2026-10-12）：模型选择器按 provider 分组，
+    键名与组名从渠道注册表派生（`providerIdOf` / `providerLabelOf`，见
+    [channels/README.md](channels/README.md)）；推送时**只动我们自己的键**
+    （前缀命中的 + 历史键 `cpa`）并清掉本轮没有模型的组，别人的 provider 原样保留。
+    ⚠️ 分组键是**已保存选择的一部分**（行键 `providerId/modelId`），改名 = 用户需重选一次，
+    所以它是稳定契约；判据在 `tests/route-registry.test.ts` 的「按渠道分组」与
+    「骨架与推送的分组一致」
   - **重载前后可见状态必须连续**：收到 `app-boot/config-reload` 先用**零 CPA 读**推回上一份成功清单
     （此刻基线只有骨架、没有 models，选择器会退化成显示 `provider/model` 并**停用 composer**），
     再读目录核对；读失败或读不全回推上一份，**无历史则保持空**；

@@ -197,8 +197,10 @@ Panel / PluginPanel
 
 ### 4.6 模型路由只走 volatile 更新通道
 
-- 模型路由由插件运行时推给 `llm-pi-ai` 的 `providers.cpa`（volatile 配置字段）：对它所在 loader entry 做**只含 volatile 差异**的 `entry.update()`，loader 在原进程内提交并广播 `loader/volatile-update`，llm-pi-ai 原子重注册路由 —— 不重启、不写盘。随包静态清单已废弃（会漂移、且与端口耦合）。
-- **只动 `cpa` 一个键**：推送前合并既有 `providers`，用户自声明的其它 provider 原样保留；混入非 volatile 变更会让 update 退化成整体重载。
+- 模型路由由插件运行时推给 `llm-pi-ai` 的 `providers.*`（volatile 配置字段）：对它所在 loader entry 做**只含 volatile 差异**的 `entry.update()`，loader 在原进程内提交并广播 `loader/volatile-update`，llm-pi-ai 原子重注册路由 —— 不重启、不写盘。随包静态清单已废弃（会漂移、且与端口耦合）。
+- **一个渠道一个 provider 键**（`cpa-<渠道>`，2026-10-12 起）：模型选择器**按 provider 分组**，四个渠道原先共用 `cpa` 一个键 —— 模型一多就是一层平铺（实测 96 行）。键名与组名由渠道注册表派生（`providerIdOf` / `providerLabelOf`），组顺序即渠道顺序。
+- **推送只动我们自己的键**：合并既有 `providers`（用户与别的插件声明的 provider 原样保留），写入本轮有模型的那些组，并**清掉旧的 `cpa` 键**（升级上来的机器上它挂着上一版整份清单，不清就是选择器里一个永不更新的「幽灵组」）；混入非 volatile 变更会让 update 退化成整体重载。
+- **分组身份是已保存选择的一部分**：选择器的行键是 `providerId/modelId`，改分组键 = 所有会话已保存的模型选择一次性失效（用户需重选一次）。所以键名是**稳定契约**，不是内部细节。
 - **每行带哪些声明字段**：`contextWindow` / `input` / `maxTokens` 来自校准表与路由配置（输出上限 `maxOutputTokens`，`0` = 不声明），`reasoningEfforts` 由总开关决定。输出上限的声明**只对会把值送进上游的渠道生效**（实测 workbuddy；qoder / trae 到不了上游），见[实测报告](audits/2026-10-08-cpa-stream-probe.md)附录。
 - **推送前等目录稳定**：CPA 启动后凭据分批加载，`/v1/models` 从空慢慢变多 —— 连续两次计数一致才推；目录为空（无账号）则撤下路由（`llm-pi-ai` 拒绝空 models 的手工路由）。
 - 触发点：**插件装配完成**（零读推磁盘缓存里那份完整清单 —— 开机那一刻就有模型可选）、CPA 就绪（boot / 环境准备完成）、OAuth 加号完成，以及**宿主配置重载** —— 任何设置写入（切语言、改主题等）都会让宿主重建 fiber、抹掉运行时注入的 volatile 值，所以重载后必须重推（机制见 F39）；幂等，无变化即零动作。
