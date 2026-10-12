@@ -45,6 +45,15 @@ export interface RenderConfigInput {
    * 所以「磁盘上有什么就启用什么」既准确又不需要维护。
    */
   readonly pluginIds: readonly string[]
+  /**
+   * 调用密钥（`/v1` 客户端鉴权用的 `CPA_API_KEY` 的**值**）。
+   *
+   * ⚠️ **缺它不是「无鉴权」的等价降级**：给了密钥 CPA 才会对 `/v1/*` 校验 ——
+   * 同一台机器上的任何进程不带密钥调 `/v1/chat/completions` 都会被拒。
+   * 不传 / 空串时不写这一段（fail-open），与「配置里出现空 api-keys 段会拒一切」相比，
+   * 宁可暂无鉴权也不造一份把模型调用全 401 的配置 —— 但 boot 会记 warn 留痕。
+   */
+  readonly apiKey?: string
 }
 
 /**
@@ -94,6 +103,8 @@ export function readConfigVersion(text: string): number | undefined {
  * - `server.host` **必须显式写 `127.0.0.1`**：上游默认是空 host，等于监听所有网卡。
  *   实测（2026-10-04）少这一行时 CPA 监听 `::`，局域网内 `http://<内网 IP>:8317/v1/models`
  *   **不带任何鉴权就返回 200** —— 同网段的任何人都能消耗用户账号额度；
+ * - `access.api-keys` **必须带调用密钥**（给了 `apiKey` 时）：上游对 `/v1/*` 只校验
+ *   这一段 —— 缺了它，同机的任何进程不带密钥就能调推理接口（P0 2.1 的收口项）；
  * - `management.secret-key` 必须设，否则管理接口无鉴权（本插件也调不通）；
  * - `oauth.auth-dir` **指向用户原有的 `~/.cli-proxy-api`** —— 这样本来就用着
  *   CPA 的人，新装的这份能直接看到已有账号，不用重新加号；
@@ -107,6 +118,10 @@ export function renderConfig(input: RenderConfigInput): string {
     .sort()
     .flatMap((id) => [`    ${id}:`, '      enabled: true'])
   const aliasBlock = input.aliases === undefined ? [] : renderAliasYaml(input.aliases).split('\n')
+  const accessBlock =
+    typeof input.apiKey === 'string' && input.apiKey !== ''
+      ? ['', 'access:', '  api-keys:', `    - "${input.apiKey}"`]
+      : []
   return [
     '# 由 dsh-cpa-switch 自动生成 —— 手改会在下次「重新准备环境」时被覆盖。',
     `config-version: ${String(CONFIG_VERSION)}`,
@@ -114,6 +129,7 @@ export function renderConfig(input: RenderConfigInput): string {
     'server:',
     '  host: "127.0.0.1"',
     `  port: ${String(input.port)}`,
+    ...accessBlock,
     '',
     'management:',
     `  secret-key: "${input.secretKey}"`,
@@ -240,6 +256,86 @@ export function patchServerHost(): boolean {
 }
 
 /**
+ * 把 `access.api-keys: [<调用密钥>]` 补写进**已有**的配置。
+ *
+ * 为什么需要单独一条路：{@link renderConfig} 只在「配置文件不存在」时写 ——
+ * 已经跑过一次的老机器配置里没有这一段，CPA 的 `/v1/*` 对**同机任意进程**
+ * 无鉴权（不带密钥就能消耗用户账号额度，2026-10-04 实测返回 200）。
+ * 与 {@link patchServerHost} 同款纪律：只动一个片段、找不到锚点就放弃、
+ * **绝不重写整份文件**。
+ *
+ * 三种形状三种处置：
+ * - 没有 `access:` 段 → 在文件尾追加一段；
+ * - 有 `access:` 段没 `api-keys` → 段内补（**缩进跟随段内既有键**，
+ *   与 {@link patchServerHost} 的缩进坑同源 —— CPA 回写用 4 空格，
+ *   缩进跳变会让整份配置非法且零信号）；
+ * - 已有 `api-keys`（含我们自己之前补的）→ **一字节不动**：那是用户的密钥清单，
+ *   我们不知道里面该有什么，乱动等于替用户改鉴权配置。
+ *
+ * ⚠️ **调用时机是「CPA 未运行时」**（与 {@link patchServerHost} 同理）：
+ * CPA 运行中持有该文件且会在保存时回写，运行中改它与它抢写是竞态。
+ *
+ * ⚠️ **防注入**：密钥里出现引号或换行会造出非法 YAML（坏在**零信号**处），
+ * 一律不写。正常密钥（`generateApiKey` 的 base64url）不含这些字符。
+ *
+ * @returns 是否真的改写了文件。
+ */
+export function patchAccessApiKeys(apiKey: string): boolean {
+  if (apiKey === '' || /["\r\n]/.test(apiKey)) return false
+  let content: string
+  try {
+    content = readFileSync(managedConfigPath(), 'utf8')
+  } catch {
+    return false
+  }
+  const ACCESS_HEAD = /^access:[ \t]*$/mu
+  const lines = content.split('\n')
+  const head = lines.findIndex((line) => ACCESS_HEAD.test(line))
+
+  if (head === -1) {
+    /**
+     * ⚠️ **追加前先确认文件里真的没有 `access:`** —— 存在但没匹配上严格锚点
+     * （如 `access: # 注释` 的行内内容形态）说明这是个我们读不懂的段，
+     * 再追加一个会造出**重复的顶层键**（YAML 静默只留一个），放弃且不改文件。
+     */
+    if (lines.some((line) => /^access:/.test(line))) return false
+    /** 文件尾追加一个顶层段 —— 顶格键在哪都合法，尾追加最不容易碰坏既有段。 */
+    const body = content.endsWith('\n') ? content.slice(0, -1) : content
+    return writeConfig(`${body}\naccess:\n  api-keys:\n    - "${apiKey}"\n`)
+  }
+
+  let sectionEnd = lines.length
+  for (let i = head + 1; i < lines.length; i++) {
+    if (/^[^\s#]/.test(lines[i] ?? '')) {
+      sectionEnd = i
+      break
+    }
+  }
+  const section = lines.slice(head + 1, sectionEnd)
+  // 已有 api-keys（带值或空值都算）→ 用户的决定，不动。
+  if (section.some((line) => /^[ \t]+api-keys:/.test(line))) return false
+
+  /**
+   * 缩进跟随段内第一个非注释键；空段退回 2 空格。
+   * 推导依据与 {@link patchServerHost} 相同，那里有 2026-10-10 的实踩记录。
+   */
+  const indent =
+    section
+      .map((line) => /^([ \t]+)(?![ \t]*#)\S/.exec(line)?.[1])
+      .find((value) => value !== undefined) ?? '  '
+  /**
+   * 插在段内**最后一个非空行**之后：既有键保持在前面、补进去的块紧跟着它们，
+   * 段尾的空行（段与段之间的分隔）留在补块之后。空段时落点就是 head+1。
+   */
+  let insertAt = head + 1
+  for (let i = head + 1; i < sectionEnd; i++) {
+    if ((lines[i] ?? '').trim() !== '') insertAt = i + 1
+  }
+  lines.splice(insertAt, 0, `${indent}api-keys:`, `${indent}  - "${apiKey}"`)
+  return writeConfig(lines.join('\n'))
+}
+
+/**
  * 生成管理密钥。
  *
  * 首次自动安装时用 —— 用户什么都不知道，插件得自己造一个能用的密钥出来。
@@ -264,8 +360,9 @@ export function generateSecretKey(): string {
  * 解析不到直接抛 `MISSING_CREDENTIAL` —— 用户看到的是「模型列表里有、一点就报错」，
  * 很难联想到是缺一条凭据。
  *
- * 托管配置里没有 `api-keys` 段，CPA 的 `/v1` 目前不校验这个值，
- * 所以它只需非空；密钥只存宿主凭据库，不出本机。
+ * 这个值**同时**是 `/v1` 的客户端鉴权钥匙：托管配置把它写进 `access.api-keys`
+ * （见 {@link renderConfig} 与 {@link patchAccessApiKeys}），CPA 据此拒绝
+ * 不带密钥的调用。密钥只存宿主凭据库与托管配置，不出本机。
  */
 export function generateApiKey(): string {
   return randomBytes(32).toString('base64url')

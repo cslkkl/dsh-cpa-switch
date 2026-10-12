@@ -7,6 +7,7 @@ import { buildAliasTable } from '../src/model-alias.ts'
 import {
   CONFIG_VERSION,
   looksLikeBcrypt,
+  patchAccessApiKeys,
   patchServerHost,
   readConfigVersion,
   renderConfig,
@@ -58,6 +59,62 @@ describe('renderConfig', () => {
     const withExtra = renderConfig({ port: 8317, secretKey: 'x', pluginIds: ['kimi'] })
     expect(withExtra).toContain('    kimi:')
     expect(withExtra).not.toContain('    workbuddy:')
+  })
+})
+
+/**
+ * `access.api-keys` 是 `/v1/*`（推理接口）的**客户端鉴权**，与 `management.secret-key`
+ * （管理接口）是两把不同的钥匙。缺这一段时 CPA 对 `/v1/*` 不做任何校验 ——
+ * 本机已堵住（127.0.0.1），但**同一台机器上的任何进程**都能不带密钥调
+ * `/v1/chat/completions`，消耗用户账号额度（2026-10-04 实测不带鉴权返回 200）。
+ *
+ * 生成的配置必须带调用密钥（`CPA_API_KEY` 的值），否则模型路由一发就 401
+ * —— DSH 侧（`llm-pi-ai` 经 `apiKeyEnv`）与 `readStableCatalog` 发的都是它。
+ *
+ * 真机验证（2026-10-11，真实 exe @ 18317 端口）：无该段不带密钥调 `/v1/models`
+ * 返回 200（无鉴权）；带该段后不带密钥 401、`Bearer <密钥>` 200 ——
+ * 与上游 `config.example.yaml` 的 `access.api-keys` 形状逐字一致。
+ */
+describe('renderConfig 的 access.api-keys 段', () => {
+  it('⚠️ 给了 apiKey 就写出 access.api-keys（/v1 不再无鉴权）', () => {
+    const yaml = renderConfig({
+      port: 8317,
+      secretKey: 'plain-secret',
+      apiKey: 'call-key-1',
+      pluginIds: PLUGIN_IDS,
+    })
+    expect(yaml).toContain('access:')
+    expect(yaml).toContain('  api-keys:')
+    expect(yaml).toContain('    - "call-key-1"')
+  })
+
+  it('access 段是顶层段（api-keys 归它管，与 management 不同轴）', () => {
+    const yaml = renderConfig({
+      port: 8317,
+      secretKey: 'plain-secret',
+      apiKey: 'call-key-1',
+      pluginIds: PLUGIN_IDS,
+    })
+    const accessIndex = yaml.indexOf('\naccess:\n')
+    expect(accessIndex).toBeGreaterThanOrEqual(0)
+    // 管理密钥是另一个段，不许混写
+    expect(yaml.indexOf('management:')).toBeGreaterThan(0)
+    expect(yaml).not.toContain('management:\n  api-keys')
+  })
+
+  it('没给 apiKey 就不写这一段（fail-open：宁可暂无鉴权，不写空段拒启动）', () => {
+    const bare = renderConfig({ port: 8317, secretKey: 'x', pluginIds: PLUGIN_IDS })
+    expect(bare).not.toContain('access:')
+  })
+
+  it('apiKey 为空串同样不写', () => {
+    const empty = renderConfig({
+      port: 8317,
+      secretKey: 'x',
+      apiKey: '',
+      pluginIds: PLUGIN_IDS,
+    })
+    expect(empty).not.toContain('access:')
   })
 })
 
@@ -316,5 +373,128 @@ describe('patchServerHost', () => {
     seed(emptySection)
     expect(patchServerHost()).toBe(true)
     expect(readFileSync(configPath(), 'utf8')).toContain('server:\n  host: "127.0.0.1"\n')
+  })
+})
+
+/**
+ * 老机器的 `/v1` 鉴权补齐：`access.api-keys` 只在「配置不存在」时由
+ * {@link renderConfig} 写 —— 已经跑过一次的机器配置里没有这一段，
+ * `/v1/*` 对同机任意进程无鉴权。补丁走与 {@link patchServerHost} 同款的
+ * 外科手术纪律：只动一个片段、锚点找不到就放弃、**绝不重写整份文件**
+ * （那会连密钥哈希带注释一起冲掉）。
+ *
+ * 三种形状三种处置：没有 `access:` 段 → 追加一段；有段没 `api-keys` → 段内补
+ * （缩进跟随段内既有键）；已有 `api-keys` → 一字节不动（那是用户的决定，
+ * 我们不知道用户的密钥清单里该放什么）。
+ */
+describe('patchAccessApiKeys', () => {
+  let home: string
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
+
+  beforeEach(() => {
+    home = mkdtemp()
+    mkdirSync(join(home, 'cpa-panel', 'runtime', 'cpa'), { recursive: true })
+  })
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 隔离 DSH_HOME（现读）并返回临时目录。 */
+  function mkdtemp(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'cpa-setup-access-'))
+    process.env.DSH_HOME = dir
+    return dir
+  }
+
+  const BASE = [
+    'config-version: 8',
+    'server:',
+    '  host: "127.0.0.1"',
+    '  port: 8317',
+    '',
+    'management:',
+    '  secret-key: "plain-secret"',
+    '',
+    'oauth:',
+    '  auth-dir: "~/.cli-proxy-api"',
+    '',
+  ].join('\n')
+
+  const seed = (content: string): void => {
+    writeFileSync(configPath(), content, 'utf8')
+  }
+
+  it('⚠️ 没有 access: 段时追加一段（其余内容原样）', () => {
+    seed(BASE)
+    expect(patchAccessApiKeys('call-key-1')).toBe(true)
+    const after = readFileSync(configPath(), 'utf8')
+    expect(after).toContain('access:\n  api-keys:\n    - "call-key-1"\n')
+    // 外科手术：管理密钥与 oauth 段原样保留
+    expect(after).toContain('secret-key: "plain-secret"')
+    expect(after).toContain('auth-dir: "~/.cli-proxy-api"')
+    expect(after).toContain('host: "127.0.0.1"')
+  })
+
+  it('⚠️ 已有 access: 段但没 api-keys 时，段内补（缩进跟随段内既有键）', () => {
+    // CPA 回写过 ⇒ 4 空格；补进去的行必须同缩进，否则整份配置非法（与 server.host 同坑）
+    const withAccess = [
+      'config-version: 8',
+      'server:',
+      '    host: "127.0.0.1"',
+      '    port: 8317',
+      '',
+      'management:',
+      '    secret-key: "plain-secret"',
+      '',
+      'access:',
+      '    allow-localhost: true',
+      '',
+      'oauth:',
+      '    auth-dir: "~/.cli-proxy-api"',
+      '',
+    ].join('\n')
+    seed(withAccess)
+    expect(patchAccessApiKeys('call-key-1')).toBe(true)
+    const after = readFileSync(configPath(), 'utf8')
+    const lines = after.split('\n')
+    const accessIndex = lines.indexOf('access:')
+    expect(lines[accessIndex + 1]).toBe('    allow-localhost: true')
+    expect(lines[accessIndex + 2]).toBe('    api-keys:')
+    expect(lines[accessIndex + 3]).toBe('      - "call-key-1"')
+    // 段内既有键没被动过
+    expect(after).toContain('    allow-localhost: true')
+  })
+
+  it('⚠️ 已有 api-keys 时一字节不动（用户的密钥清单我们不猜）', () => {
+    const withKeys = `${BASE}access:\n  api-keys:\n    - "user-own-key"\n`
+    seed(withKeys)
+    expect(patchAccessApiKeys('call-key-1')).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(withKeys)
+  })
+
+  it('⚠️ 配置文件不存在时不创建（全新安装路径由 renderConfig 负责）', () => {
+    expect(patchAccessApiKeys('call-key-1')).toBe(false)
+    expect(() => readFileSync(configPath(), 'utf8')).toThrow()
+  })
+
+  it('空密钥不写（fail-open：空段会让 CPA 拒绝一切调用）', () => {
+    seed(BASE)
+    expect(patchAccessApiKeys('')).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(BASE)
+  })
+
+  it('含引号或换行的密钥不写（防注入：YAML 形状坏掉是零信号的）', () => {
+    seed(BASE)
+    expect(patchAccessApiKeys('has"quote')).toBe(false)
+    expect(patchAccessApiKeys('two\nlines')).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(BASE)
+  })
+
+  it('access: 头带行内内容时放弃（朴素正则不猜结构）', () => {
+    const inline = `${BASE}access: # custom\n  allow-localhost: true\n`
+    seed(inline)
+    expect(patchAccessApiKeys('call-key-1')).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(inline)
   })
 })
