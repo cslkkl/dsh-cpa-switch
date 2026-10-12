@@ -65,6 +65,27 @@ export interface Clock {
   sleep(ms: number): Promise<void>
 }
 
+/**
+ * **用户把所有模型都藏起来了**（2026-10-13）。
+ *
+ * 这是一个**必须与「目录读残」区分开**的状态：
+ * - 读残 ⇒ 该重试、该让目录护栏拦下、该继续等；
+ * - 用户全藏 ⇒ 那些动作全是白跑（重试一百次也还是全藏），
+ *   而每次刷新都排一条重读链，用户看到的是「面板一直在刷新」。
+ *
+ * 所以它单独一个类型：调用方 `instanceof` 一下就知道该按哪种处理。
+ */
+export class HiddenAllModelsError extends Error {
+  /** 被隐藏的行数（诊断用）。 */
+  readonly hiddenCount: number
+
+  constructor(hiddenCount: number) {
+    super('every routable model is hidden by the user')
+    this.name = 'HiddenAllModelsError'
+    this.hiddenCount = hiddenCount
+  }
+}
+
 /** 生产用的时钟。测试注入自己的实现（见 `tests/route-registry.test.ts`）。 */
 export const systemClock: Clock = {
   now: () => Date.now(),
@@ -215,6 +236,24 @@ export interface RouteRegistryDeps {
    * docs/audits/2026-10-08-cpa-stream-probe.md 的附录）。
    */
   readonly maxOutputTokens?: (() => number) | undefined
+  /**
+   * 被用户隐藏的模型 —— **（渠道 id, 裸名）** 的判定，**现读、不缓存**。
+   *
+   * ⚠️ **这是「推送」不是「展示」**：隐藏的模型**不进清单**，于是宿主的选择器里
+   * 根本没有它。不传按「什么都没藏」—— 与「不开这个功能时行为不变」对齐。
+   *
+   * ⚠️ 键用（渠道, 裸名）而**不是行 id**：行 id 可能带渠道别名（`wb/glm-5.3`），
+   * 而别名会随上游供给面变化 —— 拿它当键，上游一变存的东西就匹配不上，
+   * 表现为「用户勾过要藏，某天它又自己冒出来了」，且没有任何报错。
+   */
+  readonly isHiddenModel?: ((channel: string, bare: string) => boolean) | undefined
+  /**
+   * 显示设置改动后要**重推一次清单**。
+   *
+   * ⚠️ 没有它，用户勾完「隐藏」要等下一次目录变化才生效 —— 而目录可能几小时
+   * 都不变，用户看到的是「勾了没反应」。由装配层接到 {@link RouteRefresher.refresh}。
+   */
+  readonly onDisplayChanged?: (() => void) | undefined
 }
 
 /** `auth-files` 里一个凭据的形状（归属识别 + 健康度判据用）。 */
@@ -631,6 +670,37 @@ function buildCpaRouteProfile(
     if (plugin === undefined) continue
     rows.push({ id, bare, label: channelLabel(plugin), channel: plugin })
   }
+
+  /**
+   * ## 过滤掉用户隐藏的模型（2026-10-13）
+   *
+   * 这是「隐藏」真正生效的地方 —— 隐藏的模型**不进清单**，于是宿主的选择器里
+   * 根本没有它（界面那边的勾选只是收集意愿）。
+   *
+   * ⚠️ **判据是（渠道, 裸名）而不是行 id**：行 id 带渠道别名（`wb/glm-5.3`），
+   * 而别名会随上游供给面变化 —— 用行 id 当键，上游一变就匹配不上，
+   * 表现为「用户明明藏过，某天它又自己冒出来」，且**零报错**。
+   *
+   * ⚠️ **过滤在读完之后、算清单之前**：这样 `rows.length === 0` 那条
+   * 「一个能路由的都没有」的判据仍然成立 —— 如果用户把某渠道全藏了，
+   * 那个渠道不会有清单（而不是推一份空的上去，宿主会拒）。
+   * 但**整份都空**要按「拿不到完整清单」处理：那是**用户的选择**，
+   * 不是读失败，所以不能让它去撞目录护栏（见下面的 `hiddenAll` 分支）。
+   */
+  const isHidden = deps.isHiddenModel
+  const hiddenAll = rows.length > 0 && isHidden !== undefined
+  const kept =
+    isHidden === undefined ? rows : rows.filter((row) => !isHidden(row.channel, row.bare))
+  if (kept.length === 0) {
+    /**
+     * ⚠️ 全部被隐藏时**抛一个可辨认的错误**：调用方据此按「用户的选择」处理，
+     * 而不是当成「目录读残了」去重试 / 触发护栏。区分这两件事很重要 ——
+     * 当成读残的话，用户藏光之后每次刷新都会排重读链，而永远好不了。
+     */
+    throw new HiddenAllModelsError(hiddenAll ? rows.length : 0)
+  }
+  rows.splice(0, rows.length, ...kept)
+
   if (rows.length === 0) {
     throw new Error('no routable model after channel split')
   }
@@ -1447,6 +1517,19 @@ export function attachRouteRegistry(
       const built = buildCpaRouteProfile(catalog, channels, aliases, deps)
       return { groups: built.groups, channelOf: built.channelOf, aliases }
     } catch (error) {
+      /**
+       * ⚠️ **用户全藏了不算「读失败」**（2026-10-13）：那个状态下重试、退避、
+       * 重读链全是白跑（重试一百次还是全藏），而用户看到的是「面板一直在刷新」。
+       * 所以单独给它一个 reason，由调用方按「用户的选择」处理 —— 不排重读链、不报错。
+       */
+      if (error instanceof HiddenAllModelsError) {
+        deps.logger?.info?.(
+          'cpa-panel: 所有模型都被用户隐藏了（%s，共 %d 行）→ 不推任何模型',
+          trigger,
+          error.hiddenCount,
+        )
+        return { reason: 'all-models-hidden' }
+      }
       deps.logger?.warn?.('cpa-panel: build model routes failed (%s): %o', trigger, error)
       return { reason: 'catalog-unavailable' }
     }
@@ -1507,6 +1590,17 @@ export function attachRouteRegistry(
 
     const outcome = buildProfileFrom(trigger, ready.snapshot)
     if (!('groups' in outcome)) {
+      /**
+       * ⚠️ **「用户全藏了」与「读不到」必须分开处置**（2026-10-13）：
+       * 前者重试一百次也还是全藏 —— 排重读链只会让面板一直转；
+       * 而且它**不是**「上一份清单仍然有效」，所以也不能回推上一份
+       * （那样用户勾了「全藏」，选择器里照旧有模型）。
+       * 所以这里**推一份空清单**（撤下我们那几个 provider）并正常收场。
+       */
+      if (outcome.reason === 'all-models-hidden') {
+        const cleared = await pushProfile({ groups: [], channelOf: new Map() }, seq, trigger)
+        return { result: cleared, verdict: 'accepted' }
+      }
       return { result: await degrade(trigger, outcome.reason), verdict: 'unavailable' }
     }
 

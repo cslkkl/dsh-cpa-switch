@@ -640,3 +640,106 @@ export function updateAccountIntent(mutate: (current: AccountIntent) => AccountI
   void _dropped
   writeJson(accountIntentPath(), { ...rest, source: 'panel' })
 }
+
+/* ── 模型选择器的可见性 ───────────────────────────────────────────────── */
+
+/**
+ * 模型可见性的落地文件。
+ *
+ * 为什么与账号意图分开：那个决定「号参不参与调度」（改错真的影响出号），
+ * 这个只决定「模型在**选择器**里出不出现」（改错顶多少选一个模型）。
+ */
+function hiddenModelsPath(): string {
+  return join(storagesDir(), 'cpa-panel-hidden-models.json')
+}
+
+/**
+ * 被隐藏的模型：**（渠道, 裸名）** 的列表。
+ *
+ * ⚠️ **存的是「隐藏的」而不是「勾选的」**（2026-10-12）：
+ * 空文件 = 一个都不藏 = 全部出现。这样两条默认都安全：
+ * ① 刚装好 / 文件丢失时，选择器里**不会变空**（存「勾选的」时那是最可能的翻车）；
+ * ② **新模型默认出现**，不会因为「表里没有它」而静默消失。
+ * 用户勾选之后，写进去的是那些**没勾**的。
+ *
+ * ⚠️ 键是（渠道, 裸名）而**不是**目录里的行 id：行 id 可能带渠道别名
+ * （`wb/glm-5.3`），而别名会随上游供给面变化（见 `route-registry.ts` 的别名表）——
+ * 拿它当键，上游一变我们存的东西就匹配不上了。这条与目录护栏的键口径一致。
+ */
+export interface HiddenModels {
+  /** 隐藏项：`渠道 id` → 该渠道被隐藏的**裸名**列表。 */
+  hidden: Record<string, string[]>
+  /** 写入时间，仅作展示。 */
+  updatedAt?: string
+  /** 读这一步的内部信号，**绝不写回磁盘**（见 {@link readAccountIntent} 的同款理由）。 */
+  ignored?: string
+}
+
+/** 空表。 */
+function emptyHiddenModels(): HiddenModels {
+  return { hidden: {} }
+}
+
+/**
+ * 读隐藏表。
+ *
+ * 与账号意图同两条纪律：**只认 `source: 'panel'`**（外部写坏 = 替用户改选择器）、
+ * **坏格子只丢那一格**（一个脏值不该把用户的选择全清空）。
+ *
+ * 读不到 / 坏掉 ⇒ 空表（什么都不藏）—— 保守方向：宁可多显示模型，也不要凭空少。
+ */
+export function readHiddenModels(): HiddenModels {
+  const parsed = readJson<Record<string, unknown>>(hiddenModelsPath())
+  if (parsed === undefined) return emptyHiddenModels()
+  if (parsed['source'] !== 'panel') return emptyHiddenModels()
+
+  const raw = parsed['hidden']
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return emptyHiddenModels()
+
+  const hidden: Record<string, string[]> = {}
+  for (const [channel, list] of Object.entries(raw as Record<string, unknown>)) {
+    const names = cleanNames(list)
+    if (names.length > 0) hidden[channel] = names
+  }
+  return { hidden }
+}
+
+/** 一格裸名列表：只留非空字符串、去重、保序。 */
+function cleanNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const name = item.trim()
+    if (name === '' || out.includes(name)) continue
+    out.push(name)
+  }
+  return out
+}
+
+/**
+ * **改**隐藏表：读当下 → 交给 `mutate` → 写回（整段同步，无 `await`）。
+ *
+ * 与 {@link updateAccountIntent} 同规：传函数而不是算好的值，
+ * 这样「值只能来自更早的某次读」，多个渠道的条目不会互相盖掉。
+ */
+export function updateHiddenModels(mutate: (current: HiddenModels) => HiddenModels): void {
+  const { ignored: _dropped, ...rest } = mutate(readHiddenModels())
+  void _dropped
+  const hidden: Record<string, string[]> = {}
+  for (const [channel, list] of Object.entries(rest.hidden)) {
+    const names = cleanNames(list)
+    if (names.length > 0) hidden[channel] = names
+  }
+  writeJson(hiddenModelsPath(), { hidden, updatedAt: new Date().toISOString(), source: 'panel' })
+}
+
+/**
+ * 某个（渠道, 裸名）是不是被隐藏了。
+ *
+ * 供路由侧逐行判 —— 它是**推送**不是过滤展示：隐藏的模型**不进清单**，
+ * 于是宿主的选择器里没有它。
+ */
+export function isModelHidden(hidden: HiddenModels, channel: string, bare: string): boolean {
+  return (hidden.hidden[channel] ?? []).includes(bare)
+}

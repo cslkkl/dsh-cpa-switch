@@ -1813,10 +1813,126 @@ describe('思考档位声明', () => {
   })
 
   /**
+   * 隐藏模型（2026-10-13）：勾掉的模型**不进清单** ⇒ 宿主的选择器里没有它。
+   *
+   * ⚠️ 这一组钉的是**推送**不是展示：面板那边照常列出全部模型（那是收集意愿的地方），
+   * 而这里决定「谁真的出现在选择器里」。
+   *
+   * ⚠️ 键必须是**（渠道, 裸名）**而不是行 id —— 行 id 带渠道别名（`wb/glm-5.3`），
+   * 别名随上游供给面变化，用行 id 当键会在上游一变时**静默失效**
+   * （用户藏过的模型又冒出来）。
+   */
+  describe('隐藏模型', () => {
+    let home = ''
+
+    beforeEach(() => {
+      home = mkdtempSync(join(tmpdir(), 'cpa-route-hidden-'))
+      process.env.DSH_HOME = home
+    })
+
+    afterEach(() => {
+      delete process.env.DSH_HOME
+      rmSync(home, { recursive: true, force: true })
+    })
+
+    /** 两渠道各两个模型：用来验「隐藏是逐（渠道,模型）的」。 */
+    const FILES = [
+      { name: 'q1', provider: 'qoder' },
+      { name: 'w1', provider: 'workbuddy' },
+    ]
+    const MODELS = { q1: ['dfmodel', 'qmodel'], w1: ['glm-5.2', 'kimi-k3'] }
+    const CATALOG = ['dfmodel', 'qmodel', 'glm-5.2', 'kimi-k3']
+
+    /** 与 `depsFor` 同形，只多一个「哪些被隐藏」。 */
+    function withHidden(cpa: FakeCpa, isHidden: (channel: string, bare: string) => boolean) {
+      return { ...depsFor(cpa), isHiddenModel: isHidden }
+    }
+
+    it('隐藏的模型不进清单，同渠道其余照旧', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+
+      await attachRouteRegistry(
+        fakeHost(entry).host,
+        withHidden(cpa, (channel, bare) => channel === 'qoder' && bare === 'dfmodel'),
+      )('boot')
+
+      const ids = pushed.at(-1)?.ids ?? []
+      expect(ids).toContain('qmodel')
+      expect(ids).not.toContain('dfmodel')
+      // 别的渠道一个都没少
+      expect(ids).toContain('glm-5.2')
+      expect(ids).toContain('kimi-k3')
+    })
+
+    /**
+     * ⚠️ 判据必须是**（渠道, 裸名）**：同一个裸名在别的渠道**不受影响**。
+     * 少了这条，一个「按裸名全局隐藏」的实现也能让上一条全绿。
+     */
+    it('⚠️ 同名模型在别的渠道不受影响（键是「渠道 + 裸名」）', async () => {
+      const cpa = fakeCpa({
+        files: [
+          { name: 'w1', provider: 'workbuddy' },
+          { name: 'z1', provider: 'zcode' },
+        ],
+        models: { w1: ['glm-5.2'], z1: ['glm-5.2'] },
+        catalog: ['glm-5.2'],
+      })
+      const { entry, pushed } = fakeEntry(BASELINE)
+
+      await attachRouteRegistry(
+        fakeHost(entry).host,
+        withHidden(cpa, (channel, bare) => channel === 'workbuddy' && bare === 'glm-5.2'),
+      )('boot')
+
+      const ids = pushed.at(-1)?.ids ?? []
+      /**
+       * 两条行 id 不同（workbuddy 那条是别名形态 `wb/glm-5.2`，zcode 那条也是
+       * `zcode/glm-5.2`）—— 所以「只剩一条」就足以证明**没按裸名全局隐藏**。
+       */
+      expect(ids).toHaveLength(1)
+      expect(ids).toContain('zcode/glm-5.2')
+    })
+
+    it('不传这个依赖时行为完全不变（把所有模型都推上去）', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+
+      await attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))('boot')
+
+      expect([...(pushed.at(-1)?.ids ?? [])].sort()).toEqual([
+        'dfmodel',
+        'glm-5.2',
+        'kimi-k3',
+        'qmodel',
+      ])
+    })
+
+    /**
+     * ⚠️ **全藏 ≠ 读失败**（2026-10-13）：用户把模型全藏了，重试一百次也还是全藏 ——
+     * 当成读残会排重读链（面板一直刷新）而且**回推上一份**（用户勾了全藏却照旧有模型）。
+     * 正确处置：推一份**空清单**（撤下我们的 provider）、正常收场、不排重读链。
+     */
+    it('⚠️ 全藏时推空清单（撤下 provider），不当成读失败去重试', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+
+      await attachRouteRegistry(
+        fakeHost(entry).host,
+        withHidden(cpa, () => true),
+      )('boot')
+
+      // 我们的 provider 键一个都不在（= 选择器里没有我们的模型）
+      expect(pushed.at(-1)?.ourProviderIds).toEqual([])
+      // 别人的 provider 还在（没被误删）
+      expect(pushed.at(-1)?.allProviderIds).toContain('cliproxy')
+    })
+  })
+
+  /**
    * ⚠️ **关掉开关必须连默认一起撤** —— 留下 `reasoning` 就是个半截状态：
    * 界面没有 Effort 行，而每个请求仍被钉在 `high` 上，正是这个开关要逃开的东西。
-   */
-  it('⚠️ 开关关闭时默认档位也要撤掉（否则逃生通道漏了一半）', async () => {
+   */ it('⚠️ 开关关闭时默认档位也要撤掉（否则逃生通道漏了一半）', async () => {
     const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
     const { entry, pushed } = fakeEntry(BASELINE)
 
