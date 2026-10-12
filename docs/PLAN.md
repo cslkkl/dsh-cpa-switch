@@ -326,6 +326,20 @@ clone 后没有这个目录；拉取方式见 [reference/README.md](../reference
   - ⚠️ **仍要做**：宿主是怎么在「选中项所属 provider 消失」时降级的，本轮没真机验过 ——
     升级后首次打开会话要复验「输入框停用 → 重选即恢复」
 
+- **面板里勾选「哪些模型出现在 DSH 的模型选择器」（2026-10-13）** ——
+  维护者诉求：选择器里挤着近百行模型，只用其中几个却每次都要翻。
+  现在面板每个渠道页签下多一节「模型」（默认折叠），**勾 = 出现在选择器**；
+  **面板照旧列出全部模型**（勾选的地方在面板、生效的地方在选择器）。
+  - 键是**（渠道, 裸名）**而不是行 id（行 id 带别名、随上游供给面变化会静默失配）；
+    两侧共用一份规范化实现（`model-alias.ts` 的 `bareModelNameOf`）
+  - **全藏是独立状态**（`HiddenAllModelsError`）：不当成「读残」去重试 / 回推上一份，
+    而是推空清单正常收场
+  - 判据：`tests/hidden-models-state.test.ts`、`tests/ops-model-visibility.test.ts`、
+    `tests/model-visibility-client.test.ts`、`tests/route-registry.test.ts` 的「隐藏模型」
+  - ⚠️ **未真机验证**：取消勾选 → 保存 → 选择器里消失、面板里还在
+  - 理由与 6 条替代方案见
+    [决策记录](../.agents/notes/2026-10-13-model-visibility-in-panel.md)
+
 **立项中**：
 
 - **按模型声明思考档位** ——

@@ -183,13 +183,18 @@
   - ⚠️ 两者共用 `CpaProcess` 的探活记忆 —— **别再自己 `probePort`**，
     否则两条路径会给出相反的答案（状态条说「运行中」、列表报 `cpa-unavailable`）
   - 改后必测：`tests/runtime.test.ts`（含「`status` 一次都不许调 `ensure`」）
-- **`ops/`** —— **业务层**：五个业务域一域一个文件 + 组合根。
+- **`ops/`** —— **业务层**：七个业务域一域一个文件 + 组合根。
   - 导出：`createOperations` / 类型 `Operations` / `OpsDeps` / `OpsResult` / `OpsFailure`
   - 域：`accounts`（读账号 / 余额 / 模型目录）、`actions`（签到 / 任务 / 补签）、
     `enable`（启用态 / 设为唯一 / 优先级 / 意图）、`oauth`（登录三条）、
-    `scheduling`（路由策略 / 调度模式 / 自动签到开关）
+    `scheduling`（路由策略 / 调度模式 / 自动签到开关）、
+    `pluginUpdate`（渠道插件查版本 / 更新）、
+    `modelVisibility`（哪些模型进**选择器** —— 只改界面清单，账号一个字节不动）
   - ⚠️ 域的划分依据是**语义**：`actions` 作用于全部号含已禁用的（F35），
-    `enable` 只动调度面 —— 这两件混在一起就会被「顺手跳过禁用号」改坏语义
+    `enable` 只动调度面 —— 这两件混在一起就会被「顺手跳过禁用号」改坏语义。
+    同理 `modelVisibility` 与 `enable` **必须分开**：前者只让模型不进选择器
+    （号、额度、调度全不受影响），后者真的把号从调度里拿掉 ——
+    混一起最危险的后果是用户以为「不显示 = 不用了」
   - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `gateway.invalidateChannel(plugin)`，
     否则用户看到旧值 —— 清哪些 key 由 [gateway.ts](gateway.ts) 决定
   - 被谁依赖：`route-table.ts` 的 `buildRoutes`、`boot.ts` 的启动流程
@@ -326,7 +331,8 @@
     出处见[实测报告](../docs/audits/2026-10-08-cpa-stream-probe.md)附录
   - 恢复挂在「配置可能变」这个**语义**上，不是挂在 boot / setup / oauth 这些**时机**上
 - **`model-alias.ts`** —— 同名模型的「渠道 / 模型」唯一别名。
-  - 导出：`buildAliasTable` / `aliasFor` / `channelPrefix` / `renderAliasYaml` / 类型 `AliasTable`
+  - 导出：`buildAliasTable` / `aliasFor` / `channelPrefix` / `bareModelNameOf` /
+    `renderAliasYaml` / 类型 `AliasTable`
   - 不拆的话 CPA 会在所有供给该模型的渠道之间轮询，面板选了哪个渠道都名不副实
   - ⚠️ 别名表**必须用实时目录现算**：渠道目录随账号增减变动，抄死的清单必然过期，
     而过期意味着「该拆的没拆」—— 静默失效
@@ -334,6 +340,9 @@
     别名是写进配置的持久状态），生成看**当前重名**（不重名的不配别名）。
     混在一起会让插件认不出自己写过的别名 → 展示名出现 `WorkBuddy · wb/xxx`：
     [决策记录](../.agents/notes/2026-10-06-alias-identity-vs-generation.md)
+  - ⚠️ **`bareModelNameOf` 是「渠道报的 id → 裸名」的唯一实现**（2026-10-13）：
+    路由侧的行身份（`row.bare`）与「隐藏模型」的键都从它派生 —— 两边口径漂开是
+    **静默的**（用户勾了隐藏，清单里那一行照样在）
   - 改后必测：`tests/model-alias.test.ts`、`tests/route-registry.test.ts`
 - **`model-caps.ts`** —— 模型能力（上下文窗口 + 图像输入）校准表。
   - 导出：`capsOf` / `calibratedChannels` / `calibratedTable` / `capSources` /

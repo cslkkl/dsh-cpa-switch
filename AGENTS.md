@@ -146,13 +146,6 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       形态的 id；代价是选择器里每个这类模型占两个条目（功能不受影响）。
       要收敛得先判「该以哪条为真」—— 属渠道知识，先记录不动。
       证据：`~/.dsh/storages/cpa-panel-routes.json` 里同名行的 id 形态。
-- [ ] **面板只显示自己要的渠道与模型**（想法未定，仅记录）—— 现在四个渠道全列，
-      每个渠道下又平铺全部号；有人只用一两个渠道、也只想看其中几个号。
-      诉求是**可勾选**「哪些渠道 / 哪些号出现在面板里」。
-      选项：设置里多选、或面板上加一层筛选。
-      ⚠️ 与**模型选择器**的分组无关 —— 那条（按渠道拆 provider）已落地（2026-10-12，
-      见[决策记录](.agents/notes/2026-10-12-model-selector-grouping.md)）。
-      未拍板，先不动手。
 - [ ] **待真机复验：0.14.0 那批（构建 + 重启 DSH 之后）** —— 这几条在代码里只有判据，
       没有真机证据（维护者 2026-10-12 要求记着）。**该版本已于 2026-10-12 发布到 npm**
       （`v0.14.0` 标签 → `publish` 工作流，正文来自手写覆盖）：
@@ -166,6 +159,13 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       ⑤ **「未签到」是灰底标签**（不再是看起来像括号的空心描边）。
       判据与决策见 [.agents/notes/2026-10-12-model-selector-grouping.md](.agents/notes/2026-10-12-model-selector-grouping.md)
       与 [.agents/notes/2026-10-12-reasoning-effort-retriage.md](.agents/notes/2026-10-12-reasoning-effort-retriage.md)。
+- [ ] **待真机复验：模型可见性（2026-10-13 那批，拉取最新 + 重启 DSH）** ——
+      面板每个渠道页签下新增「模型」一节（默认折叠），勾 = 出现在对话界面的模型下拉里：
+      ① **取消勾选某个模型 → 保存 → 对话界面的下拉里它消失**；
+      ② **面板里它照旧在**（这正是本功能的要点：勾选的地方在面板、生效的地方在选择器）；
+      ③ 勾回来 → 保存 → 下拉里它回来；
+      ④ 同渠道其它模型不受影响；同名模型在**别的渠道**不受影响。
+      判据与理由见[决策记录](.agents/notes/2026-10-13-model-visibility-in-panel.md)。
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 只能靠人工表，每次新模型都要补。
       ⚠️ **但「等谁」要说准**：CPA 侧**通路已存在**，缺的是**渠道插件没填值** ——
       上游 `sdk/pluginapi/types.go` 的 `PluginModel` 有 `ContextLength` /

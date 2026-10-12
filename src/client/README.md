@@ -94,6 +94,23 @@
 - **`use-account-login.ts`** —— 「添加账号」弹窗的状态机（`idle` / `starting` / `wait` / `error`）。
   - 授权轮询也走 `useResource` 的 `pollMs`（`POLL_MS = 2500`）；还没有 `state` 时不轮询
   - 到**终态**后 `invalidateReads(cacheKeys.accounts(plugin))` 让账号列表自己刷新
+- **`ModelVisibility.tsx` + `use-model-visibility.ts` + `model-visibility.ts`** ——
+  面板里的「模型」一节：勾选哪些模型**出现在 DSH 的模型选择器**里（2026-10-13）。
+  - ⚠️ **勾选的地方在面板、生效的地方在选择器**：面板照旧列出**全部**模型
+    （否则用户没法把取消掉的再勾回来），而宿主那边只推勾上的 —— 详见
+    [决策记录](../../.agents/notes/2026-10-13-model-visibility-in-panel.md)
+  - ⚠️ **方向**：状态文件存「**隐藏的**」（空文件 = 全不藏），界面勾「**显示的**」——
+    换算是 `model-visibility.ts` 的 `modelRowsOf` / `hiddenNamesOf`。换算反了会让
+    勾选整体颠倒，而列表看起来「真的变了」（用户以为功能生效了）
+  - ⚠️ **提交的是裸名**（宿主按裸名落盘）：行 id 带别名（`wb/glm-5.3`），
+    提交行 id 会失配 —— 用户勾了隐藏但选择器里照旧有它，且零报错。
+    裸名由**宿主**算好（`/models` 的 `bare`），因为浏览器半边不许引宿主模块
+  - ⚠️ **草稿按渠道重置**：草稿属于某个渠道的清单，不复位会让切回来时显示
+    上一个渠道的勾选（那些模型名在新渠道里大多不存在 → 勾选全空）
+  - 默认折叠（`<details>`）：一个渠道二三十个模型，展开会把账号网格挤出屏幕，
+    而账号才是这一页的主角
+  - 判定 `tests/model-visibility-client.test.ts`；宿主侧
+    `tests/ops-model-visibility.test.ts` + `tests/hidden-models-state.test.ts`
 - **`use-channel-actions.ts`** —— 渠道级动作（全部签到 / 任务、自动签到开关）+ 忙碌与提示。
   - 「批量在飞」与「某张卡在飞」**互相看得见**：并发点各发一次写请求会互相盖掉响应
   - ⚠️ **四个状态按渠道分槽，不是「切渠道清空」** —— 面板不随渠道重挂载，
@@ -437,6 +454,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [read-cache.ts](read-cache.ts)                     | 读缓存（新鲜 / 陈旧两档 + **按前缀作废**）与可订阅 store；语义改动同步 [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                                                                                                                                                                                                          |
 | [endpoints.ts](endpoints.ts)                       | `/api/v1/cpa/*` 的**路径唯一来源**（`paths`）；**写函数自己失效缓存**。⚠️ 前缀必须对上**本半边真的有读者**的那个读键（**不是**宿主 `cacheKeys` 的名字）；抄错不报错，只是那次作废**匹配不到任何条目**（空操作）。⚠️ 写成功后界面值**取回读**（F33）：作废缓存本身不会让界面更新。判据 `tests/client-cache-keys.test.ts`                                                                                                                               |
 | [report.tsx](report.tsx)                           | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](../../docs/ARCHITECTURE.md)）                                                                                                                                                                                                                                                                                                                                                |
+| [model-visibility.ts](model-visibility.ts)         | 模型可见性的**判定**（不含 JSX）：文件存「隐藏的」、界面勾「显示的」，换算只有一处；**提交裸名不是行 id**（行 id 带别名会失配）。同步 `tests/model-visibility-client.test.ts`                                                                                                                                                                                                                                                                         |
 | [plan-text.ts](plan-text.ts)                       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**；**中文档位名统一带「版」**（单写「免费」会被读成「这个号免费」）；`套餐：` 前缀不在这里加（那是 [credit-text.ts](credit-text.ts) 的事）                                                                                                                                                                                                                                                         |
 | [credit-text.ts](credit-text.ts)                   | 额度区的**唯一组装处**（单位文案 + 两格数字 + 说明行）：**只组装，判据一律向 `plan-text` / `meter-text` 要**；**单位判定只此一处**。同步 `tests/credit-text.test.ts`（含「全仓只有它判 `'tokens'`」的护栏）                                                                                                                                                                                                                                           |
 | [meter-text.ts](meter-text.ts)                     | 余额区判据：**没有分母就不画条、`used` 缺失就留空、条画「剩余占比」**；同步[决策记录](../../.agents/notes/2026-10-05-meter-bar-shows-remaining.md) + `tests/meter-text.test.ts`                                                                                                                                                                                                                                                                       |

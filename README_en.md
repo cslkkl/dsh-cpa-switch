@@ -55,6 +55,10 @@ Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own t
   reports "Running".
 - **Models registered automatically**: once the plugin is installed and an account is added,
   the four channels' models appear in DSH's model picker on their own.
+- **Keep only the models you use in the picker**: each channel's panel has a "Models" section —
+  uncheck a model and save, and it disappears from the chat model picker (the panel still
+  lists every model, so you can check it back at any time). Unchecked models remain callable;
+  they are only hidden from the dropdown.
 
 ### The four channels
 
