@@ -59,6 +59,11 @@ export function opsFor(gateway: CpaGateway): Operations {
       startTimeoutSeconds: CONFIG.startTimeoutSeconds,
     }),
   })
-  const setup = new SetupSession({ readConfig, adminKey, onPrepared: () => {} })
+  const setup = new SetupSession({
+    readConfig,
+    adminKey,
+    apiKey: async () => '',
+    onPrepared: () => {},
+  })
   return createOperations({ gateway, runtime, setup })
 }

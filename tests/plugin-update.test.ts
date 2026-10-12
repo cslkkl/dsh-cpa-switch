@@ -84,7 +84,7 @@ function makeSession(
     credentials: { resolve: async () => undefined, set: async () => undefined },
     readConfig,
   })
-  return new SetupSession({ readConfig, adminKey, onPrepared, install })
+  return new SetupSession({ readConfig, adminKey, apiKey: async () => '', onPrepared, install })
 }
 
 /** 假运行态：按用例需要回答 status / stop。 */
