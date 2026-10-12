@@ -11,13 +11,13 @@
  * @module dsh-cpa-switch/boot
  */
 
-import { ensureApiKey } from './credentials.ts'
+import { ensureApiKey, resolveApiKey } from './credentials.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import type { PluginConfig } from './config.ts'
 import type { CpaRuntime } from './runtime.ts'
 import type { Operations } from './ops/index.ts'
 import type { SyncResult } from './route-registry.ts'
-import { inspect, patchServerHost } from './setup/index.ts'
+import { inspect, patchAccessApiKeys, patchServerHost } from './setup/index.ts'
 import type { SetupSession } from './setup/index.ts'
 
 /** 生命周期流程的依赖。 */
@@ -51,6 +51,13 @@ export async function runBoot(deps: BootDeps): Promise<void> {
   const apiKeyState = await ensureApiKey({ credentials: deps.credentials, logger: deps.logger })
   deps.logger?.info?.('cpa-panel: CPA_API_KEY %s', apiKeyState)
   if (cancelled()) return
+
+  /**
+   * 调用密钥的**值**：写配置的 `access.api-keys`（`/v1` 鉴权）与模型路由
+   * （`llm-pi-ai` 经 `apiKeyEnv` 引用）用的都是它。`ensureApiKey` 刚把它备好，
+   * 这里读回；空串 = 凭据库写不进去（引用被遮蔽等）—— 下面的补丁路径会留 warn。
+   */
+  const apiKey = await resolveApiKey({ credentials: deps.credentials })
 
   /**
    * **先补环境，再启动** —— 顺序不能反。
@@ -93,6 +100,32 @@ export async function runBoot(deps: BootDeps): Promise<void> {
       }
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: server.host 补齐失败（不影响启动）: %o', error)
+    }
+
+    /**
+     * **`/v1` 鉴权收口（P0 2.1）**：老配置缺 `access.api-keys` 时 CPA 对
+     * `/v1/*` 不校验任何密钥 —— 同机任意进程不带密钥就能消耗用户账号额度
+     * （2026-10-04 实测 200）。补丁只补「缺失」：已有 `api-keys` 是用户的
+     * 密钥清单，一字节不动；找不到锚点就放弃且不改文件。
+     *
+     * ⚠️ 密钥拿不到时**留 warn 但不阻断启动**：写空段会让 CPA 拒绝一切调用
+     * （fail-open 优于 fail-closed 到自残的程度），但「无鉴权」这件事必须留痕。
+     */
+    try {
+      if (apiKey !== '') {
+        if (patchAccessApiKeys(apiKey)) {
+          deps.logger?.warn?.(
+            'cpa-panel: 托管配置缺 access.api-keys，已写入 CPA_API_KEY（/v1 从此要求鉴权）',
+          )
+        }
+      } else {
+        deps.logger?.warn?.(
+          'cpa-panel: CPA_API_KEY 未备好，跳过 /v1 鉴权写入 —— ' +
+            '/v1 当前无鉴权，同机进程可不带密钥调用（模型路由也可能不可用）',
+        )
+      }
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: access.api-keys 补齐失败（不影响启动）: %o', error)
     }
   }
   if (!portBusy && preflight.manageLifecycle && missing.length > 0) {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -47,6 +47,8 @@ describe('runBoot', () => {
     delete process.env.DSH_HOME
     rmSync(home, { recursive: true, force: true })
   })
+
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
 
   const config = (): PluginConfig => ({
     adminKey: '',
@@ -193,4 +195,59 @@ describe('runBoot', () => {
     expect(calls).not.toContain('push:boot')
     expect(calls).not.toContain('autoInstall')
   })
+
+  /**
+   * **`/v1` 鉴权收口（P0 2.1）**：CPA 未运行时，把调用密钥补写进托管配置的
+   * `access.api-keys` —— 否则同机任意进程都能不带密钥调 `/v1/chat/completions`
+   * （2026-10-04 实测 200）。密钥来自凭据库（`ensureApiKey` 已在此前备好）。
+   *
+   * ⚠️ 与 `patchServerHost` 同一个竞态纪律：**只在 CPA 未运行时写**
+   * （运行中它持有该文件并会回写，抢写是竞态）。
+   */
+  it('⚠️ CPA 没起来时把调用密钥补写进配置的 access.api-keys', async () => {
+    seedConfig()
+    await runBoot(depsOf(false))
+
+    const config = readFileSync(configPath(), 'utf8')
+    expect(config).toContain('access:')
+    expect(config).toContain('api-keys:')
+    expect(config).toContain('- "test-key"')
+  })
+
+  it('CPA 已在跑时不动配置（运行中抢写是竞态）', async () => {
+    const before = seedConfig()
+    await runBoot(depsOf(true))
+
+    expect(readFileSync(configPath(), 'utf8')).toBe(before)
+  })
+
+  it('调用密钥拿不到时跳过写入并留 warn（fail-open，但不许零痕迹）', async () => {
+    seedConfig()
+    const deps = depsOf(false)
+    ;(deps.credentials as unknown as { resolve: () => Promise<undefined> }).resolve = async () =>
+      undefined
+
+    await runBoot(deps)
+
+    expect(readFileSync(configPath(), 'utf8')).not.toContain('api-keys:')
+    expect(logs.some((line) => line.level === 'warn' && line.text.includes('鉴权'))).toBe(true)
+  })
+
+  /** 种一份最小托管配置，返回种下的内容（好断言「一个字节没动」）。 */
+  function seedConfig(): string {
+    const dir = join(home, 'cpa-panel', 'runtime', 'cpa')
+    mkdirSync(dir, { recursive: true })
+    const content = [
+      'config-version: 8',
+      'server:',
+      '  host: "127.0.0.1"',
+      '  port: 8317',
+      '',
+      'management:',
+      '  secret-key: "plain-secret"',
+      '',
+    ].join('\n')
+    writeFileSync(join(dir, 'config.yaml'), content, 'utf8')
+    return content
+  }
 })
