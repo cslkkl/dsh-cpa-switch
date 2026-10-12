@@ -107,8 +107,20 @@
 
 /** 单个模型的能力元数据。 */
 export interface ModelCaps {
-  /** 上下文窗口（token）。 */
-  readonly contextWindow: number
+  /**
+   * 上下文窗口（token）。**可以缺** —— 缺就是「这个模型我没有窗口出处」。
+   *
+   * ⚠️ **为什么允许缺**（2026-10-12）：档位类的实测标记（{@link reasoningEfforts} /
+   * {@link reasoningEffortsSwapped}）与窗口是**两条独立的证据轴**。
+   * Trae 那 11 条裸名按渠道口径**窗口故意不填**（等渠道侧证据），但它们照样需要
+   * 「档位要不要摘/对调」的标记 —— 若窗口是必填，就只能为了挂标记去**编一个窗口**，
+   * 那是拿一条没有出处的数据换一条有出处的数据。
+   *
+   * 缺省时推送侧**完全不写** `contextWindow`（而不是写 `undefined`）⇒ 宿主落自己的
+   * 兜底 262144，与「这个模型没有校准条目」**行为一致**。判据
+   * `tests/route-registry.test.ts` 的「只带档位标记的条目不许顺带改窗口」。
+   */
+  readonly contextWindow?: number
   /** 可选窗口；默认取 `contextWindow`，有更大值时说明「能开但默认没开」。 */
   readonly supportedContextWindows?: readonly number[]
   /**
@@ -158,6 +170,36 @@ export interface ModelCaps {
    * [tests/route-registry.test.ts](../tests/route-registry.test.ts)。
    */
   readonly reasoningEfforts?: false
+  /**
+   * **对调**该模型的两个档位 —— 界面「关」发上游「开」的词、界面「开」发「关」的词。
+   *
+   * ## 为什么需要这一档
+   *
+   * 实测有一类模型**方向是反的**：发 `high` 反而比发 `off` **想得更少**。
+   * 2026-10-12 三重复测的例子（off / high 中位数字数）：
+   * `dfmodel` 167 / **31**、`gm51model` 185 / **48**、`kmodel_latest` 158 / **57**。
+   *
+   * 对用户来说这比「没差别」更坏：他为了「多想点」去选「开」，**结果适得其反**。
+   * 对调之后界面语义回到「关 = 想得少、开 = 想得多」——**方向正确**。
+   *
+   * ## ⚠️ 对调 ≠ 真的能关掉
+   *
+   * 这类模型实测「关」那一档**仍有思考**（上表里 31–57 字；有的模型更多）。
+   * **上游没给一个真能关掉思考的词** —— 对调只能保证方向，不能保证「关 = 0 思考」。
+   * 所以不要把它当成 `reasoningEfforts: false` 的替代：**能关的照常关**，
+   * 关不掉的走 `false`（摘掉档位），只有「方向反了」的才来这里。
+   *
+   * ## 与 {@link ModelCaps.reasoningEfforts} 互斥
+   *
+   * 一个要**摘掉**档位、一个要**换个方向声明** —— 同时写是自相矛盾，
+   * 判据直接拦住（`tests/model-caps.test.ts`）。
+   *
+   * ⚠️ **值必须来自至少三次重复实测**：单次测量会翻类 ——
+   * 2026-10-12 那次复测里，上一版单次数据的「方向相反」名单**有一半翻了类**
+   * （`wb/glm-5.3` 585/38 → 12/12、`gmodel` 309/48 → 193/698、`kimi-k3` 反的变正的）。
+   * 详见[实测报告](../docs/audits/2026-10-06-reasoning-effort-off-vs-high.md)的后续复测一节。
+   */
+  readonly reasoningEffortsSwapped?: true
 }
 
 /**
@@ -317,13 +359,24 @@ export const REASONING_DEFAULT = 'high' as const
  *
  * @param enabled 面板上的总开关（「允许切换思考档位」）。
  * @param channel 渠道 id；决定「关」发哪个词（见 {@link OFF_SPELLING}）。
+ * @param swapped 对调两个档位的值（见 {@link ModelCaps.reasoningEffortsSwapped}）——
+ *   用于实测「方向相反」的模型，让界面语义回到「关 = 想得少、开 = 想得多」。
  */
 export function reasoningEffortsOf(
   enabled: boolean,
   channel = '',
+  swapped = false,
 ): Readonly<Record<string, string>> | undefined {
   if (!enabled) return undefined
-  return { [OFF_KEY]: offSpellingOf(channel), [HIGH_KEY]: HIGH_SPELLING }
+  const off = offSpellingOf(channel)
+  /**
+   * 对调后仍是**同样的两个键**（界面文案不变），只是把值换过来：
+   * 界面「关」→ 上游 `high`（想得少的那档）、界面「开」→ 上游的「关」词。
+   * zcode 的「关」词是 `none`，对调后它就落在「开」这一档上。
+   */
+  return swapped
+    ? { [OFF_KEY]: HIGH_SPELLING, [HIGH_KEY]: off }
+    : { [OFF_KEY]: off, [HIGH_KEY]: HIGH_SPELLING }
 }
 
 /**
@@ -392,9 +445,11 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     'hy3-x': { contextWindow: 192_000, supportsImages: true },
     'hy4-preview': { contextWindow: 1_000_000 },
     // 国际端点清单（`FALLBACK_WORKBUDDY_AI_MODELS`）的值：默认 300K、可开到 1M。
+    // ⚠️ 档位摘掉：三次重复实测「关」那一档照样思考（178/176/0 字）—— 关不掉的假旋钮。
     'hy4-preview-f': {
       contextWindow: 300_000,
       supportedContextWindows: [300_000, 1_000_000],
+      reasoningEfforts: false,
     },
     'hy4-preview-x': { contextWindow: 1_000_000 },
     // ── 以下无来源，按口径填 1M（见头注「无来源为什么填 1M」）──
@@ -404,12 +459,18 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     // —— 档位开关纯属误导，逐模型省略声明（不省渠道里其它模型的）。
     // 依据见 docs/audits/2026-10-06-reasoning-effort-off-vs-high.md 与决策记录。
     'hunyuan-chat': { contextWindow: 1_000_000, reasoningEfforts: false },
+    // 档位摘掉（2026-10-12 三重复测）：关不掉 —— off=[135,122,139]、high=[180,184,207]。
+    // ⚠️ 只带档位标记、**不填窗口**：这条模型的窗口没有渠道侧出处，按渠道口径走兜底
+    //（与 Trae 那 11 条裸名同一条口径），别为了挂标记去编一个窗口。
+    'step-5-preview': { reasoningEfforts: false },
     'space-bunny': { contextWindow: 1_000_000, supportsImages: true },
   },
   zcode: {
     'glm-5.2': { contextWindow: 1_000_000, supportsImages: true },
-    'glm-5.3': { contextWindow: 1_000_000 },
-    'glm-5.3-flash': { contextWindow: 1_000_000, supportsImages: true },
+    // 档位摘掉（2026-10-12 三重复测）：四种词（none/off/low/high）全部 200 且**思考 0 字**
+    // —— 真·假 high，给开关纯属误导。
+    'glm-5.3': { contextWindow: 1_000_000, reasoningEfforts: false },
+    'glm-5.3-flash': { contextWindow: 1_000_000, supportsImages: true, reasoningEfforts: false },
     'glm-5': { contextWindow: 200_000 },
     'glm-5-turbo': { contextWindow: 200_000 },
     'glm-4.6': { contextWindow: 200_000 },
@@ -450,12 +511,24 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     qmodel: { contextWindow: 1_000_000, supportsImages: true },
     q37fmodel: { contextWindow: 1_000_000, supportsImages: true },
     dmodel: { contextWindow: 1_000_000, supportsImages: true },
-    dfmodel: { contextWindow: 1_000_000, supportsImages: true },
+    /**
+     * ── 以下 4 条：**档位方向相反，对调**（2026-10-12 三重复测）──
+     *
+     * 实测「关」比「开」想得**更多**（用户为了多想点去选「开」反而更少）：
+     * `dfmodel` off=[121,185,187] / high=[90,65,38]、
+     * `gfmodel` off=[84,203,180] / high=[25,31,21]、
+     * `gm51model` off=[174,173,187] / high=[102,44,38]、
+     * `gmodel` off=[216,142,413] / high=[67,51,38]。
+     *
+     * ⚠️ 对调**只修方向**：这些模型「关」那一档仍会思考（25–413 字），
+     * 上游没给一个真能关掉思考的词。
+     */
+    dfmodel: { contextWindow: 1_000_000, supportsImages: true, reasoningEffortsSwapped: true },
     // 智谱官方：GLM-5.3 仅文本 → 保持不标（**有反证**，不是「不确定」）
-    gmodel: { contextWindow: 1_000_000 },
-    gfmodel: { contextWindow: 1_000_000, supportsImages: true },
+    gmodel: { contextWindow: 1_000_000, reasoningEffortsSwapped: true },
+    gfmodel: { contextWindow: 1_000_000, supportsImages: true, reasoningEffortsSwapped: true },
     // GLM-5.2 纯文本 → 保持不标（**有反证**）
-    gm51model: { contextWindow: 1_000_000 },
+    gm51model: { contextWindow: 1_000_000, reasoningEffortsSwapped: true },
     // ⚠️ 窗口：插件源码 wbModels() 写 180000、动态路径取上游 max_input_tokens
     //    （缺省回落 180000）。按维护者口径「不确定填 1M」——**这是知情取舍**，
     //    不是查不到：真实值逐账号不同，我们拿不到。图片标 ✅（Kimi K2.x 系列）。
@@ -484,13 +557,30 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
    * ⚠️ **`kimi-k2.7-code` 也在那 11 条里**（同一个模型 WorkBuddy 侧叫 `kimi-k2.7`，
    * 那边标了 256K）。Trae 侧的窗口没有渠道证据，所以这里**不填** ——
    * 别把 WorkBuddy 的值搬过来：同一模型在不同渠道上限本就可能不同。
+   *
+   * ── 档位标记（2026-10-12 三重复测）──
+   *
+   * 下面几条带 `reasoningEfforts: false`（关不掉：off 那一档照样思考 100+ 字）或
+   * `reasoningEffortsSwapped` 的，是**只带档位证据**的条目 —— 窗口仍然不填。
+   * 两条证据轴独立：有档位出处不等于有窗口出处（见 {@link ModelCaps.contextWindow}）。
    */
   trae: {
     'deepseek-v4.1-flash': { contextWindow: 1_000_000, supportsImages: true },
-    'glm-5.2': { contextWindow: 1_000_000, supportsImages: true },
+    // 档位摘掉：off=[865,572,530] high=[337,371,436] —— 关不掉，且「开」比「关」还少。
+    'glm-5.2': { contextWindow: 1_000_000, supportsImages: true, reasoningEfforts: false },
     'glm-5.3': { contextWindow: 1_000_000 },
-    'kimi-k2.6': { contextWindow: 256_000, supportsImages: true },
+    // 档位摘掉：off=[347,404,335] high=[203,151,198] —— 关不掉。
+    'glm-5.3-flash': { reasoningEfforts: false },
+    // 档位摘掉：off=[877,797,753] high=[545,497,529] —— 关不掉。
+    'kimi-k2.6': { contextWindow: 256_000, supportsImages: true, reasoningEfforts: false },
     'minimax-m3': { contextWindow: 1_000_000, supportsImages: true },
+    // ── 以下只带档位标记（窗口按渠道口径走兜底，不填）──
+    // 档位摘掉：off=[155,122,148] high=[164,200,167] —— 关不掉。
+    'Doubao-Seed-2.1-Pro': { reasoningEfforts: false },
+    // 档位摘掉：off=[578,557,553] high=[709,598,661] —— 关不掉。
+    'Doubao-Seed-2.1-Turbo': { reasoningEfforts: false },
+    // 档位摘掉：off=[189,188,537] high=[149,134,172] —— 关不掉。
+    'step-5-preview': { reasoningEfforts: false },
   },
 }
 
@@ -514,6 +604,17 @@ export function capsOf(channel: string, model: string): ModelCaps | undefined {
 /** 已校准的渠道列表（供文档与测试现查，别手抄）。 */
 export function calibratedChannels(): readonly string[] {
   return Object.keys(CALIBRATED).sort()
+}
+
+/**
+ * 校准表的只读视图（供判据枚举**全表性质**，别手抄清单）。
+ *
+ * 现有两个用途：① 「省略档位」与「对调档位」两个标记**互斥**；
+ * ② 对调标记只认 `true`（没有 `false`）。
+ * 这两条都是**表级不变量** —— 只测某几个模型的话，新增条目时可以悄悄违反。
+ */
+export function calibratedTable(): Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> {
+  return CALIBRATED
 }
 
 /** 校准表的出处分档（供文档与测试现查，别手抄）。 */

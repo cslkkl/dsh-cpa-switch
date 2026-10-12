@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { calibratedChannels, capSources, capsOf } from '../src/model-caps.ts'
+import {
+  calibratedChannels,
+  calibratedTable,
+  capSources,
+  capsOf,
+  reasoningEffortsOf,
+} from '../src/model-caps.ts'
 
 /**
  * 这些值是**外部事实**，抄错就是给用户报一个假的上下文窗口。
@@ -50,6 +56,50 @@ describe('capsOf', () => {
         expect(Number.isInteger(caps.contextWindow)).toBe(true)
         expect(caps.contextWindow).toBeGreaterThan(0)
       }
+    }
+  })
+
+  /**
+   * ⚠️ **窗口可以缺，但写了就必须是正整数**（2026-10-12）。
+   *
+   * 缺 = 「这个模型我没有窗口出处」（Trae 那 11 条裸名的口径）；
+   * 但写了 `0` / 负数 / 小数会被宿主当非法值 —— 那是**整个 provider 注册失败**，
+   * 所有模型一起消失。所以这条覆盖**全表**，不只上面那三个模型名。
+   */
+  it('⚠️ 全表：窗口要么不写，要么是正整数（写坏值会让整个 provider 注册失败）', () => {
+    for (const [channel, models] of Object.entries(calibratedTable())) {
+      for (const [model, caps] of Object.entries(models)) {
+        if (caps.contextWindow === undefined) continue
+        expect(Number.isInteger(caps.contextWindow), `${channel}.${model}`).toBe(true)
+        expect(caps.contextWindow, `${channel}.${model}`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  /**
+   * ⚠️ **只带档位标记的条目不许顺带声明窗口**（2026-10-12）。
+   *
+   * 为什么值得钉：给「关不掉」的模型加标记时，最省事的做法是**新建一条带窗口的条目**
+   * —— 那等于**凭空给这个模型一个窗口值**，而 Trae 那批裸名的渠道口径是「窗口不填、
+   * 走兜底 262144」。多写一个 1M 就是**静默把兜底改成了 1M**，谁也不会发现。
+   *
+   * 所以：**档位标记与窗口是两条独立的证据轴**，标记不能成为编窗口的理由。
+   * 这里只钉「确有出处的那几条」不填窗口；别处的窗口值有各自出处，不受本条约束。
+   */
+  it('⚠️ 只带档位标记的条目不填窗口（别拿标记当编窗口的理由）', () => {
+    const flagOnly = [
+      // Trae 平台模型：窗口无渠道侧出处，按口径走兜底
+      ['trae', 'Doubao-Seed-2.1-Pro'],
+      ['trae', 'Doubao-Seed-2.1-Turbo'],
+      ['trae', 'glm-5.3-flash'],
+      ['trae', 'step-5-preview'],
+      ['workbuddy', 'step-5-preview'],
+    ] as const
+    for (const [channel, model] of flagOnly) {
+      const caps = capsOf(channel, model)
+      expect(caps, `${channel}.${model} 应有档位标记`).toBeDefined()
+      expect(caps?.reasoningEfforts, `${channel}.${model}`).toBe(false)
+      expect(caps?.contextWindow, `${channel}.${model} 不该有窗口出处`).toBeUndefined()
     }
   })
 })
@@ -151,6 +201,56 @@ describe('reasoningEfforts 逐模型省略', () => {
     // 同渠道、同校准表的其它模型不跟着省略 —— 省略是逐模型的，不是逐渠道的
     expect(capsOf('workbuddy', 'deepseek-v4.1-flash')?.reasoningEfforts).toBeUndefined()
     expect(capsOf('workbuddy', 'hunyuan-2.0-thinking')?.reasoningEfforts).toBeUndefined()
+  })
+})
+
+/**
+ * **方向相反**的模型：对调两个档位的值（2026-10-12 立项）。
+ *
+ * 实测有一类模型发 `high` 反而比发 `off` 想得**更少**（`dfmodel` 167/31、
+ * `gm51model` 185/48）：用户为了「多想点」去选「开」结果适得其反。
+ * 对调让界面语义回到「关 = 想得少、开 = 想得多」。
+ *
+ * ⚠️ 两条硬约束：
+ * 1. **对调 ≠ 能关掉** —— 它只保证方向；「关」那一档仍有思考，摘档位是另一档（`reasoningEfforts: false`）
+ * 2. **与 `reasoningEfforts: false` 互斥** —— 一个要摘、一个要换方向，同时写是自相矛盾
+ */
+describe('reasoningEffortsSwapped 档位对调', () => {
+  it('对调后仍是同样的两个键 —— 界面文案不变（宿主只认 off / high）', () => {
+    const swapped = reasoningEffortsOf(true, 'workbuddy', true)
+    expect(Object.keys(swapped ?? {}).sort()).toEqual(['high', 'off'])
+  })
+
+  it('⚠️ 值正好互换：界面「关」发 high、界面「开」发「关」的词', () => {
+    expect(reasoningEffortsOf(true, 'workbuddy', true)).toEqual({ off: 'high', high: 'off' })
+    // 未对调的照旧
+    expect(reasoningEffortsOf(true, 'workbuddy', false)).toEqual({ off: 'off', high: 'high' })
+  })
+
+  it('⚠️ zcode 对调后「开」= `none`（该渠道的关词），不是 `off`', () => {
+    expect(reasoningEffortsOf(true, 'zcode', true)).toEqual({ off: 'high', high: 'none' })
+  })
+
+  it('总开关关掉时对调同样不声明（逃生通道优先）', () => {
+    expect(reasoningEffortsOf(false, 'workbuddy', true)).toBeUndefined()
+  })
+
+  it('⚠️ 与「省略档位」互斥：两个标记不许同时出现在一条条目上', () => {
+    for (const [channel, models] of Object.entries(calibratedTable())) {
+      for (const [model, caps] of Object.entries(models)) {
+        const both = caps.reasoningEfforts === false && caps.reasoningEffortsSwapped === true
+        expect(both, `${channel}.${model} 同时标了「省略」与「对调」`).toBe(false)
+      }
+    }
+  })
+
+  it('⚠️ 对调标记只认 `true`（没有 false —— 不写就是不对调）', () => {
+    for (const [channel, models] of Object.entries(calibratedTable())) {
+      for (const [model, caps] of Object.entries(models)) {
+        if (caps.reasoningEffortsSwapped === undefined) continue
+        expect(caps.reasoningEffortsSwapped, `${channel}.${model}`).toBe(true)
+      }
+    }
   })
 })
 
