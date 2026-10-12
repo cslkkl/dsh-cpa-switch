@@ -19,7 +19,6 @@ import type { CpaRuntime } from '../runtime.ts'
 import type { InstallDeps, SetupSession } from '../setup/index.ts'
 import { createAccountsOps, type AccountsOps } from './accounts.ts'
 import { createActionsOps, type ActionsOps } from './actions.ts'
-import { createDisplayOps, type DisplayOps } from './display.ts'
 import { createEnableOps, type EnableOps } from './enable.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
 import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
@@ -75,8 +74,6 @@ export interface Operations {
   readonly scheduling: SchedulingOps
   /** 渠道插件查版本 / 更新（**唯一不碰 CPA API 的域**）。 */
   readonly pluginUpdate: PluginUpdateOps
-  /** 面板显示偏好（隐藏哪些渠道 / 号）—— **只改界面，不碰 CPA**。 */
-  readonly display: DisplayOps
 }
 
 /** 按域组装业务层。 */
@@ -88,6 +85,5 @@ export function createOperations(deps: OpsDeps): Operations {
     oauth: createOauthOps(deps),
     scheduling: createSchedulingOps(deps),
     pluginUpdate: createPluginUpdateOps(deps),
-    display: createDisplayOps(),
   }
 }

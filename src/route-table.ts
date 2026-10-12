@@ -339,24 +339,6 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       },
     },
     {
-      /**
-       * 面板**显示设置**：隐藏哪些渠道、哪些号（`GET` 读、`POST` 写）。
-       *
-       * body: `{hiddenChannels: string[], hiddenAccounts: string[]}`。
-       *
-       * ⚠️ 这条路由**不碰 CPA**（偏好只落本地状态文件）—— 所以没有就绪前置、
-       * 也不作废任何读缓存。它与 `account-enabled` 的区别是**语义上的**：
-       * 那条真的把号从调度里拿掉，这条只让面板不画它（号照常跑）。
-       */
-      path: '/api/v1/cpa/display',
-      methods: ['GET', 'POST'],
-      handle: async (request) => {
-        if (request.method === 'GET') return json(ops.display.get())
-        const body = await readBody(request)
-        return json(ops.display.set(body.hiddenChannels, body.hiddenAccounts))
-      },
-    },
-    {
       path: '/api/v1/cpa/auto-checkin',
       methods: ['GET', 'POST'],
       handle: async (request) => {

@@ -182,27 +182,6 @@ export const zh = {
   creditsUnreadableHint: '点工具栏的「{action}」重试；若一直如此，去 CPA 里看该渠道的账号状态',
   creditsPartlyUnreadable: '有 {count} 个账号的额度读不到',
   creditsPartlyUnreadableHint: '上面的合计不含它们；点「{action}」可重试',
-  /**
-   * 面板「显示设置」（隐藏哪些渠道 / 号）。
-   *
-   * ⚠️ `displayHiddenHint` 是本功能**唯一会造成误解**的地方，必须说清
-   * 「隐藏只是不显示」：用户以为藏起来的号不再消耗额度，就会把它当成省额度的手段。
-   */
-  displaySettings: '显示设置',
-  displayChannels: '显示的渠道',
-  displayAccounts: '显示的账号',
-  displayNoAccounts: '这个渠道还没有账号。',
-  displayHidden: '已隐藏',
-  displayShown: '显示中',
-  displayCannotHide: '无法隐藏（上游没给这个号的标识）',
-  displayHiddenHint:
-    '**隐藏只是不在面板上显示** —— 被隐藏的号照常参与调度、照常签到、照常消耗额度，只是这里看不到它。要真的让它不参与，请用「选择账号」或卡片上的开关。',
-  displayHiddenTitle: '有隐藏的号需要处理',
-  /** 点名：`{names}` 是「名字（原因）」的列表。 */
-  displayHiddenExhausted: '额度已用完：{names}',
-  displayHiddenUnreadable: '另外 {count} 个隐藏号的额度读不到',
-  displayShowAll: '全部显示',
-  save: '保存',
   failedWith: '{action}失败：{reason}',
   checkedIn: '已签到',
   notCheckedIn: '未签到',
@@ -389,20 +368,6 @@ export const en: Record<LocaleKey, string> = {
     'Click "{action}" in the toolbar to retry; if it keeps happening, check the account status for this channel in CPA',
   creditsPartlyUnreadable: 'Credits unavailable for {count} account(s)',
   creditsPartlyUnreadableHint: 'The totals above exclude them; click "{action}" to retry',
-  displaySettings: 'Display settings',
-  displayChannels: 'Channels shown',
-  displayAccounts: 'Accounts shown',
-  displayNoAccounts: 'This channel has no accounts yet.',
-  displayHidden: 'Hidden',
-  displayShown: 'Shown',
-  displayCannotHide: 'Cannot hide (upstream did not identify this account)',
-  displayHiddenHint:
-    '**Hiding only affects this panel** — hidden accounts still take part in scheduling, still check in, and still spend credits; you just cannot see them here. To really take one out, use "Select account" or the switch on its card.',
-  displayHiddenTitle: 'Hidden accounts need attention',
-  displayHiddenExhausted: 'Out of credits: {names}',
-  displayHiddenUnreadable: '{count} more hidden account(s) have unreadable credits',
-  displayShowAll: 'Show all',
-  save: 'Save',
   failedWith: '{action} failed: {reason}',
   checkedIn: 'Checked in',
   notCheckedIn: 'Not checked in',

@@ -48,8 +48,6 @@ export const paths = {
   /** 自动签到开关（`GET` 读、`POST` 写）。 */
   autoCheckin: (plugin: string): string =>
     '/api/v1/cpa/auto-checkin?plugin=' + encodeURIComponent(plugin),
-  /** 面板显示设置：隐藏哪些渠道 / 号（`GET` 读、`POST` 写）。 */
-  display: '/api/v1/cpa/display',
   /** 起一次登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（`POST`）。 */
   auth: '/api/v1/cpa/auth',
   /** 起登录的完整路径。 */
@@ -181,28 +179,6 @@ export function autoCheckinOf(result: ApiResult): boolean | undefined {
 /** 起一次渠道登录，返回 `{ok, state, url}`。 */
 export function startAuth(plugin: string): Promise<ApiResult> {
   return api(paths.authStart(plugin))
-}
-
-/** 读面板显示设置。 */
-export function fetchDisplay(): Promise<ApiResult> {
-  return api(paths.display)
-}
-
-/**
- * 写面板显示设置。
- *
- * ⚠️ **写成功后要作废显示设置这个读**（否则界面继续拿旧值：勾了「隐藏」但列表不动）。
- * 但它**不作废 `accounts:`** —— 这个域不碰 CPA，账号数据一个字节都没变，
- * 顺手失效只是让下一次切页签多打一次 CPA。判据见 `tests/read-cache.test.ts` 的同类。
- */
-export function setDisplay(
-  hiddenChannels: readonly string[],
-  hiddenAccounts: readonly string[],
-): Promise<ApiResult> {
-  return post(paths.display, { hiddenChannels, hiddenAccounts }).then((result) => {
-    if (result.ok) invalidateReads(cacheKeys.display())
-    return result
-  })
 }
 
 /** 查登录进度。返回 `{ok, status}`，`status === 'wait'` 表示还没完成。 */

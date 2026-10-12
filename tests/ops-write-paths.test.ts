@@ -282,18 +282,6 @@ describe('读路径不许作废缓存', () => {
     run: (o: Operations) => Promise<OpsResult>
   }[] = [
     {
-      /**
-       * 显示设置**完全不碰 CPA**（偏好只落本地状态文件）——
-       * 所以这条读路径的 `setup` 是空的：它会替我们抓住「哪天有人顺手给它加了
-       * 一次 CPA 请求或一次作废」这类改动。
-       */
-      name: '显示设置',
-      setup: () => {
-        /* 不铺任何 CPA 响应：它不该发请求 */
-      },
-      run: async (ops) => await ops.display.get(),
-    },
-    {
       name: '账号列表',
       setup: (cpa) => {
         cpa.reply('/v0/management/plugins/workbuddy/accounts', { accounts: [] })

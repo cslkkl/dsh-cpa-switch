@@ -112,35 +112,6 @@
   margin-top: 2px;
 }
 
-/*
- * 显示设置弹层里的两组（渠道 / 号）。
- *
- * 组标题与行的排版都跟 `.noticeHint` 一个层级（12px、次要色）——
- * 弹层里没有层级要表达，只要「一组一行」看得清。
- */
-.displayGroup {
-  margin-top: 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.displayRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.displayRowLabel {
-  flex: 1;
-  font-size: 13px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ---- Environment setup block ------------------------------------------- */
 
 /* Read as a distinct region rather than another account card: a 3px leading
