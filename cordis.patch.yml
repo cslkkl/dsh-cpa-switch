@@ -26,10 +26,30 @@
 # **为什么不写 models**：省略是合法的（`llm-pi-ai/src/config.ts:470` 只在
 # `source.models !== undefined` 时才传入）。骨架 + 空清单是合法状态：
 # 路由存在、模型列表暂空，插件就绪后补上。
+#
+# **为什么是四行（一个渠道一个 provider）**：模型选择器**按 provider 分组**，
+# 四个渠道原先共用一行 `cpa` —— 模型一多就是一层平铺（实测 96 行）。
+# 拆成四行之后分组常驻，重载空窗里也不会整组消失。
+#
+# ⚠️ 键名与组名由 `src/channels/registry.ts` 的 `providerIdOf` / `providerLabelOf`
+# 派生，这里是手抄的副本（YAML 无法 import TS）—— 由
+# `tests/route-registry.test.ts` 的「骨架与推送的分组一致」钉住两者相等。
 - id: llm-pi-ai
   config:
     providers:
-      cpa:
-        displayName: CPA Switch
+      cpa-workbuddy:
+        displayName: CPA Switch · WorkBuddy
+        apiKeyEnv: CPA_API_KEY
+        api: openai-completions
+      cpa-trae:
+        displayName: CPA Switch · Trae
+        apiKeyEnv: CPA_API_KEY
+        api: openai-completions
+      cpa-qoder:
+        displayName: CPA Switch · Qoder
+        apiKeyEnv: CPA_API_KEY
+        api: openai-completions
+      cpa-zcode:
+        displayName: CPA Switch · ZCode
         apiKeyEnv: CPA_API_KEY
         api: openai-completions

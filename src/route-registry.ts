@@ -32,11 +32,14 @@
 import type { CpaGateway } from './gateway.ts'
 import type { CpaRuntime } from './runtime.ts'
 import {
+  PROVIDER_PREFIX,
   ROUTE_PREFIXES,
   channelLabel,
   channelOf,
   channelOfPrefix,
   channelOrder,
+  providerIdOf,
+  providerLabelOf,
 } from './channels/registry.ts'
 import { buildAliasTable, type AliasTable } from './model-alias.ts'
 import { capsOf, reasoningDefaultOf, reasoningEffortsOf } from './model-caps.ts'
@@ -67,6 +70,15 @@ export const systemClock: Clock = {
   now: () => Date.now(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }
+
+/**
+ * **历史 provider 键**：拆分组之前所有模型都挂在这一个键下（2026-10-12 之前）。
+ *
+ * 升级上来的机器上它挂着**上一版**的整份清单 —— 推送时必须清掉，
+ * 否则选择器里会多一个永远不更新的「幽灵组」（挂满陈旧模型）。
+ * 判据见 `tests/route-registry.test.ts` 的「按渠道分组」。
+ */
+const LEGACY_PROVIDER_ID = 'cpa'
 
 /**
  * 渠道展示名与顺序**一律从渠道注册表派生**，这里不再抄第二份清单。
@@ -525,6 +537,18 @@ function catalogIds(catalog: { data?: unknown[] }): string[] {
 }
 
 /**
+ * 一个渠道分组：`id` 是模型选择器的**分组身份**（`cpa-<渠道>`），`profile` 是推给宿主的那份。
+ *
+ * 为什么 id 与 profile 分开而不是塞进 profile 里：`profile` 的键就是宿主的
+ * provider id（`providers.<id> = profile`），把 id 也写进值里会出现**两份**说法，
+ * 还会被宿主 schema 当成未知字段（`z.dict(profile)` 收的是 dict，值必须是 profile 形状）。
+ */
+interface ChannelGroupProfile {
+  readonly id: string
+  readonly profile: RouteProfile
+}
+
+/**
  * 算好的清单 + **每行 id 属于哪个托管渠道**。
  *
  * 那张表只服务一件事：目录护栏**按渠道放行**（见 `refresh`）——
@@ -532,7 +556,8 @@ function catalogIds(catalog: { data?: unknown[] }): string[] {
  * 所以它**不进** {@link RouteProfile}（那是推给宿主的形状），只在进程内流传。
  */
 interface BuiltProfile {
-  readonly profile: RouteProfile
+  /** 按渠道分好组的清单（每个有模型的渠道一组）。 */
+  readonly groups: readonly ChannelGroupProfile[]
   readonly channelOf: ReadonlyMap<string, string>
 }
 
@@ -645,63 +670,103 @@ function buildCpaRouteProfile(
    * 的形状坑同类。`0` 是「不声明」的开关值，不是要写出去的值。
    */
   const routeMaxOutputTokens = deps.maxOutputTokens?.() ?? 0
+  /** 一行 → 宿主认的模型条目（全部渠道共用同一条映射，差异只由 `caps` / 渠道拼写给）。 */
+  const toModel = (row: {
+    id: string
+    bare: string
+    label: string
+    channel: string
+  }): RouteModel => {
+    // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
+    const caps = capsOf(row.channel, row.bare)
+    // 逐模型省略：校准表标了 `reasoningEfforts: false`（实测反证：两档都无思考）
+    // 的模型不发档位声明 —— 宿主落 `reasoning: false`，界面不给 Effort 行。
+    // 其余模型照常按渠道给。判据见 tests/route-registry.test.ts「思考档位声明」。
+    const reasoningEfforts =
+      caps?.reasoningEfforts === false ? undefined : reasoningEffortsOf(effortsEnabled, row.channel)
+    // 模型级例外优先于路由级默认；`0` / 非法值都落到「不写」。
+    const maxOutputTokens = caps?.maxOutputTokens ?? routeMaxOutputTokens
+    return {
+      id: row.id,
+      name: `${row.label} · ${row.bare}`,
+      ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
+      /**
+       * 输出上限：**只在正整数时写**（`0` = 用户关掉了声明）。
+       *
+       * 宿主没读到时回退 `DEFAULT_MAX_TOKENS = 32768`；声明只对会把值送进
+       * 上游的渠道生效（实测 workbuddy 真截断，qoder / trae 到不了上游）。
+       * 判据见 `tests/route-registry.test.ts`「输出上限声明」。
+       */
+      ...(Number.isInteger(maxOutputTokens) && maxOutputTokens >= 1
+        ? { maxTokens: maxOutputTokens }
+        : {}),
+      /**
+       * 模态走 `input`（pi-ai 的字段名；直连 DeepSeek 适配器才用 `inputModalities`）。
+       *
+       * ⚠️ **只在 `supportsImages === true` 时写** —— 省略时宿主落
+       * `DEFAULT_INPUT = ["text"]`（`dsh-llm-pi-ai/lib/index.js:940`）。
+       * 少标＝附加图片前就被拒；多标＝图片已发出去、消息已落库，
+       * provider 中途拒绝，会话卡在反复重试。所以不写才是保守。
+       */
+      ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
+      /**
+       * 思考档位：**逐模型带上、值按该行的渠道给**（开关打开时）。
+       *
+       * ⚠️ 这里对多数模型仍是「乐观默认」：没实测过的模型标了也只表现为
+       * 「开了开关却看不到思考」，不会崩。**实测反证的模型不在此列** ——
+       * 校准表标 `reasoningEfforts: false` 的（现为 `hunyuan-chat`，两档都 0 思考）
+       * 直接省略声明、不出现 Effort 行，见上面的逐模型省略分支。
+       *
+       * ⚠️ 但**「关」的拼写不能宽** —— 写错是硬错误、炸整轮对话（实测 `1210`）。
+       * 逃生通道仍是面板上的总开关。
+       */
+      ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
+    }
+  }
+
+  /**
+   * **按渠道分组**（2026-10-12）：一个渠道一个 provider，组名与组顺序从渠道注册表派生。
+   *
+   * 为什么拆：选择器**按 provider 分组**，而四个渠道的模型原先全挂在同一个 `cpa` 下
+   * —— 实测 96 行平铺成一层，翻起来很长。拆开之后组数 = 渠道数，找模型先按渠道收敛。
+   *
+   * ⚠️ **`rows` 已按渠道排序**（上面的 `channelOrder`），所以这里按顺序收集即可，
+   * 不必再排一次；组内顺序就是原来的裸名序。
+   */
+  const groups = new Map<string, { id: string; displayName: string; models: RouteModel[] }>()
+  for (const row of rows) {
+    const providerId = providerIdOf(row.channel)
+    const displayName = providerLabelOf(row.channel)
+    /**
+     * 认不出渠道 ⇒ **不产出行**（与「认不出归属不产出行」同一条纪律）。
+     * `rows` 的每一行都来自托管渠道，这里只是把不变量写成代码：
+     * 与其落进兜底组，不如让它在推之前就消失（少显示 ≠ 显示错）。
+     */
+    if (providerId === undefined || displayName === undefined) continue
+    const group = groups.get(providerId) ?? { id: providerId, displayName, models: [] }
+    group.models.push(toModel(row))
+    groups.set(providerId, group)
+  }
+
+  /**
+   * 每个组的公共部分（除 `models` / `displayName` 外全同）：一次算好再展开，
+   * 避免四个组各抄一遍 `baseURL` / `apiKeyEnv` 而漂开。
+   */
+  const shared: Omit<RouteProfile, 'displayName' | 'models'> = {
+    api: 'openai-completions',
+    baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
+    apiKeyEnv: CPA_API_KEY_REF,
+    ...(reasoning === undefined ? {} : { reasoning }),
+  }
   return {
-    profile: {
-      displayName: 'CPA Switch',
-      api: 'openai-completions',
-      baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
-      apiKeyEnv: CPA_API_KEY_REF,
-      ...(reasoning === undefined ? {} : { reasoning }),
-      models: rows.map((row) => {
-        // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
-        const caps = capsOf(row.channel, row.bare)
-        // 逐模型省略：校准表标了 `reasoningEfforts: false`（实测反证：两档都无思考）
-        // 的模型不发档位声明 —— 宿主落 `reasoning: false`，界面不给 Effort 行。
-        // 其余模型照常按渠道给。判据见 tests/route-registry.test.ts「思考档位声明」。
-        const reasoningEfforts =
-          caps?.reasoningEfforts === false
-            ? undefined
-            : reasoningEffortsOf(effortsEnabled, row.channel)
-        // 模型级例外优先于路由级默认；`0` / 非法值都落到「不写」。
-        const maxOutputTokens = caps?.maxOutputTokens ?? routeMaxOutputTokens
-        return {
-          id: row.id,
-          name: `${row.label} · ${row.bare}`,
-          ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
-          /**
-           * 输出上限：**只在正整数时写**（`0` = 用户关掉了声明）。
-           *
-           * 宿主没读到时回退 `DEFAULT_MAX_TOKENS = 32768`；声明只对会把值送进
-           * 上游的渠道生效（实测 workbuddy 真截断，qoder / trae 到不了上游）。
-           * 判据见 `tests/route-registry.test.ts`「输出上限声明」。
-           */
-          ...(Number.isInteger(maxOutputTokens) && maxOutputTokens >= 1
-            ? { maxTokens: maxOutputTokens }
-            : {}),
-          /**
-           * 模态走 `input`（pi-ai 的字段名；直连 DeepSeek 适配器才用 `inputModalities`）。
-           *
-           * ⚠️ **只在 `supportsImages === true` 时写** —— 省略时宿主落
-           * `DEFAULT_INPUT = ["text"]`（`dsh-llm-pi-ai/lib/index.js:940`）。
-           * 少标＝附加图片前就被拒；多标＝图片已发出去、消息已落库，
-           * provider 中途拒绝，会话卡在反复重试。所以不写才是保守。
-           */
-          ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
-          /**
-           * 思考档位：**逐模型带上、值按该行的渠道给**（开关打开时）。
-           *
-           * ⚠️ 这里对多数模型仍是「乐观默认」：没实测过的模型标了也只表现为
-           * 「开了开关却看不到思考」，不会崩。**实测反证的模型不在此列** ——
-           * 校准表标 `reasoningEfforts: false` 的（现为 `hunyuan-chat`，两档都 0 思考）
-           * 直接省略声明、不出现 Effort 行，见上面的逐模型省略分支。
-           *
-           * ⚠️ 但**「关」的拼写不能宽** —— 写错是硬错误、炸整轮对话（实测 `1210`）。
-           * 逃生通道仍是面板上的总开关。
-           */
-          ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
-        }
-      }),
-    },
+    groups: [...groups.values()].map((group) => ({
+      id: group.id,
+      profile: {
+        displayName: group.displayName,
+        ...shared,
+        models: group.models,
+      },
+    })),
     /** 护栏按渠道放行要用（见 `refresh`）—— 它是这一份清单的行归属，不推给宿主。 */
     channelOf: new Map(rows.map((row) => [row.id, row.channel])),
   }
@@ -1039,8 +1104,19 @@ export interface RouteRefresher {
  * 不推给宿主、也不写盘（从磁盘缓存恢复的那一份没有它，见 `attachRouteRegistry`）。
  */
 interface GoodSnapshot {
-  readonly profile: RouteProfile
+  /** 按渠道分好组的清单（每个有模型的渠道一组）—— 推送时整组落成 `providers.<id>`。 */
+  readonly groups: readonly ChannelGroupProfile[]
   readonly channelOf: ReadonlyMap<string, string>
+}
+
+/** 一份快照里**所有组**的行数（日志与「清单条数」这类对外读数用）。 */
+function modelCountOf(snapshot: GoodSnapshot): number {
+  return snapshot.groups.reduce((sum, group) => sum + group.profile.models.length, 0)
+}
+
+/** 一份快照里**所有组**的行 id（目录护栏比较用）。 */
+function modelIdsOf(snapshot: GoodSnapshot): string[] {
+  return snapshot.groups.flatMap((group) => group.profile.models.map((model) => model.id))
 }
 
 /**
@@ -1164,7 +1240,8 @@ export function attachRouteRegistry(
     seq: number,
     trigger: string,
   ): Promise<SyncResult> => {
-    const profile = snapshot.profile
+    const groups = snapshot.groups
+    const total = modelCountOf(snapshot)
     const entry = await findEntry()
 
     /**
@@ -1184,7 +1261,7 @@ export function attachRouteRegistry(
         seq,
         pushedSeq,
       )
-      return { ok: true, models: profile.models.length, reason: 'superseded' }
+      return { ok: true, models: total, reason: 'superseded' }
     }
     if (loaderRef === undefined) return { ok: false, reason: 'loader-unavailable' }
     if (entry === undefined || entry.fiber === undefined) {
@@ -1192,7 +1269,23 @@ export function attachRouteRegistry(
     }
     const current = (entry.options.config ?? {}) as Record<string, unknown>
     const providers = { ...((current.providers as Record<string, unknown>) ?? {}) }
-    providers.cpa = profile
+    /**
+     * ⚠️ **先清掉「我们的」旧键，再写新的**（2026-10-12 拆分组）。
+     *
+     * 两件事都靠这一步：
+     * 1. **旧的 `cpa` 键**：升级上来的机器上它挂着**上一版**的整份清单 ——
+     *    不清就是选择器里多一个永远不更新的「幽灵组」（挂满陈旧模型）；
+     * 2. **本轮没有模型的渠道**：它的组必须消失，而不是留着空骨架 ——
+     *    否则删号之后那组还挂着旧模型。
+     *
+     * 判据是「键属不属于我们」：**只删前缀命中的 + 那个历史键**，
+     * `providers` 是插件共用的一张 dict（实测同 dict 里有 `cliproxy`），
+     * 整体覆盖别人 = 静默打断别人。
+     */
+    for (const key of Object.keys(providers)) {
+      if (key === LEGACY_PROVIDER_ID || key.startsWith(`${PROVIDER_PREFIX}-`)) delete providers[key]
+    }
+    for (const group of groups) providers[group.id] = group.profile
     try {
       await entry.update({ config: { ...current, providers } })
     } catch (error) {
@@ -1202,8 +1295,14 @@ export function attachRouteRegistry(
     lastGood = snapshot
     lastGoodSeq = seq
     pushedSeq = seq
-    deps.logger?.info?.('cpa-panel: model routes %s: %d models', trigger, profile.models.length)
-    return { ok: true, models: profile.models.length }
+    deps.logger?.info?.(
+      'cpa-panel: model routes %s: %d 组 / %d models（%s）',
+      trigger,
+      groups.length,
+      total,
+      groups.map((group) => `${group.id}:${String(group.profile.models.length)}`).join(' '),
+    )
+    return { ok: true, models: total }
   }
 
   /**
@@ -1247,16 +1346,23 @@ export function attachRouteRegistry(
      * 老缓存没有这个字段 ⇒ 解析成空表 ⇒ 退化成保守路径，
      * 语义仍然安全（宁可多跑一轮重读，也不放过一次真的读残）。
      */
-    lastGood = {
-      profile: restored.profile as RouteProfile,
+    /**
+     * ⚠️ 这里的 `as` 与旧代码处理单份 profile 时同理：形状由
+     * `readCachedRoutes` 里的**结构性校验**保证（`parseCachedGroups`），
+     * 它验的是「够不够格进缓存」，不复制 provider schema 的字面量类型。
+     */
+    const restoredSnapshot: GoodSnapshot = {
+      groups: restored.groups as readonly ChannelGroupProfile[],
       channelOf: restored.channelOf,
     }
+    lastGood = restoredSnapshot
     deps.logger?.info?.(
-      'cpa-panel: 启动用磁盘缓存清单（%d models，存于 %s）',
-      lastGood.profile.models.length,
+      'cpa-panel: 启动用磁盘缓存清单（%d 组 / %d models，存于 %s）',
+      restoredSnapshot.groups.length,
+      modelCountOf(restoredSnapshot),
       restored.savedAt,
     )
-    void pushProfile(lastGood, lastGoodSeq, 'boot:cache')
+    void pushProfile(restoredSnapshot, lastGoodSeq, 'boot:cache')
       .then((result) => {
         deps.logger?.info?.('cpa-panel: 装配即推缓存清单 → %o', result)
       })
@@ -1289,15 +1395,16 @@ export function attachRouteRegistry(
       return { ok: false, models: 0, reason }
     }
     deps.logger?.warn?.(
-      'cpa-panel: model routes %s: 未取到完整清单（%s），回推上一份（%d models）',
+      'cpa-panel: model routes %s: 未取到完整清单（%s），回推上一份（%d 组 / %d models）',
       trigger,
       reason,
-      cached.profile.models.length,
+      cached.groups.length,
+      modelCountOf(cached),
     )
     const pushed = await pushProfile(cached, lastGoodSeq, `${trigger}:stale`)
     return {
       ok: pushed.ok,
-      models: cached.profile.models.length,
+      models: modelCountOf(cached),
       reason: pushed.ok ? reason : (pushed.reason ?? reason),
       stale: true,
     }
@@ -1318,14 +1425,18 @@ export function attachRouteRegistry(
     trigger: string,
     snapshot: ReadySnapshot,
   ):
-    | { profile: RouteProfile; channelOf: ReadonlyMap<string, string>; aliases: AliasTable }
+    | {
+        groups: readonly ChannelGroupProfile[]
+        channelOf: ReadonlyMap<string, string>
+        aliases: AliasTable
+      }
     | { reason: string } => {
     try {
       const { catalog, channels } = snapshot
       const ids = catalogIds(catalog)
       const aliases = aliasTableOf(channels, ids)
       const built = buildCpaRouteProfile(catalog, channels, aliases, deps)
-      return { profile: built.profile, channelOf: built.channelOf, aliases }
+      return { groups: built.groups, channelOf: built.channelOf, aliases }
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: build model routes failed (%s): %o', trigger, error)
       return { reason: 'catalog-unavailable' }
@@ -1386,11 +1497,11 @@ export function attachRouteRegistry(
     }
 
     const outcome = buildProfileFrom(trigger, ready.snapshot)
-    if (!('profile' in outcome)) {
+    if (!('groups' in outcome)) {
       return { result: await degrade(trigger, outcome.reason), verdict: 'unavailable' }
     }
 
-    const built: GoodSnapshot = { profile: outcome.profile, channelOf: outcome.channelOf }
+    const built: GoodSnapshot = { groups: outcome.groups, channelOf: outcome.channelOf }
 
     /**
      * ## 目录护栏：**写盘与推送之前**的最后一道闸
@@ -1415,8 +1526,8 @@ export function attachRouteRegistry(
         ...ready.snapshot.dropped.map((d) => d.provider),
       ])
       const blocked = shrunkRows(
-        { ids: previous.profile.models.map((m) => m.id), channelOf: previous.channelOf },
-        outcome.profile.models.map((m) => m.id),
+        { ids: modelIdsOf(previous), channelOf: previous.channelOf },
+        modelIdsOf(built),
         built.channelOf,
         allowedChannels,
       )
@@ -1441,7 +1552,7 @@ export function attachRouteRegistry(
         return {
           result: {
             ok: pushed.ok,
-            models: previous.profile.models.length,
+            models: modelCountOf(previous),
             reason: pushed.ok ? 'catalog-shrunk' : (pushed.reason ?? 'catalog-shrunk'),
             stale: true,
           },
@@ -1506,7 +1617,7 @@ export function attachRouteRegistry(
      * 代价只是「这次没更新缓存」，下次读全了自然会更新。
      */
     if (ready.snapshot.skipped.length === 0) {
-      writeCachedRoutes(outcome.profile, deps.gateway.port, built.channelOf)
+      writeCachedRoutes(built.groups, deps.gateway.port, built.channelOf)
     }
 
     return { result: await pushProfile(built, seq, trigger), verdict: 'accepted' }
@@ -1552,10 +1663,10 @@ export function attachRouteRegistry(
       deps.logger?.warn?.(
         'cpa-panel: 目录护栏重试用完（%s）→ 放行这一份（%d models）',
         trigger,
-        pending.snapshot.profile.models.length,
+        modelCountOf(pending.snapshot),
       )
       if (pending.writeCache) {
-        writeCachedRoutes(pending.snapshot.profile, deps.gateway.port, pending.snapshot.channelOf)
+        writeCachedRoutes(pending.snapshot.groups, deps.gateway.port, pending.snapshot.channelOf)
       }
       await pushProfile(pending.snapshot, pending.seq, `${trigger}:retry-exhausted`)
     } finally {

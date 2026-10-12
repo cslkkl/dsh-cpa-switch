@@ -6,6 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { attachRouteRegistry, readStableCatalog } from '../src/route-registry.ts'
 import type { Clock, RouteRegistryDeps, RouteRegistryHost } from '../src/route-registry.ts'
+import {
+  CHANNEL_IDS,
+  PROVIDER_PREFIX,
+  providerIdOf,
+  providerLabelOf,
+} from '../src/channels/registry.ts'
 
 /**
  * `readStableCatalog` 的间隔策略是**行为契约**，不是实现细节：
@@ -189,6 +195,16 @@ interface PushRecord {
   readonly names: readonly string[]
   /** 路由级默认档位（`providers.cpa.reasoning`）—— 决定选择器里有没有 `Default` 行。 */
   readonly reasoning?: unknown
+  /**
+   * **每个分组各自的行**（键 = provider id）—— 「按渠道分组」的判据看它。
+   *
+   * 上面 `ids` / `names` 是**全部组的并集**，让既有判据不必逐组遍历。
+   */
+  readonly groups: Record<string, { ids: string[]; names: string[] }>
+  /** 这次推送后 `providers` 里**属于我们**的键（前缀约定的那些）。 */
+  readonly ourProviderIds: readonly string[]
+  /** 这次推送后 `providers` 的全部键 —— 用来验「别人的 provider 没被误删」。 */
+  readonly allProviderIds: readonly string[]
   readonly rows: {
     id?: unknown
     name?: unknown
@@ -200,13 +216,15 @@ interface PushRecord {
   }[]
 }
 
-/** 从条目 config 里取出 `providers.cpa`（模型选择器读的就是它）。 */
-function cpaProfileOf(config: unknown): Record<string, unknown> | undefined {
-  const providers = (config as { providers?: Record<string, unknown> } | null)?.providers
-  return providers?.['cpa'] as Record<string, unknown> | undefined
+/** 从条目 config 里取出**我们自己的**那几个 provider（键以 {@link PROVIDER_PREFIX} 开头）。 */
+function ourProfilesOf(config: unknown): Record<string, Record<string, unknown>> {
+  const providers = (config as { providers?: Record<string, unknown> } | null)?.providers ?? {}
+  return Object.fromEntries(
+    Object.entries(providers).filter(([id]) => id.startsWith(PROVIDER_PREFIX)),
+  ) as Record<string, Record<string, unknown>>
 }
 
-/** 从条目 config 里取出 `providers.cpa.models`（模型选择器读的就是它）。 */
+/** 从条目 config 里取出**我们自己的**那几个 provider 里所有的模型行（并集）。 */
 function modelsOf(config: unknown): {
   id?: unknown
   name?: unknown
@@ -214,19 +232,21 @@ function modelsOf(config: unknown): {
   contextWindow?: unknown
   reasoningEfforts?: unknown
 }[] {
-  const providers = (config as { providers?: Record<string, unknown> } | null)?.providers
-  const cpa = providers?.['cpa'] as
-    | {
-        models?: {
-          id?: unknown
-          name?: unknown
-          input?: unknown
-          contextWindow?: unknown
-          reasoningEfforts?: unknown
-        }[]
-      }
-    | undefined
-  return cpa?.models ?? []
+  type Model = NonNullable<Record<string, unknown>['models']>
+  return Object.values(ourProfilesOf(config)).flatMap(
+    (profile) => (profile['models'] ?? []) as unknown as Model,
+  ) as unknown as {
+    id?: unknown
+    name?: unknown
+    input?: unknown
+    contextWindow?: unknown
+    reasoningEfforts?: unknown
+  }[]
+}
+
+/** 路由级默认档位（每个组都该带同一个值）—— 决定选择器里有没有 `Default` 行。 */
+function routeReasoningOf(config: unknown): unknown {
+  return Object.values(ourProfilesOf(config))[0]?.['reasoning']
 }
 
 /** 假 loader 条目：`update` 把 config 变成新基线，并记下这次推上来的模型行。 */
@@ -245,11 +265,26 @@ function fakeEntry(baseline: unknown): {
     update: async (next: { config?: unknown }): Promise<void> => {
       // 宿主就是这样把它变成新基线的。
       entry.options = { name: '@deepseek-ai/dsh-llm-pi-ai', config: next.config }
-      const rows = modelsOf(next.config)
+      /** 逐组收集：选择器按 provider 分组，判据要能看见**哪一行落在哪个组**。 */
+      const groups: Record<string, { ids: string[]; names: string[] }> = {}
+      const rows: PushRecord['rows'] = []
+      for (const [id, profile] of Object.entries(ourProfilesOf(next.config))) {
+        const models = (profile['models'] ?? []) as PushRecord['rows']
+        groups[id] = {
+          ids: models.map((row) => String(row.id)),
+          names: models.map((row) => String(row.name)),
+        }
+        rows.push(...models)
+      }
+      const providers =
+        (next.config as { providers?: Record<string, unknown> } | null)?.providers ?? {}
       pushed.push({
         ids: rows.map((row) => String(row.id)),
         names: rows.map((row) => String(row.name)),
-        reasoning: cpaProfileOf(next.config)?.['reasoning'],
+        reasoning: routeReasoningOf(next.config),
+        groups,
+        ourProviderIds: Object.keys(ourProfilesOf(next.config)),
+        allProviderIds: Object.keys(providers),
         rows: rows.map((row) => ({ ...row })),
       })
     },
@@ -740,16 +775,21 @@ describe('重载空窗', () => {
       writeFileSync(
         join(home, 'storages', 'cpa-panel-routes.json'),
         JSON.stringify({
-          version: 1,
+          version: 2,
           port: 8317,
           savedAt: '2026-10-07T00:00:00.000Z',
-          profile: {
-            displayName: 'CPA Switch',
-            api: 'openai-completions',
-            baseURL: 'http://127.0.0.1:8317/v1',
-            apiKeyEnv: 'CPA_API_KEY',
-            models: [{ id: 'dfmodel', name: 'Qoder · 旧名字' }],
-          },
+          providers: [
+            {
+              id: 'cpa-qoder',
+              profile: {
+                displayName: 'CPA Switch · Qoder',
+                api: 'openai-completions',
+                baseURL: 'http://127.0.0.1:8317/v1',
+                apiKeyEnv: 'CPA_API_KEY',
+                models: [{ id: 'dfmodel', name: 'Qoder · 旧名字' }],
+              },
+            },
+          ],
         }),
         'utf8',
       )
@@ -1227,22 +1267,38 @@ describe('启动用持久缓存', () => {
     rmSync(home, { recursive: true, force: true })
   })
 
-  /** 直接往缓存文件写一份清单（模拟「上次启动留下的」）。 */
+  /**
+   * 直接往缓存文件写一份清单（模拟「上次启动留下的」）。
+   *
+   * ⚠️ **形状是 v2**（按渠道分组的一组）：v1 那份单 provider 的缓存**已经不再被认**
+   * （见 `tests/state.test.ts` 的「v1 不认」判据），所以夹具也必须写 v2 ——
+   * 否则「启动用缓存」这一组判据会全部走空（缓存读不到 → 回退正常读），
+   * 看着像通过、实际什么都没验。
+   */
   function seedCache(models: { id: string; name: string }[], port = 8317): void {
     mkdirSync(join(home, 'storages'), { recursive: true })
+    /** 按渠道归组（夹具里的 id 前缀足够判断归属；这本身不是被测行为）。 */
+    const byChannel = new Map<string, { id: string; name: string }[]>()
+    for (const model of models) {
+      const channel = model.id.startsWith('hy3') ? 'workbuddy' : 'qoder'
+      byChannel.set(channel, [...(byChannel.get(channel) ?? []), model])
+    }
     writeFileSync(
       cachePath(),
       JSON.stringify({
-        version: 1,
+        version: 2,
         port,
         savedAt: '2026-10-05T00:00:00.000Z',
-        profile: {
-          displayName: 'CPA Switch',
-          api: 'openai-completions',
-          baseURL: `http://127.0.0.1:${port}/v1`,
-          apiKeyEnv: 'CPA_API_KEY',
-          models,
-        },
+        providers: [...byChannel].map(([channel, list]) => ({
+          id: providerIdOf(channel) ?? `cpa-${channel}`,
+          profile: {
+            displayName: providerLabelOf(channel) ?? `CPA Switch · ${channel}`,
+            api: 'openai-completions',
+            baseURL: `http://127.0.0.1:${port}/v1`,
+            apiKeyEnv: 'CPA_API_KEY',
+            models: list,
+          },
+        })),
       }),
       'utf8',
     )
@@ -1346,9 +1402,13 @@ describe('启动用持久缓存', () => {
     await attachRouteRegistry(host, depsFor(cpa))('boot')
     await until(() => {
       const onDisk = JSON.parse(readFileSync(cachePath(), 'utf8')) as {
-        profile: { models: { id: string }[] }
+        providers: { profile: { models: { id: string }[] } }[]
       }
-      expect(onDisk.profile.models.map((m) => m.id).sort()).toEqual(['dfmodel', 'hy3'])
+      const ids = onDisk.providers
+        .flatMap((group) => group.profile.models)
+        .map((m) => m.id)
+        .sort()
+      expect(ids).toEqual(['dfmodel', 'hy3'])
     })
     // 旧名字被这一轮的新值覆盖掉了
     expect(readFileSync(cachePath(), 'utf8')).not.toContain('旧名字')
@@ -2147,25 +2207,34 @@ describe('目录护栏与有限重读', () => {
     { id: 'wb/glm-5.3', name: 'WorkBuddy · glm-5.3' },
   ]
 
-  /** 往缓存文件里种一份「上次完整成功过」的清单（含行归属表）。 */
+  /** 往缓存文件里种一份「上次完整成功过」的清单（含行归属表，v2 形状）。 */
   function seedCache(
     models: { id: string; name: string; maxTokens?: number }[],
     channels: Record<string, string>,
   ): void {
     mkdirSync(join(home, 'storages'), { recursive: true })
+    /** 按行归属分成组（这份夹具的 `channels` 就是归属来源）。 */
+    const byChannel = new Map<string, typeof models>()
+    for (const model of models) {
+      const channel = channels[model.id] ?? 'qoder'
+      byChannel.set(channel, [...(byChannel.get(channel) ?? []), model])
+    }
     writeFileSync(
       cachePath(),
       JSON.stringify({
-        version: 1,
+        version: 2,
         port: 8317,
         savedAt: '2026-10-05T00:00:00.000Z',
-        profile: {
-          displayName: 'CPA Switch',
-          api: 'openai-completions',
-          baseURL: 'http://127.0.0.1:8317/v1',
-          apiKeyEnv: 'CPA_API_KEY',
-          models,
-        },
+        providers: [...byChannel].map(([channel, list]) => ({
+          id: providerIdOf(channel) ?? `cpa-${channel}`,
+          profile: {
+            displayName: providerLabelOf(channel) ?? `CPA Switch · ${channel}`,
+            api: 'openai-completions',
+            baseURL: 'http://127.0.0.1:8317/v1',
+            apiKeyEnv: 'CPA_API_KEY',
+            models: list,
+          },
+        })),
         channels,
       }),
       'utf8',
@@ -2179,9 +2248,12 @@ describe('目录护栏与有限重读', () => {
   /** 磁盘上那份缓存的行 id（按**集合**看，不依赖顺序）。 */
   function cachedIds(): string[] {
     const parsed = JSON.parse(readFileSync(cachePath(), 'utf8')) as {
-      profile?: { models?: { id?: unknown }[] }
+      providers?: { profile?: { models?: { id?: unknown }[] } }[]
     }
-    return (parsed.profile?.models ?? []).map((m) => String(m.id)).sort()
+    return (parsed.providers ?? [])
+      .flatMap((group) => group.profile?.models ?? [])
+      .map((m) => String(m.id))
+      .sort()
   }
 
   /** 推上去的那份的行 id（按集合看）。 */
@@ -2496,5 +2568,162 @@ describe('目录护栏与有限重读', () => {
 
     // 退避序列只走了一遍 —— 叠加的话这里会是两遍
     expect(gate.released).toEqual([2000, 5000, 15000, 30000])
+  })
+})
+
+/**
+ * ## 按渠道分组（2026-10-12 立项）
+ *
+ * 治的现象：**模型选择器太长**。选择器按 provider 分组，而四个渠道的模型原先
+ * 全挂在同一个 provider（`cpa`）下 —— 本机实测 96 行**平铺成一层**，
+ * 翻起来很长。现在一个渠道一个 provider，组数 = 渠道数、组顺序与面板页签一致。
+ *
+ * ## 三条不变量（错了都**不报错、只是界面变样**）
+ *
+ * 1. **分组要覆盖到有模型的每一个渠道** —— 漏一个渠道 = 那个渠道的模型
+ *    归到别的组里（用户按渠道找模型会找不到）；
+ * 2. **旧的 `cpa` 键必须清掉** —— 不清的话它会一直挂着**上一版**的旧清单，
+ *    选择器里就多出一个「幽灵组」，而且永远不更新；
+ * 3. **别人的 provider 一个都不许动** —— `providers` 是插件共用的一个 dict
+ *    （实测同 dict 里还有 `cliproxy`），推自己的分组时整体覆盖别人 = 静默打断别人。
+ *
+ * ⚠️ 已保存的模型选择会**一次性失效**（行键是 `providerId/modelId`，
+ * provider 改名即失效，用户需重选一次）—— 这是本改动的**已知代价**，
+ * 见 PLAN §2.9 的立项讨论。
+ */
+describe('按渠道分组', () => {
+  let home = ''
+  const storages = (): string => join(home, 'cpa-panel', 'runtime', 'cpa')
+  const configPath = (): string => join(storages(), 'config.yaml')
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-route-groups-'))
+    process.env.DSH_HOME = home
+    mkdirSync(storages(), { recursive: true })
+    writeFileSync(configPath(), 'config-version: 8\noauth:\n    auth-dir: "auth"\n', 'utf8')
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 四个渠道各有点模型（trae 与 workbuddy 共用 `glm-5.3` → 拆别名）。 */
+  const FILES = [
+    { name: 'w1', provider: 'workbuddy' },
+    { name: 't1', provider: 'trae' },
+    { name: 'q1', provider: 'qoder' },
+    { name: 'z1', provider: 'zcode' },
+  ]
+  const MODELS = {
+    w1: ['glm-5.3', 'hy3'],
+    t1: ['glm-5.3', 'kimi-k3'],
+    q1: ['dfmodel'],
+    z1: ['glm-5.3'],
+  }
+  const CATALOG = ['glm-5.3', 'hy3', 'kimi-k3', 'dfmodel']
+
+  /** 老版本留下的骨架：只有 `cpa`（升级上来的机器就是这个样子）。 */
+  const LEGACY_SKELETON = {
+    providers: {
+      cpa: { displayName: 'CPA Switch', apiKeyEnv: 'CPA_API_KEY', api: 'openai-completions' },
+      cliproxy: { displayName: 'Cli Proxy' },
+    },
+  }
+
+  it('⚠️ 每个有模型的渠道各成一个组，组内只有该渠道的模型', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(LEGACY_SKELETON)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const groups = pushed.at(-1)?.groups ?? {}
+    expect(Object.keys(groups).sort()).toEqual(CHANNEL_IDS.map((id) => providerIdOf(id)).sort())
+    // 独供模型落在自己渠道的组里
+    expect(groups['cpa-qoder']?.ids).toEqual(['dfmodel'])
+    expect(groups['cpa-workbuddy']?.ids).toContain('hy3')
+    // 同名模型按渠道拆两条别名，各自落在**自己**那个组里
+    expect(groups['cpa-workbuddy']?.ids).toContain('wb/glm-5.3')
+    expect(groups['cpa-trae']?.ids).toContain('trae/glm-5.3')
+    expect(groups['cpa-zcode']?.ids).toContain('zcode/glm-5.3')
+    // 跨组串味：workbuddy 的组里不该出现别的渠道的行
+    expect(groups['cpa-workbuddy']?.ids).not.toContain('trae/glm-5.3')
+  })
+
+  it('⚠️ 组名与组顺序按渠道注册表派生（与面板页签一致）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry } = fakeEntry(LEGACY_SKELETON)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const providers = (
+      entry.options.config as { providers: Record<string, { displayName: string }> }
+    ).providers
+    for (const id of CHANNEL_IDS) {
+      expect(providers[providerIdOf(id) ?? '']?.displayName).toBe(providerLabelOf(id))
+    }
+  })
+
+  it('⚠️ 旧的 `cpa` 组被清掉（不留挂着旧清单的幽灵组）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(LEGACY_SKELETON)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    expect(pushed.at(-1)?.ourProviderIds).not.toContain('cpa')
+    const providers = (entry.options.config as { providers: Record<string, unknown> }).providers
+    expect(providers['cpa']).toBeUndefined()
+  })
+
+  it('⚠️ 别人的 provider 一个都不动（同 dict 里还有 cliproxy）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(LEGACY_SKELETON)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    expect(pushed.at(-1)?.allProviderIds).toContain('cliproxy')
+    const providers = (
+      entry.options.config as { providers: Record<string, { displayName: string }> }
+    ).providers
+    expect(providers['cliproxy']?.displayName).toBe('Cli Proxy')
+  })
+
+  it('没有模型的渠道不产组（空组只会占位置）', async () => {
+    const cpa = fakeCpa({
+      files: [{ name: 'w1', provider: 'workbuddy' }],
+      models: { w1: ['hy3'] },
+      catalog: ['hy3'],
+    })
+    const { entry, pushed } = fakeEntry(LEGACY_SKELETON)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    expect(pushed.at(-1)?.ourProviderIds).toEqual(['cpa-workbuddy'])
+  })
+})
+
+/**
+ * 骨架与推送的**分组一致**。
+ *
+ * `cordis.patch.yml` 是随包发布的静态骨架，它必须声明同样那几个 provider：
+ * 任何设置写入都会重建 fiber、**抹掉运行时注入的 volatile 值**，
+ * 那时选择器读到的就是骨架里的分组 —— 骨架少了组，那段空窗里那些渠道的模型
+ * 会**整个消失**（而不是「暂时少几个」）。
+ *
+ * ⚠️ 骨架是 YAML、派生函数在 TS 里，**两边没法共享常量**，所以只能用判据钉住。
+ */
+describe('骨架与推送的分组一致', () => {
+  it('⚠️ cordis.patch.yml 声明的 provider 键 = 渠道注册表的派生输出', () => {
+    const yaml = readFileSync(join(process.cwd(), 'cordis.patch.yml'), 'utf8')
+    for (const id of CHANNEL_IDS) {
+      const provider = providerIdOf(id) ?? ''
+      expect(yaml).toContain(`${provider}:`)
+      expect(yaml).toContain(`displayName: ${String(providerLabelOf(id))}`)
+    }
   })
 })

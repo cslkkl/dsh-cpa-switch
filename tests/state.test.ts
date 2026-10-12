@@ -200,7 +200,7 @@ describe('localDay', () => {
 describe('路由清单缓存', () => {
   /** 一份最小的合法 profile。 */
   const profile = (over: Record<string, unknown> = {}): unknown => ({
-    displayName: 'CPA Switch',
+    displayName: 'CPA Switch · Qoder',
     api: 'openai-completions',
     baseURL: 'http://127.0.0.1:8317/v1',
     apiKeyEnv: 'CPA_API_KEY',
@@ -211,11 +211,22 @@ describe('路由清单缓存', () => {
     ...over,
   })
 
-  it('写进去能原样读回来（含写盘时刻）', () => {
-    writeCachedRoutes(profile() as never, 8317)
+  /** v2 的写法：缓存里存的是**按渠道分组的一组**（`[{ id, profile }]`）。 */
+  const groups = (over: Record<string, unknown> = {}): unknown => [
+    { id: 'cpa-qoder', profile: profile(over) },
+  ]
+
+  /** 读回第一组的清单（绝大多数用例只关心「清单能不能原样往返」）。 */
+  const firstModels = (): { maxTokens?: unknown; input?: unknown; reasoningEfforts?: unknown }[] =>
+    (readCachedRoutes()?.groups[0]?.profile.models ?? []) as never
+
+  it('写进去能原样读回来（含写盘时刻与分组身份）', () => {
+    writeCachedRoutes(groups() as never, 8317)
     const cached = readCachedRoutes()
 
-    expect(cached?.profile.models).toHaveLength(2)
+    expect(cached?.groups).toHaveLength(1)
+    expect(cached?.groups[0]?.id).toBe('cpa-qoder')
+    expect(cached?.groups[0]?.profile.models).toHaveLength(2)
     expect(cached?.port).toBe(8317)
     expect(typeof cached?.savedAt).toBe('string')
   })
@@ -238,22 +249,42 @@ describe('路由清单缓存', () => {
         reasoningEfforts: { off: 'off', high: 'high' },
       },
     ]
-    writeCachedRoutes(profile({ models }) as never, 8317)
-    expect(readCachedRoutes()?.profile.models).toEqual(models)
+    writeCachedRoutes(groups({ models }) as never, 8317)
+    expect(firstModels()).toEqual(models)
   })
 
   it('坏形状的声明字段只被丢掉、不作废整份缓存（宁可少声明，不丢清单）', () => {
     writeCachedRoutes(
-      profile({
+      groups({
         models: [{ id: 'x', name: 'X', maxTokens: 'big', input: 'text', reasoningEfforts: [1] }],
       }) as never,
       8317,
     )
-    const models = readCachedRoutes()?.profile.models
+    const models = firstModels()
     expect(models).toHaveLength(1)
     expect(models?.[0]?.maxTokens).toBeUndefined()
     expect(models?.[0]?.input).toBeUndefined()
     expect(models?.[0]?.reasoningEfforts).toBeUndefined()
+  })
+
+  /**
+   * ⚠️ **分组身份必须唯一**：两份同名组写下去，读回时只能剩一个 ——
+   * 那意味着**一个渠道的模型整组消失**，而且不报错。
+   */
+  it('⚠️ 重复的分组 id 不许写盘（后写的会静默盖掉前一组）', () => {
+    writeCachedRoutes(
+      [
+        { id: 'cpa-qoder', profile: profile() },
+        { id: 'cpa-qoder', profile: profile() },
+      ] as never,
+      8317,
+    )
+    expect(readCachedRoutes()).toBeUndefined()
+  })
+
+  it('一组都没有（空数组）不许写盘 —— 与「空清单不写」同一条决策', () => {
+    writeCachedRoutes([] as never, 8317)
+    expect(readCachedRoutes()).toBeUndefined()
   })
 
   it('没有缓存文件时返回 undefined，不抛', () => {
@@ -278,15 +309,15 @@ describe('路由清单缓存', () => {
     writeFileSync(
       path,
       JSON.stringify({
-        version: 1,
+        version: 2,
         port: 8317,
         savedAt: '2020-01-01T00:00:00.000Z',
-        profile: profile(),
+        providers: groups(),
       }),
       'utf8',
     )
     const cached = readCachedRoutes()
-    expect(cached?.profile.models).toHaveLength(2)
+    expect(cached?.groups[0]?.profile.models).toHaveLength(2)
   })
 
   /**
@@ -296,7 +327,7 @@ describe('路由清单缓存', () => {
    * 旧缓存整个指错地方 —— 用户改了端口，模型却还指向旧端口。
    */
   it('⚠️ port 变了缓存作废（baseURL 焊死了端口）', () => {
-    writeCachedRoutes(profile() as never, 8317)
+    writeCachedRoutes(groups() as never, 8317)
     expect(readCachedRoutes(9000)).toBeUndefined()
     expect(readCachedRoutes(8317)).toBeDefined()
   })
@@ -309,17 +340,24 @@ describe('路由清单缓存', () => {
    * 而那时没有任何读能纠正它（读在后台）。
    */
   it('⚠️ 空清单不许写盘（宁可没有缓存，也不要坏缓存）', () => {
-    writeCachedRoutes(profile({ models: [] }) as never, 8317)
+    writeCachedRoutes(groups({ models: [] }) as never, 8317)
     expect(readCachedRoutes()).toBeUndefined()
   })
 
   it('⚠️ 形状不对的 profile 不许写盘', () => {
-    writeCachedRoutes({ displayName: 'x' } as never, 8317)
+    writeCachedRoutes([{ id: 'cpa-qoder', profile: { displayName: 'x' } }] as never, 8317)
+    expect(readCachedRoutes()).toBeUndefined()
+  })
+
+  it('分组缺 id / id 为空串不许写盘（分组身份是必须的）', () => {
+    writeCachedRoutes([{ profile: profile() }] as never, 8317)
+    expect(readCachedRoutes()).toBeUndefined()
+    writeCachedRoutes([{ id: '', profile: profile() }] as never, 8317)
     expect(readCachedRoutes()).toBeUndefined()
   })
 
   it('缺少 baseURL / apiKeyEnv 的 profile 不许写盘', () => {
-    writeCachedRoutes(profile({ baseURL: undefined }) as never, 8317)
+    writeCachedRoutes(groups({ baseURL: undefined }) as never, 8317)
     expect(readCachedRoutes()).toBeUndefined()
   })
 
@@ -327,7 +365,32 @@ describe('路由清单缓存', () => {
   it('⚠️ 版本不匹配时不认这份缓存', () => {
     writeFileSync(
       join(home, '.dsh', 'storages', 'cpa-panel-routes.json'),
-      JSON.stringify({ version: 999, port: 8317, savedAt: 'now', profile: profile() }),
+      JSON.stringify({ version: 999, port: 8317, savedAt: 'now', providers: groups() }),
+      'utf8',
+    )
+    expect(readCachedRoutes()).toBeUndefined()
+  })
+
+  /**
+   * ⚠️ **v1 那份「单 provider」缓存必须一律不认**（2026-10-12，拆分组时改的）。
+   *
+   * v1 的形状是 `profile: <一份清单>`，而它只可能属于**旧的单个 `cpa` 分组**；
+   * 若继续按 v1 解析，启动时就会拿它当作**某一个渠道**的清单推上去 ——
+   * 归属错位、而且**不报错**。
+   *
+   * 判别标准沿用本文件的口径：**老文件会不会被误读**。会被误读 ⇒ 必须 bump。
+   * 代价只是「这次启动没有缓存可用」，退回正常读一轮（自愈）。
+   */
+  it('⚠️ v1（单 provider 形状）的缓存不认 —— 宁可重读一次，也不误读成某一组', () => {
+    writeFileSync(
+      join(home, '.dsh', 'storages', 'cpa-panel-routes.json'),
+      JSON.stringify({
+        version: 1,
+        port: 8317,
+        savedAt: '2026-10-11T00:00:00.000Z',
+        profile: profile(),
+        channels: { dfmodel: 'qoder' },
+      }),
       'utf8',
     )
     expect(readCachedRoutes()).toBeUndefined()

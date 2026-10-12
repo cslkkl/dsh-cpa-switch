@@ -215,8 +215,14 @@ function cachedRoutesPath(): string {
  * ⚠️ **加了 `channels` 而没 bump**（2026-10-07）：那是**旁证**不是清单形状 ——
  * 老文件缺它时解析成空表，护栏对那份基线走保守路径，语义仍然正确。
  * 判别标准是「老文件会不会被**误读**」，不是「字段多了没有」。
+ *
+ * ⚠️ **v1 → v2（2026-10-12，模型选择器按渠道分组）**：v1 的 `profile` 是
+ * **单份**清单（只可能属于旧的单个 `cpa` 分组），v2 换成按渠道分组的一组
+ * （`providers: [{ id, profile }]`）。继续按 v1 解析会把那份清单当作
+ * **某一个渠道**的清单推上去 —— 归属错位且**不报错**，正是「会被误读」，
+ * 所以必须 bump。代价只是这次启动没缓存可用（退回正常读一轮，自愈）。
  */
-const CACHED_ROUTES_VERSION = 1
+const CACHED_ROUTES_VERSION = 2
 
 /** 磁盘上的缓存形状。 */
 interface CachedRoutesFile {
@@ -225,7 +231,8 @@ interface CachedRoutesFile {
   port?: unknown
   /** 写盘时刻（ISO 串），**仅供诊断展示**，不参与失效判断。 */
   savedAt?: unknown
-  profile?: unknown
+  /** 按渠道分组的清单：`[{ id: 'cpa-<渠道>', profile: {...} }]`（v2 起）。 */
+  providers?: unknown
   /**
    * **行归属**：模型 id → 它所属的托管渠道。
    *
@@ -267,9 +274,10 @@ interface CachedModel {
   reasoningEfforts?: Record<string, string>
 }
 
-/** 读到的缓存。 */
+/** 读到的缓存：**一组**按渠道分好的清单。 */
 export interface CachedRoutes {
-  readonly profile: CachedProfile
+  /** 按渠道分组的清单：`id` 是模型选择器的分组身份（`cpa-<渠道>`）。 */
+  readonly groups: readonly { readonly id: string; readonly profile: CachedProfile }[]
   readonly port: number
   readonly savedAt: string
   /**
@@ -357,6 +365,31 @@ function parseCachedProfile(value: unknown): CachedProfile | undefined {
 }
 
 /**
+ * 校验**一组**分组清单（v2 形状）。
+ *
+ * 两条硬要求：
+ * - 至少一组（一组都没有 = 空清单，按决策 2「宁可少显示」直接不认）；
+ * - 每组的 `id` 非空且**不重复**（重复 = 后写的组覆盖前一个，静默丢一整个渠道）。
+ */
+function parseCachedGroups(value: unknown): CachedRoutes['groups'] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  const groups: { id: string; profile: CachedProfile }[] = []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) return undefined
+    const row = entry as Record<string, unknown>
+    const id = row['id']
+    if (typeof id !== 'string' || id === '') return undefined
+    if (seen.has(id)) return undefined
+    const profile = parseCachedProfile(row['profile'])
+    if (profile === undefined) return undefined
+    seen.add(id)
+    groups.push({ id, profile })
+  }
+  return groups
+}
+
+/**
  * 读缓存的清单。
  *
  * ## 三条决策都在这里体现
@@ -377,8 +410,8 @@ export function readCachedRoutes(currentPort?: number): CachedRoutes | undefined
   if (parsed === undefined) return undefined
 
   if (parsed.version !== CACHED_ROUTES_VERSION) return undefined
-  const profile = parseCachedProfile(parsed.profile)
-  if (profile === undefined) return undefined
+  const groups = parseCachedGroups(parsed.providers)
+  if (groups === undefined) return undefined
 
   const port = typeof parsed.port === 'number' ? parsed.port : undefined
   if (port === undefined) return undefined
@@ -386,7 +419,7 @@ export function readCachedRoutes(currentPort?: number): CachedRoutes | undefined
   if (currentPort !== undefined && port !== currentPort) return undefined
 
   return {
-    profile,
+    groups,
     port,
     savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : '',
     channelOf: channelsFrom(parsed.channels),
@@ -394,7 +427,7 @@ export function readCachedRoutes(currentPort?: number): CachedRoutes | undefined
 }
 
 /**
- * 写缓存的清单。
+ * 写缓存的清单（**按渠道分组的一组**，v2 起）。
  *
  * ⚠️ **只该在「读全了」之后调用**（[`route-registry`] 的完整快照分支）。
  * 半成品一旦写进去，下次启动就会**立刻**把它推给用户，而那时没有任何读能纠正。
@@ -402,22 +435,23 @@ export function readCachedRoutes(currentPort?: number): CachedRoutes | undefined
  * 这里**再校验一次**，不指望调用方自觉：形状不对的直接不写 ——
  * 宁可没有缓存（退回原路径），也不要一份坏缓存。
  *
+ * @param groups - 按渠道分组的清单：`[{ id: 'cpa-<渠道>', profile }]`。
  * @param channelOf - 行归属（模型 id → 托管渠道），供下次启动的护栏按渠道放行。
  *   不传 / 空表 ⇒ 下次启动对这份基线走保守路径（认不出归属 = 按缩水处理），
  *   语义仍然安全，只是「删号」那类合法缩水要多等一轮重试。
  */
 export function writeCachedRoutes(
-  profile: unknown,
+  groups: unknown,
   port: number,
   channelOf?: ReadonlyMap<string, string>,
 ): void {
-  const checked = parseCachedProfile(profile)
+  const checked = parseCachedGroups(groups)
   if (checked === undefined) return
   writeJson(cachedRoutesPath(), {
     version: CACHED_ROUTES_VERSION,
     port,
     savedAt: new Date().toISOString(),
-    profile: checked,
+    providers: checked,
     ...(channelOf === undefined || channelOf.size === 0
       ? {}
       : { channels: Object.fromEntries(channelOf) }),
