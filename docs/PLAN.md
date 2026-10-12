@@ -79,6 +79,12 @@
   （`/v0/management/*`）继续用管理密钥，两把钥匙不同轴。
 - ✅ **实测**（2026-10-11，真实 exe @ 18317 临时实例）：不带密钥 401、
   `Bearer <密钥>` 200。
+- ✅ **重启后真机复验（2026-10-12）**：托管配置由 `patchAccessApiKeys` 自动补出
+  `access:` 段；不带密钥 `GET /v1/models` → **401**、带密钥 → **200**（106 个模型）；
+  重启后那台机器 **46 次 `POST /v1/chat/completions` 全是 200** —— 调用侧
+  （`llm-pi-ai` 经 `apiKeyEnv`）与管理侧（面板读写走管理密钥）各用各的钥匙、
+  互不干扰。`server.host` 与配置代际两条提示也一并真机复验过
+  （见根 [AGENTS.md](../AGENTS.md) 的验证快照）。
 
 遗留（不阻塞，等自然窗口）：`access.api-keys` 与 `server.host` 一样只在
 「CPA 未运行」时补 —— CPA 常驻不重启的机器要等下次 CPA 停机窗口才生效；
@@ -319,7 +325,10 @@ clone 后没有这个目录；拉取方式见 [reference/README.md](../reference
   [决策记录](../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)。
   三条判据里可测的两条已钉（省略只落该模型、同行不受影响，
   `tests/route-registry.test.ts`）；第三条（选择器分组不出现重复条目）
-  属宿主 UI，待重启 DSH 真机复验。
+  **已真机复验（2026-10-12）**：`hunyuan-chat` 行不给档位列、同渠道其它模型档位照旧，
+  省略没有带出重复条目 ✅。顺带发现另一件事（与省略无关）：渠道插件把
+  13 个模型报成两种 id 形态（裸名 + 渠道别名），选择器里因此各占两个条目 ——
+  已记进根 [AGENTS.md](../AGENTS.md) 待办区，待判「该以哪条为真」。
   **仍未做**：关不掉的 9 个（`ALWAYS_THINKS`）与方向相反的 23 个（`INVERTED`）
   怎么处置 —— 它们仍能思考，摘开关是功能倒退，待维护者定夺后再动；
   与根 [AGENTS.md](../AGENTS.md) 待办区那条「`providerId` 粒度裁决」是同一件事。
