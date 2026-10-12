@@ -390,6 +390,7 @@
 | `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                     |
 | `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`） |
 | `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                        |
+| `/api/v1/cpa/model-visibility` | GET/POST | 哪些模型进**选择器**（`{channel, names}` 是**要隐藏**的那批）       |
 | `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                    |
 | `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                              |
 | `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                 |

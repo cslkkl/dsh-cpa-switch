@@ -32,6 +32,7 @@ import { createOperations } from './ops/index.ts'
 import { SetupSession } from './setup/index.ts'
 import { registerRoutes } from './routes.ts'
 import { buildRoutes } from './route-table.ts'
+import { isModelHidden, readHiddenModels } from './state.ts'
 import type { RouteSpec } from './routes.ts'
 
 /** 本插件那一行的 Loader 条目 id —— 0.1.7 起它就是设置命名空间。 */
@@ -139,6 +140,11 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     reasoningEffortsEnabled: () => readConfig().reasoningEfforts,
     /** 每模型的输出上限（推 `maxTokens`）；`0` = 不声明。与开关同规矩：现读。 */
     maxOutputTokens: () => readConfig().maxOutputTokens,
+    /**
+     * 用户隐藏了哪些模型（**（渠道, 裸名）**）：现读 —— 面板一勾就要在**下一次重推**
+     * 生效（重推由 `onModelsVisibilityChanged` 触发）。
+     */
+    isHiddenModel: (channel, bare) => isModelHidden(readHiddenModels(), channel, bare),
   })
 
   /**
@@ -163,6 +169,13 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     logger: ctx.logger,
     /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */
     onAccountsChanged: () => void ensureRoutesFresh('oauth').catch(() => {}),
+    /**
+     * 用户改了「哪些模型出现在选择器里」—— **必须立刻重推一次**。
+     *
+     * ⚠️ 不重推的话要等下一次目录变化才生效，而目录可能几小时都不变 ——
+     * 用户看到的是「勾了没反应」，与「勾选没保存」长得一模一样。
+     */
+    onModelsVisibilityChanged: () => void ensureRoutesFresh('model-visibility').catch(() => {}),
     runtime,
     setup,
   })

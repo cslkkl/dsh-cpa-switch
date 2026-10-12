@@ -339,6 +339,25 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       },
     },
     {
+      /**
+       * 模型可见性：哪些模型出现在 **DSH 的模型选择器**里
+       * （`GET` 读被隐藏的、`POST` 改某个渠道的隐藏列表）。
+       *
+       * body: `{channel, names: string[]}` —— `names` 是**要隐藏的**模型
+       * （面板提交的是渠道报的 id，宿主负责规范化成裸名）。
+       *
+       * ⚠️ 它**不改 CPA 的账号状态**，但会**重推一次模型清单** ——
+       * 不重推的话用户勾完要等下一次目录变化才生效（可能几小时）。
+       */
+      path: '/api/v1/cpa/model-visibility',
+      methods: ['GET', 'POST'],
+      handle: async (request) => {
+        if (request.method === 'GET') return json(ops.modelVisibility.get())
+        const body = await readBody(request)
+        return json(ops.modelVisibility.set(body.channel, body.names))
+      },
+    },
+    {
       path: '/api/v1/cpa/auto-checkin',
       methods: ['GET', 'POST'],
       handle: async (request) => {

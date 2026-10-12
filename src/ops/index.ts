@@ -20,6 +20,7 @@ import type { InstallDeps, SetupSession } from '../setup/index.ts'
 import { createAccountsOps, type AccountsOps } from './accounts.ts'
 import { createActionsOps, type ActionsOps } from './actions.ts'
 import { createEnableOps, type EnableOps } from './enable.ts'
+import { createModelVisibilityOps, type ModelVisibilityOps } from './model-visibility.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
 import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
 import { createSchedulingOps, type SchedulingOps } from './scheduling.ts'
@@ -42,6 +43,15 @@ export interface OpsDeps {
    * 模型路由依赖账号集合，宿主用它安排一次重推。
    */
   readonly onAccountsChanged?: (() => void) | undefined
+  /**
+   * 模型可见性改动后的回调 —— 清单要**立刻重推**一次。
+   *
+   * ⚠️ 与 `onAccountsChanged` 分开命名而不是复用同一个：两者触发条件不同
+   * （一个是账号变了、一个是用户的显示偏好变了），合成一个回调会让
+   * 「谁在什么时候会重推」变得说不清 —— 而重推链上的每个环节都有代价
+   * （装配即推、目录护栏、重读链）。
+   */
+  readonly onModelsVisibilityChanged?: (() => void) | undefined
   /**
    * 运行态：只有更新域用（换 dll 前要停 CPA）。其余各域一律经 `gateway`。
    *
@@ -72,8 +82,15 @@ export interface Operations {
   readonly oauth: OauthOps
   /** 路由策略、调度模式、自动签到开关。 */
   readonly scheduling: SchedulingOps
-  /** 渠道插件查版本 / 更新（**唯一不碰 CPA API 的域**）。 */
+  /** 渠道插件查版本 / 更新（**不碰 CPA API 的域之一**）。 */
   readonly pluginUpdate: PluginUpdateOps
+  /**
+   * 模型可见性：哪些模型进**选择器**（改的是我们推给宿主的清单，账号一个字节不动）。
+   *
+   * ⚠️ 与 `enable` 的区别是**语义**上的：那条真的把号从调度里拿掉。混在一起最危险的
+   * 后果是用户以为「不显示 = 不用了」。
+   */
+  readonly modelVisibility: ModelVisibilityOps
 }
 
 /** 按域组装业务层。 */
@@ -85,5 +102,11 @@ export function createOperations(deps: OpsDeps): Operations {
     oauth: createOauthOps(deps),
     scheduling: createSchedulingOps(deps),
     pluginUpdate: createPluginUpdateOps(deps),
+    modelVisibility: createModelVisibilityOps({
+      ...(deps.onModelsVisibilityChanged === undefined
+        ? {}
+        : { onChanged: deps.onModelsVisibilityChanged }),
+      ...(deps.logger === undefined ? {} : { logger: deps.logger }),
+    }),
   }
 }
