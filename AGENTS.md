@@ -154,7 +154,8 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       见[决策记录](.agents/notes/2026-10-12-model-selector-grouping.md)）。
       未拍板，先不动手。
 - [ ] **待真机复验：0.14.0 那批（构建 + 重启 DSH 之后）** —— 这几条在代码里只有判据，
-      没有真机证据（维护者 2026-10-12 要求记着）：
+      没有真机证据（维护者 2026-10-12 要求记着）。**该版本已于 2026-10-12 发布到 npm**
+      （`v0.14.0` 标签 → `publish` 工作流，正文来自手写覆盖）：
       ① **模型选择器出现四个组**（`CPA Switch · WorkBuddy / Trae / Qoder / ZCode`），
       不再是原来那个单一 `cpa` 分组；
       ② **升级后每个会话要重选一次模型**（行键是 `providerId/modelId`，分组键变了）——
