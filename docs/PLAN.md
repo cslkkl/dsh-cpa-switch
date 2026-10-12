@@ -176,14 +176,18 @@
 > 发版本身**不入待办**：推 `v*` 标签即由 [publish.yml](../.github/workflows/publish.yml)
 > 自动发布（OIDC），流程见[发布手册](PUBLISHING.md)。这里只放**发布管线的完整性缺口**。
 
-- [ ] **`cslkkl/CLIProxyAPI` 的 `release-windows.yml` 没有 pin 上游 tag** ——
-      `actions/checkout@v6` 编译的是 fork 当前 HEAD，`inputs.version` 只进产物名与
-      ldflags，**不能证明二进制对应上游该 tag 的源码**。
-      建议：解析上游 tag → exact commit SHA → checkout 该 SHA → 记进 Release notes。
-      （补充实测：`v8.0.13-lp` 与上游 `v8.0.13` 的源码树**只差该 workflow 一个文件**，
-      即那次发布恰好是干净的；但机制上仍无保证。）
-- [ ] **`go test ./... -count=1` 带 `continue-on-error: true`** ——
-      任何测试失败都照发。建议只对已知 flaky 用例单独放行，其余失败阻断发布。
+**两条缺口已销账（2026-10-12）** —— 改的是 `cslkkl/CLIProxyAPI` 的
+`release-windows.yml`，落在该仓 `main` 的 `b6cc727`（两个提交：钉上游提交 +
+测试失败阻断发版）。改动内容与逐条理由在**那两个提交消息里**，此处不复制。
+
+只留两条**以后还要盯**的口径：
+
+- ⚠️ **`-skip` 那条豁免有期限** —— 上游修掉
+  `TestDeletePluginRemovesDiscoveredFileAndConfig` 的并发偶发失败之后，必须删掉那个
+  `-skip`，否则它会把该用例**永久**挡在门外（那正是「整条放行」的反面陷阱）。
+- ⚠️ **Release 正文里的「除 `.github/` 外的源码差异条数」不为 0 时要去查** ——
+  正常应当是 0（fork 只带发布脚手架）。不为 0 说明要么 fork 有意带了源码补丁，
+  要么上游那个 tag 被移动过；两者都该在发版前弄明白，而不是发完再说。
 
 ### 2.6 研究方向（未立项，先记录）
 
