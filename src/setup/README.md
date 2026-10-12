@@ -22,8 +22,8 @@
   - ⚠️ `SOURCES.cpa` **绝不能指向没有 Release 的仓库**（没有兜底）
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
   - 导出：`CONFIG_VERSION` / `readConfigVersion` / `renderConfig` / `patchModelAlias` /
-    `patchServerHost` / `writeConfig` / `generateSecretKey` / `generateApiKey` /
-    `looksLikeBcrypt` / `readSecretKeyFromConfig`
+    `patchServerHost` / `patchAccessApiKeys` / `writeConfig` / `generateSecretKey` /
+    `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`
   - ⚠️ `CONFIG_VERSION` 是上游的**硬校验**值（不是 `8` 就拒绝启动，没有降级兼容）。
     它与 CPA 的**软件版本号没有映射关系** —— 上游不存在「版本 → 代际」的表，
     所以代际只能**读对端声明的那个数**，推不出来。`readConfigVersion` 就是那个读法
@@ -39,6 +39,11 @@
     写死会在段内造出缩进跳变（2 → 4）⇒ 整份配置非法、CPA 拒绝启动
     （2026-10-10 实踩「CPA 连不上」）——
     [决策记录](../../.agents/notes/2026-10-10-server-host-autopatch.md)
+  - ⚠️ `patchAccessApiKeys` 是 `/v1` **鉴权收口**的补齐路（`boot` 在 CPA 未运行时调，
+    与 `patchServerHost` 同一竞态纪律）：没有 `access:` 段追加、有段没 `api-keys`
+    段内补（缩进跟随）、**已有 `api-keys` 一字节不动**（那是用户的密钥清单）、
+    空密钥 / 含引号换行的值一律不写（fail-open + boot 留 warn）——
+    [决策记录](../../.agents/notes/2026-10-11-access-api-keys-enforcement.md)
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
   - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
     `listPluginIds` / `removeDir` / `inspect` / `humanSize` / 类型
