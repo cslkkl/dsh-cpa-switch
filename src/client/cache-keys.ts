@@ -58,4 +58,11 @@ export const cacheKeys = {
    * 键里带状态：状态一换就是另一次读，旧那条自然不会再被取到。
    */
   auth: (state: string): string => `auth:${state}`,
+  /**
+   * 宿主 `GET /display`（面板显示设置：隐藏哪些渠道 / 号）。
+   *
+   * ⚠️ **不带渠道**：这份偏好是全局的（一次勾选对所有页签生效），
+   * 而面板的四个页签是同一个组件实例轮流渲染 —— 键带渠道会变成读四次同一份数据。
+   */
+  display: (): string => 'display',
 } as const

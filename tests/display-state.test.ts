@@ -73,7 +73,10 @@ describe('显示偏好落盘', () => {
       }),
       'utf8',
     )
-    expect(readDisplayPrefs()).toEqual({ hiddenChannels: ['qoder', 'trae'], hiddenAccounts: ['wb-1.json'] })
+    expect(readDisplayPrefs()).toEqual({
+      hiddenChannels: ['qoder', 'trae'],
+      hiddenAccounts: ['wb-1.json'],
+    })
   })
 
   it('去重（同一个渠道被写两次不该存两遍）', () => {

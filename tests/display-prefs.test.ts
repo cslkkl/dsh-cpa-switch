@@ -94,10 +94,9 @@ describe('显示偏好 · 隐藏区告警', () => {
   })
 
   it('⚠️ 已禁用且额度读不到 → 仍然什么都不出（禁用是排除项，压过读不到）', () => {
-    const issues = hiddenIssues(
-      prefs(['workbuddy-1.json']),
-      [account({ disabled: true, credits: null })],
-    )
+    const issues = hiddenIssues(prefs(['workbuddy-1.json']), [
+      account({ disabled: true, credits: null }),
+    ])
     expect(hasHiddenIssues(issues)).toBe(false)
   })
 
@@ -107,10 +106,9 @@ describe('显示偏好 · 隐藏区告警', () => {
   })
 
   it('⚠️ 「已用完」与「读不到」同时命中只算一次（用完是更硬的事实）', () => {
-    const issues = hiddenIssues(
-      prefs(['workbuddy-1.json']),
-      [account({ exhausted: true, credits: null })],
-    )
+    const issues = hiddenIssues(prefs(['workbuddy-1.json']), [
+      account({ exhausted: true, credits: null }),
+    ])
     expect(issues.exhausted).toEqual(['号甲'])
     expect(issues.unreadable).toBe(0)
   })

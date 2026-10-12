@@ -16,6 +16,8 @@ import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/d
 import { cacheKeys } from './cache-keys.ts'
 import { AccountCard } from './AccountCard.tsx'
 import { unitTextOf } from './credit-text.ts'
+import { accountVisible, hasHiddenIssues, hiddenIssues } from './display-prefs.ts'
+import { DisplaySettings, type ChannelChoice } from './DisplaySettings.tsx'
 import { emptyHintOf } from './empty-hint.ts'
 import { paths } from './endpoints.ts'
 import { fmt } from './format.ts'
@@ -26,6 +28,7 @@ import { summaryViewOf } from './summary-hint.ts'
 import { useAccountLogin } from './use-account-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
+import { useDisplayPrefs } from './use-display-prefs.ts'
 import { useResource } from './use-resource.ts'
 import { CYCLE_WINDOW_DAYS, upcomingCycles } from './upcoming-cycles.ts'
 import type { Translate } from './locales.ts'
@@ -64,11 +67,18 @@ export interface PluginPanelProps {
    * 两者只在 boot 时相遇。值一律取后端回读 —— 不取请求值、不取意图文件。
    */
   readonly onAccountDisabled: (authIndex: string, disabled: boolean) => void
+  /**
+   * 全部渠道（供「显示设置」弹层勾选）。
+   *
+   * ⚠️ 从父级传入而不是自己读：渠道清单的读在 `Panel` 里（它要用同一份数据画页签），
+   * 这里再读一次就成了**同一份数据两个来源**，两边不一致时页签与弹层会各说各话。
+   */
+  readonly channels: readonly ChannelChoice[]
 }
 
 /** 一个渠道的面板。 */
 export function PluginPanel(props: PluginPanelProps): ReactNode {
-  const { plugin, meta, t, onAccountDisabled } = props
+  const { plugin, meta, t, onAccountDisabled, channels } = props
   const capabilities = meta.capabilities
 
   /**
@@ -126,6 +136,23 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const unitText = unitTextOf(t, meta.unit)
 
   const accounts = overrides.accounts
+
+  /**
+   * 显示设置（隐藏哪些渠道 / 号）—— 一份状态、两个消费者：
+   * 本组件用它的**号**那一半过滤网格 + 算隐藏区告警，`Panel` 用**渠道**那一半过滤页签。
+   *
+   * ⚠️ 过滤只影响**画不画**：`accounts`（全量）仍然是汇总、告警、签到的数据源 ——
+   * 拿过滤后的列表去算合计，用户会看到「藏了几个号，总额度就变少了」。
+   */
+  const display = useDisplayPrefs()
+  const visibleAccounts = useMemo(
+    () => accounts.filter((account) => accountVisible(display.prefs, account)),
+    [accounts, display.prefs],
+  )
+  const hiddenIssue = useMemo(
+    () => hiddenIssues(display.prefs, accounts),
+    [accounts, display.prefs],
+  )
 
   /**
    * 汇总三格的呈现 —— **判定不在这里**，在 `summary-hint.ts`（纯函数、Node 侧测得到）。
@@ -374,7 +401,48 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         )}
         {/* 重验提示：安静地在末尾加四个字，不动其它任何布局 */}
         {accountsResource.revalidating && <span className={css.hint}>{t('refreshing')}</span>}
+        {/*
+         * 显示设置的入口。
+         *
+         * ⚠️ 它**一直可点**（不受 `loading` 影响）：这份偏好是本地状态，
+         * 与 CPA 读没读完无关 —— 禁用会让「列表读失败时想先藏几个号」变成不可能。
+         */}
+        <Button variant="outline" size="sm" onClick={display.open}>
+          {t('displaySettings')}
+        </Button>
       </div>
+
+      {/*
+       * 隐藏区的告警（2026-10-12）。
+       *
+       * 维护者口径：**藏起来的号出问题仍然要提示**，否则用户会以为「藏了就等于没事」。
+       * 但两种信号的可靠性差很远，所以分级（判定在 `display-prefs.ts` 的 `hiddenIssues`）：
+       * - 额度**用完**：点名 —— 换号是马上要做的动作；
+       * - 额度**读不到**：只给计数 —— 那可能只是这一次没读到；
+       * - **已禁用**：什么都不出 —— 那是用户主动关的，禁用+隐藏是常见组合。
+       *
+       * 常驻块而不是 `Toast`：这是**持续成立的事实**，不是「用户刚点了一下」的结果。
+       */}
+      {hasHiddenIssues(hiddenIssue) && (
+        <div className={css.notice}>
+          <div className={css.noticeTitle}>{t('displayHiddenTitle')}</div>
+          {hiddenIssue.exhausted.length > 0 && (
+            <div className={css.noticeHint}>
+              {t('displayHiddenExhausted', { names: hiddenIssue.exhausted.join('、') })}
+            </div>
+          )}
+          {hiddenIssue.unreadable > 0 && (
+            <div className={css.noticeHint}>
+              {t('displayHiddenUnreadable', { count: String(hiddenIssue.unreadable) })}
+            </div>
+          )}
+          <div className={css.noticeActions}>
+            <Button variant="outline" size="sm" onClick={display.open}>
+              {t('displayShowAll')}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/*
        * 空渠道的说明。
@@ -412,7 +480,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
             <SkeletonCards plugin={plugin} />
           </>
         ) : (
-          accounts.map((account) => (
+          visibleAccounts.map((account) => (
             <AccountCard
               key={account.authIndex ?? account.authId}
               account={account}
@@ -498,6 +566,29 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
           <div className={css.hint}>{t('loginIntro')}</div>
         )}
       </Modal>
+
+      {/*
+       * 显示设置弹层。
+       *
+       * 号那一组列的是**本渠道**的号（弹层由这个渠道面板打开）—— 见
+       * `DisplaySettings` 的头注：跨渠道把号塞进一个列表，正是用户想摆脱的长列表。
+       * 渠道那一组是全局的，勾掉之后连页签都不出现（过滤在 `Panel`）。
+       */}
+      <DisplaySettings
+        open={display.isOpen}
+        onClose={display.close}
+        saving={display.saving}
+        error={display.error}
+        channels={channels}
+        accounts={accounts}
+        currentChannelLabel={meta.label}
+        hiddenChannels={display.draft.hiddenChannels}
+        hiddenAccounts={display.draft.hiddenAccounts}
+        onToggleChannel={display.toggleChannel}
+        onToggleAccount={display.toggleAccount}
+        onSave={display.save}
+        t={t}
+      />
 
       {/*
        * 官方 `Toast`：自带传送门、淡出、`onDone` 回调。

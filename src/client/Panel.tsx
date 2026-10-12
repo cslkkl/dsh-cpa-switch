@@ -8,6 +8,7 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { cacheKeys } from './cache-keys.ts'
+import { channelVisible } from './display-prefs.ts'
 import { paths, runPluginUpdate, runSetup, startCpa } from './endpoints.ts'
 import { prefetch } from './read-cache.ts'
 import { PluginPanel } from './PluginPanel.tsx'
@@ -20,6 +21,7 @@ import type { StatusInput, StatusView } from './status-text.ts'
 import { updateResultLine, updateView } from './update-text.ts'
 import type { PluginUpdateInfo } from './update-text.ts'
 import { useResource } from './use-resource.ts'
+import { useDisplayPrefs } from './use-display-prefs.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
 
@@ -234,6 +236,14 @@ export function Panel(props: PanelProps): ReactNode {
     if (!list.some((p) => p.id === active)) setActive(list[0]?.id ?? 'workbuddy')
   }, [pluginsResource.data, active])
 
+  /**
+   * ⚠️ **勾掉当前正在看的渠道时，页签要自动换到还剩的第一个**（2026-10-12）。
+   *
+   * 上面那条 effect 只看 `pluginsResource.data`（**全量**渠道，它不该被显示偏好
+   * 影响 —— 否则勾选一动就重跑一遍默认校正），所以这里补一条：`active` 落在
+   * 一个被隐藏的渠道上时，界面会变成「没有页签选中、下面一片空」，
+   * 而**没有任何报错**。
+   */
   /** 手动拉起 CPA；成功与否都**回读**状态，不拿 POST 的 `ok` 当运行态。 */
   const start = async (): Promise<void> => {
     await startCpa()
@@ -260,8 +270,41 @@ export function Panel(props: PanelProps): ReactNode {
    * 里判（那边不含 JSX，所以 Node 侧测得到）。
    */
   const view: StatusView | undefined = status === undefined ? undefined : statusView(t, status)
-  const activeMeta = plugins.find((p) => p.id === active)
+
+  /**
+   * 显示设置（隐藏哪些渠道 / 号）。
+   *
+   * ⚠️ **读在父级、只读这一次**：页签的过滤（本组件）与号的过滤 + 告警
+   * （`PluginPanel`）要用**同一份**偏好 —— 各读一次就会出现「页签藏了、号没藏」
+   * 这类同屏不一致，而两边都自认为是对的。
+   *
+   * ⚠️ **不把 `hiddenChannels` 为空当成「还没读到」**：读失败时按空处理
+   * （什么都显示）是保守方向 —— 宁可多显示，也不要因为一次读失败把用户
+   * 勾掉的渠道全恢复出来又藏不回去。
+   */
+  const display = useDisplayPrefs()
+  const visiblePlugins = useMemo(
+    () => plugins.filter((p) => channelVisible(display.prefs, p.id)),
+    [plugins, display.prefs],
+  )
+  const activeMeta = visiblePlugins.find((p) => p.id === active)
   const port = String(status?.port)
+
+  /**
+   * ⚠️ **勾掉当前正在看的渠道时，页签要自动换到还剩的第一个**（2026-10-12）。
+   *
+   * 上面那条校正默认页签的 effect 只看 `pluginsResource.data`（**全量**渠道 ——
+   * 它不该被显示偏好影响，否则勾选一动就重跑一遍默认校正），所以这里补一条：
+   * `active` 落在一个被隐藏的渠道上时，界面会变成「没有页签选中、下面一片空」，
+   * 而**没有任何报错**。
+   */
+  useEffect(() => {
+    if (plugins.length === 0) return
+    if (display.prefs.hiddenChannels.length === 0) return
+    if (!display.prefs.hiddenChannels.includes(active)) return
+    const fallback = plugins.find((p) => !display.prefs.hiddenChannels.includes(p.id))
+    if (fallback !== undefined) setActive(fallback.id)
+  }, [plugins, active, display.prefs])
   /** 环境准备进度那一行（拿不到就为空串，退回只显示通用文案）。 */
   const setupProgress = progressLine(setupResource.data?.progress, t)
   const missing = Array.isArray(setupResource.data?.missing)
@@ -277,10 +320,23 @@ export function Panel(props: PanelProps): ReactNode {
    *
    * 原来每次渲染都 `plugins.map(...)` 生成新数组。`SegmentedControl` 是**受控**
    * 组件，新数组会让它认为选项变了 —— 顺带也让下面那条校正默认页签的 effect
-   * 拿到一个每次都不同的 `list`。`useMemo` 把它钉在 `plugins` 上。
+   * 拿到一个每次都不同的 `list`。`useMemo` 把它钉在 `visiblePlugins` 上。
+   *
+   * ⚠️ 用**过滤后**的列表：勾掉的渠道连页签都不出现（这正是「只显示自己要的渠道」）。
    */
   const channelOptions = useMemo(
-    () => plugins.map((p) => ({ value: p.id, label: p.label })),
+    () => visiblePlugins.map((p) => ({ value: p.id, label: p.label })),
+    [visiblePlugins],
+  )
+
+  /**
+   * 供「显示设置」弹层勾选的**全部**渠道。
+   *
+   * ⚠️ 是 `plugins`（**未过滤**）而不是 `visiblePlugins` —— 用过滤后的列表，
+   * 被勾掉的渠道就从弹层里消失了，用户**再也勾不回来**（只能改文件）。
+   */
+  const channelChoices = useMemo(
+    () => plugins.map((p) => ({ id: p.id, label: p.label })),
     [plugins],
   )
 
@@ -544,6 +600,7 @@ export function Panel(props: PanelProps): ReactNode {
            * 卡片不直接改父级的 props。
            */
           onAccountDisabled={() => {}}
+          channels={channelChoices}
         />
       )}
 

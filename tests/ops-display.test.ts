@@ -40,7 +40,11 @@ describe('显示设置域', () => {
     const ops = createDisplayOps()
     const written = ops.set(['qoder'], ['wb-1.json'])
     expect(written).toEqual({ ok: true, hiddenChannels: ['qoder'], hiddenAccounts: ['wb-1.json'] })
-    expect(ops.get()).toEqual({ ok: true, hiddenChannels: ['qoder'], hiddenAccounts: ['wb-1.json'] })
+    expect(ops.get()).toEqual({
+      ok: true,
+      hiddenChannels: ['qoder'],
+      hiddenAccounts: ['wb-1.json'],
+    })
   })
 
   it('空白项与重复项在写入时就归一（去空白、去重）', () => {
