@@ -66,7 +66,12 @@ function makeDeps(): RouteDeps {
     runtime,
   })
   const ops = createOperations({ gateway })
-  const setup = new SetupSession({ readConfig, adminKey, onPrepared: () => {} })
+  const setup = new SetupSession({
+    readConfig,
+    adminKey,
+    apiKey: async () => '',
+    onPrepared: () => {},
+  })
   return { ops, adminKey, readConfig, setup, runtime }
 }
 

@@ -152,6 +152,8 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
   const setup = new SetupSession({
     readConfig,
     adminKey,
+    /** 写配置时落 `access.api-keys`（`/v1` 鉴权）；值在 boot 第一步已备好。 */
+    apiKey: () => resolveApiKey({ credentials: ctx.credentials }),
     logger: ctx.logger,
     /** 用户点「一键准备」成功后，CPA 可能刚被拉起 —— 立刻推模型路由。 */
     onPrepared: (trigger) => void ensureRoutesFresh(trigger).catch(() => {}),

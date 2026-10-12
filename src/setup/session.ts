@@ -31,6 +31,14 @@ export interface SetupSessionDeps {
   /** 每次调用现求值 —— 配置改了立刻生效。 */
   readonly readConfig: () => PluginConfig
   readonly adminKey: AdminKeyStore
+  /**
+   * 调用密钥（`CPA_API_KEY` 的值）的现读口 —— 写配置时落进 `access.api-keys`。
+   *
+   * ⚠️ **必须在 `ensureApiKey` 备好凭据之后调才有值**：boot 的第一步就是备它，
+   * 而 `run` / `autoInstall` 都在那之后发生。空串 = 没备好（写不进凭据库等），
+   * 配置侧 fail-open 不写鉴权段。
+   */
+  readonly apiKey: () => Promise<string>
   readonly logger?: LoggerLike | undefined
   /**
    * **用户显式触发**的准备成功之后调用（CPA 可能是这次拉起的）—— 推模型路由用。
@@ -139,9 +147,15 @@ export class SetupSession {
      * 后者必然是空，直接传会立刻 `no-admin-key` 卡死，自动安装就成了摆设。
      */
     const secretKey = await this.#deps.adminKey.ensureForAutoInstall()
+    /**
+     * 调用密钥现读一次：写进配置的 `access.api-keys`（`/v1` 鉴权）。
+     * 拿不到就空着 —— 配置侧 fail-open，boot 的补丁路径会再试一次并留 warn。
+     */
+    const apiKey = await this.#deps.apiKey().catch(() => '')
     const result = await prepare({
       port: config.port,
       secretKey,
+      apiKey,
       ...(onStep === undefined ? {} : { onStep }),
     })
 

@@ -44,6 +44,11 @@ export interface SetupStep {
 export interface PrepareInput {
   readonly port: number
   readonly secretKey: string
+  /**
+   * 调用密钥（`CPA_API_KEY` 的值），写进 `access.api-keys` 供 `/v1` 鉴权。
+   * 空串 / 未给时不写这一段（fail-open，boot 会记 warn）。
+   */
+  readonly apiKey?: string
   readonly onStep?: (step: SetupStep) => void
 }
 
@@ -139,7 +144,14 @@ export async function prepare(input: PrepareInput): Promise<PrepareResult> {
   if (!existsSync(managedConfigPath())) {
     step('config', {})
     const pluginIds = listPluginIds(managedPluginsDir())
-    writeConfig(renderConfig({ port: input.port, secretKey: input.secretKey, pluginIds }))
+    writeConfig(
+      renderConfig({
+        port: input.port,
+        secretKey: input.secretKey,
+        ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+        pluginIds,
+      }),
+    )
   }
 
   const state = inspect({ port: input.port, secretKey: input.secretKey })
