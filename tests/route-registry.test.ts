@@ -343,7 +343,12 @@ function fakeCpa(input: {
     status?: string
     unavailable?: boolean
   }[]
-  models: Readonly<Record<string, readonly string[] | 'fail'>>
+  /**
+   * 每个凭据报出的模型。值可以是字符串或 `{ id }` 对象 —— **两种形态上游都给过**
+   * （`/v0/management/auth-files/models` 实测是字符串、`/v1/models` 是 `{ id }`），
+   * 所以条目形态本身是被测行为，夹具必须能表达它。
+   */
+  models: Readonly<Record<string, readonly (string | { id?: unknown })[] | 'fail'>>
   catalog: readonly string[]
 }): FakeCpa {
   const waiting: (() => void)[] = []
@@ -2039,6 +2044,41 @@ describe('供给面只收托管渠道的可用凭据', () => {
       'ZCode · glm-5-turbo',
     ]) {
       expect(names).toContain(expected)
+    }
+  })
+
+  /**
+   * **模型条目的形态：字符串与 `{ id }` 都要认。**
+   *
+   * 上游两个端点的形态**不一样**：`/v1/models` 实测返 `{ id }` 对象、
+   * `auth-files/models` 实测返字符串数组。同一条解析逻辑在两处各写了一份
+   * （`catalogIds` 与 `readChannelModels` 里那段 `.map().filter()`），
+   * 而**渠道那一侧此前没有任何判据** —— 万一哪天只改了一处，
+   * 「渠道报模型名但认不出来」会表现成**清单少一堆模型**，不报错。
+   *
+   * 用对象形态喂渠道供给面，钉住它和目录那侧一样能认出 id
+   * （含「缺 id / id 非字符串 / 空串」要丢掉）。
+   */
+  it('⚠️ 渠道报出的模型可以是 `{ id }` 对象，与字符串一样认', async () => {
+    const cpa = fakeCpa({
+      files: [{ name: 'w1', provider: 'workbuddy' }],
+      models: {
+        w1: [{ id: 'hy3' }, 'kimi-k2.7', {}, { id: 42 }, { id: '' }],
+      },
+      catalog: ['hy3', 'kimi-k2.7'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const names = pushed.flatMap((p) => p.names)
+    // 认得出对象形态 + 字符串形态
+    expect(names).toContain('WorkBuddy · hy3')
+    expect(names).toContain('WorkBuddy · kimi-k2.7')
+    // 认不出的一律不进清单，也不许变成 `WorkBuddy · undefined` 这种名字
+    for (const name of names) {
+      expect(String(name)).not.toContain('undefined')
     }
   })
 })

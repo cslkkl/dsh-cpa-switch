@@ -378,9 +378,16 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
           `/v0/management/auth-files/models?name=${encodeURIComponent(String(file.name))}`,
           { timeoutMs: 60000 },
         )) as { models?: unknown }
-        const ids = ((data.models ?? []) as unknown[])
-          .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
-          .filter((id): id is string => typeof id === 'string' && id !== '')
+        /**
+         * 与目录那侧**共用一份解析**（`catalogIds`）—— 上游两个端点的条目形态不同
+         * （这里是字符串数组、`/v1/models` 是 `{ id }`），但「取 id 列表」这件事只有
+         * 一个判据，抄两份必然漂。
+         *
+         * `undefined` 时交空对象：`catalogIds` 内部就是 `?? []`，与原来的
+         * `(data.models ?? [])` 逐字等价（`exactOptionalPropertyTypes` 不许
+         * 显式传 `undefined`，所以不写成 `{ data: data.models }`）。
+         */
+        const ids = catalogIds(data.models === undefined ? {} : { data: data.models as unknown[] })
         byChannel[provider] = [...new Set([...(byChannel[provider] ?? []), ...ids])]
       } catch (error) {
         failures.push({
@@ -501,8 +508,15 @@ function routeOwnerOf(
 /**
  * 从目录里取出 id 列表（条目可能是字符串或 `{ id }`）。
  *
- * 单独抽出来是因为**两处**要用：构造路由行、以及给别名表提供「实际存在哪些 id」
- * （别名是持久状态，识别不能只靠当前重名 —— 见 {@link aliasTableOf}）。
+ * 单独抽出来是因为**三处**要用：构造路由行、给别名表提供「实际存在哪些 id」
+ * （别名是持久状态，识别不能只靠当前重名 —— 见 {@link aliasTableOf}）、
+ * 以及**每个凭据报出的模型名**（`auth-files/models`）。
+ *
+ * ⚠️ **上游两个端点的条目形态不一样**：`/v1/models` 返 `{ id }` 对象、
+ * `auth-files/models` 实测返字符串。同一条解析原先在 `readChannelModels` 里
+ * **又抄了一份**，两处一旦只改一处，症状是「渠道报了模型名但认不出来」
+ * —— 清单少一堆模型，不报错。所以这里就是那条判据的唯一 home
+ * （判据 `tests/route-registry.test.ts` 的「渠道报出的模型可以是 `{ id }` 对象」）。
  */
 function catalogIds(catalog: { data?: unknown[] }): string[] {
   return (catalog.data ?? [])
