@@ -94,6 +94,22 @@
 - **`use-account-login.ts`** —— 「添加账号」弹窗的状态机（`idle` / `starting` / `wait` / `error`）。
   - 授权轮询也走 `useResource` 的 `pollMs`（`POLL_MS = 2500`）；还没有 `state` 时不轮询
   - 到**终态**后 `invalidateReads(cacheKeys.accounts(plugin))` 让账号列表自己刷新
+- **`display-prefs.ts` + `use-display-prefs.ts` + `DisplaySettings.tsx`** ——
+  面板「显示设置」：隐藏哪些渠道、哪些号（2026-10-12）。
+  - ⚠️ **隐藏只是不显示**：被隐藏的号照常参与调度、照常签到、照常消耗额度。
+    弹层里**必须**说清这一点 —— 用户以为藏起来就不耗额度，是这功能唯一会造成的误解
+  - ⚠️ **过滤只影响画不画**：合计 / 隐藏区告警 / 批量签到一律按**全量**算
+    （拿过滤后的列表算合计，用户会看到「藏几个号，总额度就变少了」）
+  - ⚠️ **没有 `authId` 的号不给勾**：隐藏要靠稳定标识认人，上游实测可能不给 `auth_id`
+    （见 `contracts/domain.ts`），认不出就不能藏 —— 否则下次可能**藏错人**
+  - ⚠️ **勾掉当前正在看的渠道时，页签必须自动换到剩下的第一个**：否则界面变成
+    「没有页签选中、下面一片空」而**零报错**（`Panel` 里那条补的 effect）
+  - **隐藏区的告警分级**（`hiddenIssues`，纯函数、Node 侧测得到）：额度**用完点名**、
+    额度**读不到只给计数**、**已禁用什么都不出** —— 禁用是用户主动关的，
+    禁用+隐藏是常见组合，报了就是噪音
+  - 判定 `tests/display-prefs.test.ts` + `tests/display-state.test.ts` +
+    `tests/ops-display.test.ts`；决策见
+    [决策记录](../../.agents/notes/2026-10-12-panel-display-settings.md)
 - **`use-channel-actions.ts`** —— 渠道级动作（全部签到 / 任务、自动签到开关）+ 忙碌与提示。
   - 「批量在飞」与「某张卡在飞」**互相看得见**：并发点各发一次写请求会互相盖掉响应
   - ⚠️ **四个状态按渠道分槽，不是「切渠道清空」** —— 面板不随渠道重挂载，
@@ -437,6 +453,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [read-cache.ts](read-cache.ts)                     | 读缓存（新鲜 / 陈旧两档 + **按前缀作废**）与可订阅 store；语义改动同步 [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                                                                                                                                                                                                          |
 | [endpoints.ts](endpoints.ts)                       | `/api/v1/cpa/*` 的**路径唯一来源**（`paths`）；**写函数自己失效缓存**。⚠️ 前缀必须对上**本半边真的有读者**的那个读键（**不是**宿主 `cacheKeys` 的名字）；抄错不报错，只是那次作废**匹配不到任何条目**（空操作）。⚠️ 写成功后界面值**取回读**（F33）：作废缓存本身不会让界面更新。判据 `tests/client-cache-keys.test.ts`                                                                                                                               |
 | [report.tsx](report.tsx)                           | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](../../docs/ARCHITECTURE.md)）                                                                                                                                                                                                                                                                                                                                                |
+| [display-prefs.ts](display-prefs.ts)               | 显示设置的**判定**（过滤 + 隐藏区告警分级，不含 JSX）：**「已禁用」不算有问题**（用户主动关的）、**没有 `authId` 的号永远显示**（认不出就不能藏）。同步 `tests/display-prefs.test.ts`                                                                                                                                                                                                                                                                 |
 | [plan-text.ts](plan-text.ts)                       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**；**中文档位名统一带「版」**（单写「免费」会被读成「这个号免费」）；`套餐：` 前缀不在这里加（那是 [credit-text.ts](credit-text.ts) 的事）                                                                                                                                                                                                                                                         |
 | [credit-text.ts](credit-text.ts)                   | 额度区的**唯一组装处**（单位文案 + 两格数字 + 说明行）：**只组装，判据一律向 `plan-text` / `meter-text` 要**；**单位判定只此一处**。同步 `tests/credit-text.test.ts`（含「全仓只有它判 `'tokens'`」的护栏）                                                                                                                                                                                                                                           |
 | [meter-text.ts](meter-text.ts)                     | 余额区判据：**没有分母就不画条、`used` 缺失就留空、条画「剩余占比」**；同步[决策记录](../../.agents/notes/2026-10-05-meter-bar-shows-remaining.md) + `tests/meter-text.test.ts`                                                                                                                                                                                                                                                                       |

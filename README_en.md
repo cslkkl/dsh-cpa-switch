@@ -45,6 +45,9 @@ Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own t
   every other account in the same channel at once.
 - **Add an account**: the "+ Add account" entry at the end of each channel's list opens the
   OAuth page — finish the login in your browser and you are done.
+- **Show only what you care about**: "Display settings" in the toolbar lets you hide channels
+  and accounts you do not need. Hidden accounts keep running in the background (check-in and
+  scheduling are unaffected), and the panel still calls one out by name if it runs out of credits.
 - **Remembers your choice**: after a DSH restart, the account you picked is still the one in use.
 - **Automatic check-in**: toggled per channel; check-ins missed while DSH was not running are
   caught up when the plugin starts.

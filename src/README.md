@@ -183,13 +183,16 @@
   - ⚠️ 两者共用 `CpaProcess` 的探活记忆 —— **别再自己 `probePort`**，
     否则两条路径会给出相反的答案（状态条说「运行中」、列表报 `cpa-unavailable`）
   - 改后必测：`tests/runtime.test.ts`（含「`status` 一次都不许调 `ensure`」）
-- **`ops/`** —— **业务层**：五个业务域一域一个文件 + 组合根。
+- **`ops/`** —— **业务层**：六个业务域一域一个文件 + 组合根。
   - 导出：`createOperations` / 类型 `Operations` / `OpsDeps` / `OpsResult` / `OpsFailure`
   - 域：`accounts`（读账号 / 余额 / 模型目录）、`actions`（签到 / 任务 / 补签）、
     `enable`（启用态 / 设为唯一 / 优先级 / 意图）、`oauth`（登录三条）、
-    `scheduling`（路由策略 / 调度模式 / 自动签到开关）
+    `scheduling`（路由策略 / 调度模式 / 自动签到开关）、
+    `display`（面板显示设置：隐藏哪些渠道 / 号 —— **不碰 CPA**）
   - ⚠️ 域的划分依据是**语义**：`actions` 作用于全部号含已禁用的（F35），
-    `enable` 只动调度面 —— 这两件混在一起就会被「顺手跳过禁用号」改坏语义
+    `enable` 只动调度面 —— 这两件混在一起就会被「顺手跳过禁用号」改坏语义。
+    同理 `display` 与 `enable` **必须分开**：前者只让面板不画（号照常跑），
+    后者真的把号从调度里拿掉 —— 混一起最危险的后果是用户以为「隐藏 = 停用」
   - ⚠️ 每个改变 CPA 状态的写操作成功后要调 `gateway.invalidateChannel(plugin)`，
     否则用户看到旧值 —— 清哪些 key 由 [gateway.ts](gateway.ts) 决定
   - 被谁依赖：`route-table.ts` 的 `buildRoutes`、`boot.ts` 的启动流程
