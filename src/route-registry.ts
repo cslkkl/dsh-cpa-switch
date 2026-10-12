@@ -681,15 +681,24 @@ function buildCpaRouteProfile(
     const caps = capsOf(row.channel, row.bare)
     // 逐模型省略：校准表标了 `reasoningEfforts: false`（实测反证：两档都无思考）
     // 的模型不发档位声明 —— 宿主落 `reasoning: false`，界面不给 Effort 行。
+    // 标了 `reasoningEffortsSwapped`（实测方向相反）的模型**照常声明两个档位、把值对调**，
+    // 让界面回到「关 = 想得少、开 = 想得多」。
     // 其余模型照常按渠道给。判据见 tests/route-registry.test.ts「思考档位声明」。
     const reasoningEfforts =
-      caps?.reasoningEfforts === false ? undefined : reasoningEffortsOf(effortsEnabled, row.channel)
+      caps?.reasoningEfforts === false
+        ? undefined
+        : reasoningEffortsOf(effortsEnabled, row.channel, caps?.reasoningEffortsSwapped === true)
     // 模型级例外优先于路由级默认；`0` / 非法值都落到「不写」。
     const maxOutputTokens = caps?.maxOutputTokens ?? routeMaxOutputTokens
     return {
       id: row.id,
       name: `${row.label} · ${row.bare}`,
-      ...(caps === undefined ? {} : { contextWindow: caps.contextWindow }),
+      /**
+       * 窗口：**只在有出处时写**。校准表里的条目可以只带档位标记而不带窗口
+       * （两条证据轴独立）—— 那时**一个字段都不写**，让宿主落自己的兜底
+       * 262144，与「压根没有校准条目」逐字相同。判据见「只带档位标记的条目…」。
+       */
+      ...(caps?.contextWindow === undefined ? {} : { contextWindow: caps.contextWindow }),
       /**
        * 输出上限：**只在正整数时写**（`0` = 用户关掉了声明）。
        *

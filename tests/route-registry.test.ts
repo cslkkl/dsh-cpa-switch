@@ -1643,8 +1643,11 @@ describe('思考档位声明', () => {
         { name: 'w1', provider: 'workbuddy' },
         { name: 'z1', provider: 'zcode' },
       ],
-      models: { w1: ['deepseek-v4.1-flash'], z1: ['glm-5.3'] },
-      catalog: ['deepseek-v4.1-flash', 'glm-5.3'],
+      // ⚠️ zcode 这边用 `glm-5.2` 而不是 `glm-5.3`：后者 2026-10-12 实测「两档都 0 思考」，
+      // 已按逐模型省略摘掉档位 —— 拿它当「zcode 的关词是 none」的标本会撞上省略分支
+      // （判据会红，但红的不是拼写接线，而是标本选错了）。
+      models: { w1: ['deepseek-v4.1-flash'], z1: ['glm-5.2'] },
+      catalog: ['deepseek-v4.1-flash', 'glm-5.2'],
     })
     const { entry, pushed } = fakeEntry(BASELINE)
 
@@ -1657,9 +1660,9 @@ describe('思考档位声明', () => {
       (pushed.at(-1)?.rows ?? []).map((row) => [String(row.id), row.reasoningEfforts]),
     )
     // 两条都在，才谈得上「逐行」——少一条就退化成「整份共用同一个值」。
-    expect([...effortsOf.keys()].sort()).toEqual(['deepseek-v4.1-flash', 'glm-5.3'])
+    expect([...effortsOf.keys()].sort()).toEqual(['deepseek-v4.1-flash', 'glm-5.2'])
     expect(effortsOf.get('deepseek-v4.1-flash')).toEqual({ off: 'off', high: 'high' })
-    expect(effortsOf.get('glm-5.3')).toEqual({ off: 'none', high: 'high' })
+    expect(effortsOf.get('glm-5.2')).toEqual({ off: 'none', high: 'high' })
   })
 
   /**
@@ -1746,6 +1749,67 @@ describe('思考档位声明', () => {
     )
     expect(effortsOf.get('hunyuan-chat')).toBeUndefined()
     expect(effortsOf.get('deepseek-v4.1-flash')).toEqual({ off: 'off', high: 'high' })
+  })
+
+  /**
+   * 逐模型**对调**（2026-10-12）：实测「方向相反」的模型把两个档位的值换过来，
+   * 界面语义回到「关 = 想得少、开 = 想得多」。
+   *
+   * ⚠️ 判据要**同清单里对调与照常并存**才站得住 ——
+   * 只断言「对调的那条换了」，挡不住「顺手把所有条目都换了」。
+   *
+   * 走**真实校准表**（`qoder.dfmodel` 标了对调、`qoder.qmodel` 没标），
+   * 所以顺带钉住「标记真的接上线」：若 `buildCpaRouteProfile` 漏传第三个参数，这条会红。
+   */
+  it('⚠️ 对调的模型值正好互换，同渠道未标的照常', async () => {
+    const cpa = fakeCpa({
+      files: [{ name: 'q1', provider: 'qoder' }],
+      models: { q1: ['dfmodel', 'qmodel'] },
+      catalog: ['dfmodel', 'qmodel'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => true),
+    )('boot')
+
+    const effortsOf = new Map(
+      (pushed.at(-1)?.rows ?? []).map((row) => [String(row.id), row.reasoningEfforts]),
+    )
+    // 对调：界面「关」→ high、界面「开」→ 该渠道的关词
+    expect(effortsOf.get('dfmodel')).toEqual({ off: 'high', high: 'off' })
+    // 未标：照常
+    expect(effortsOf.get('qmodel')).toEqual({ off: 'off', high: 'high' })
+  })
+
+  /**
+   * ⚠️ **只带档位标记的条目不许顺带改窗口**（2026-10-12）。
+   *
+   * 校准表里有些条目**只有档位标记、没有窗口**（Trae 平台模型的窗口按渠道口径不填）。
+   * 那时推送侧必须**一个字段都不写** —— 写了 `contextWindow: undefined` 或顺手补个
+   * 兜底值，就等于把「宿主兜底 262144」静默改成别的数，而**没有任何报错**。
+   */
+  it('⚠️ 只有档位标记的模型：摘了档位、窗口一个字段都不写', async () => {
+    const cpa = fakeCpa({
+      files: [{ name: 't1', provider: 'trae' }],
+      models: { t1: ['step-5-preview'] },
+      catalog: ['step-5-preview'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+
+    await attachRouteRegistry(
+      fakeHost(entry).host,
+      withReasoning(cpa, () => true),
+    )('boot')
+
+    const row = (pushed.at(-1)?.rows ?? []).find((item) => item.id === 'step-5-preview')
+    expect(row).toBeDefined()
+    // 档位摘掉
+    expect(row?.reasoningEfforts).toBeUndefined()
+    // 窗口不写（宿主落自己的兜底）
+    expect(row?.contextWindow).toBeUndefined()
+    expect(Object.keys(row ?? {})).not.toContain('contextWindow')
   })
 
   /**
