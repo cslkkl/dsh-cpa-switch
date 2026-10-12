@@ -76,6 +76,37 @@ describe('槽位 2 · tagRow —— 只放状态标签', () => {
     expect(tagRow).not.toMatch(/tone="danger"/)
   })
 
+  /**
+   * **「未签到」用 `neutral` 灰底，不是空心描边**（2026-10-12 维护者定案）。
+   *
+   * 维护者反馈空心 `outline` 标签**看起来像括号** —— 它确实只是「一行文字描了个边」，
+   * 与相邻的绿底「已签到」并列时，**静默**读成标点而不是一个状态。
+   *
+   * 宿主对 `neutral` 的定义正好是我们要的语义：**「平台灰底：一个没有状态含义的中性事实」**
+   * （`dsh-client-ui-primitives` 的 `TagTone` 注释）。而「今天没签」正是这种事实 ——
+   * **可能是有意不签，不是异常**，所以既不能用 `warning` 也不能用 `danger`
+   * （那与「红/警示色＝误报」的既有定案冲突）。
+   *
+   * 三条一起钉：真签到了仍是绿、没签到是灰底、**上游没给签到状态时整行不渲染**
+   * （「不知道」不是「没签」—— 那是设计，不是漏渲染）。
+   */
+  it('⚠️「未签到」用 neutral 灰底（空心的看起来像括号），「不知道」不渲染', () => {
+    const tagRow = card.slice(card.indexOf('css.tagRow'), card.indexOf('css.numbers'))
+    // ⚠️ 断言必须**只切签到那一块**：同一个 tagRow 里还有「已用完」的 `warning`
+    // 与「已禁用」的 `neutral`，它们各有各的定案 —— 拿整行做 `not.toMatch(/warning/)`
+    // 会把别人的合法用法判红（2026-10-12 我自己先写错过一次）。
+    const checkinBlock = tagRow.slice(
+      tagRow.indexOf('account.checkin !== undefined'),
+      tagRow.indexOf('css.numbers'),
+    )
+    // 没签到 → 灰底；不是空心描边，也不是警告/失败色
+    expect(checkinBlock).toMatch(/tone=\{[^}]*\?\s*'success'\s*:\s*'neutral'\}/)
+    expect(checkinBlock).not.toContain("'outline'")
+    expect(checkinBlock).not.toMatch(/tone="(warning|danger)"/)
+    // 「不知道」不渲染：整块由 `checkin !== undefined &&` 包着
+    expect(checkinBlock).toMatch(/account\.checkin !== undefined\s*&&/)
+  })
+
   it('「已禁用」排在最后（切 Tab 时左边永远是渠道自身状态）', () => {
     const tagRow = card.slice(card.indexOf('css.tagRow'), card.indexOf('css.numbers'))
     const disabledAt = tagRow.indexOf("t('disabled')")

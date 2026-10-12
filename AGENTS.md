@@ -153,6 +153,18 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       ⚠️ 与**模型选择器**的分组无关 —— 那条（按渠道拆 provider）已落地（2026-10-12，
       见[决策记录](.agents/notes/2026-10-12-model-selector-grouping.md)）。
       未拍板，先不动手。
+- [ ] **待真机复验：0.14.0 那批（构建 + 重启 DSH 之后）** —— 这几条在代码里只有判据，
+      没有真机证据（维护者 2026-10-12 要求记着）：
+      ① **模型选择器出现四个组**（`CPA Switch · WorkBuddy / Trae / Qoder / ZCode`），
+      不再是原来那个单一 `cpa` 分组；
+      ② **升级后每个会话要重选一次模型**（行键是 `providerId/modelId`，分组键变了）——
+      验「输入框停用 → 重选即恢复」，这是本次**唯一被接受的代价**；
+      ③ **摘了档位的模型没有 Effort 行**（如 `workbuddy/step-5-preview`、`zcode/glm-5.3`），
+      同渠道其它模型档位照旧；
+      ④ **对调的模型「开」比「关」想得多**（如 `qoder/gmodel`）；
+      ⑤ **「未签到」是灰底标签**（不再是看起来像括号的空心描边）。
+      判据与决策见 [.agents/notes/2026-10-12-model-selector-grouping.md](.agents/notes/2026-10-12-model-selector-grouping.md)
+      与 [.agents/notes/2026-10-12-reasoning-effort-retriage.md](.agents/notes/2026-10-12-reasoning-effort-retriage.md)。
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 只能靠人工表，每次新模型都要补。
       ⚠️ **但「等谁」要说准**：CPA 侧**通路已存在**，缺的是**渠道插件没填值** ——
       上游 `sdk/pluginapi/types.go` 的 `PluginModel` 有 `ContextLength` /
@@ -169,13 +181,6 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       都按「渠道侧证据不足」留空、走兜底。等有渠道侧来源再补，
       **别把 WorkBuddy/ZCode 的已知值搬过去**（同名模型在不同渠道上限可能不同）。
       归属与事实源见 [src/channels/README.md](src/channels/README.md)。
-- [ ] **面板「未签到」是空心描边标签，是否该改用颜色表达** —— 现在
-      `checkin === undefined` 时**整行不渲染标签**（＝「不知道」，是设计不是漏渲染），
-      `checkedToday: false` 才显示空心 `outline` 标签。维护者反馈「看起来像括号」。
-      选项：换 `neutral` 灰底、只改文案、或把「三态」写进
-      [src/client/README.md](src/client/README.md) 槽位规范。
-      ⚠️ 改颜色要与「红/警示色＝误报」的既有定案对齐 ——
-      「今天没签」可能是有意不签，不是异常。改动属改行为，走 §2.9。
 - [ ] **研究方向见 [docs/PLAN.md](docs/PLAN.md)** —— 额度显示位置、每代理独立用号、
       调度维护界面等**尚未立项**的想法记在那里；本清单只放「确定要做、照做即可」的动作。
       **结构类改动**（会改行为或签名的）立项在那份的 §2.9：**先补判据再动结构**。

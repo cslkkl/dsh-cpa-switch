@@ -298,7 +298,22 @@ export function AccountCard(props: AccountCardProps): ReactNode {
       <div className={css.tagRow}>
         {account.exhausted && <Tag tone="warning">{t('exhausted')}</Tag>}
         {account.checkin !== undefined && (
-          <Tag tone={account.checkin.checkedToday ? 'success' : 'outline'}>
+          /*
+           * ⚠️ **「未签到」是 `neutral` 灰底，不是空心描边**（2026-10-12 维护者定案）。
+           *
+           * 空心 `outline` 只是「一行文字描了个边」，跟绿底「已签到」并排时**静默**
+           * 读成标点（维护者原话：看起来像括号），而它其实是一个状态。
+           *
+           * 宿主对 `neutral` 的定义正好对上：「平台灰底：一个没有状态含义的中性事实」
+           * （`dsh-client-ui-primitives` 的 `TagTone`）。「今天没签」正是这种事实 ——
+           * **可能是有意不签，不是异常**，所以既不是 `warning` 也不是 `danger`：
+           * 那与「红/警示色＝误报」的既有定案冲突（同下面「已禁用」的取舍）。
+           *
+           * ⚠️ **「不知道」不渲染整行**：`checkin === undefined`（上游没给这个渠道的
+           * 签到状态，如 Qoder / ZCode）时**什么都不显示** —— 那是设计不是漏渲染，
+           * 把「不知道」画成「没签」会让用户以为自己的号漏签了。
+           */
+          <Tag tone={account.checkin.checkedToday ? 'success' : 'neutral'}>
             {account.checkin.checkedToday ? t('checkedIn') : t('notCheckedIn')}
           </Tag>
         )}
