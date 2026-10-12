@@ -260,6 +260,9 @@ affiliated with WorkBuddy, Trae, Qoder, ZCode or any other platform's official t
 
 Issues and pull requests are welcome. Make sure `pnpm check` is green before submitting.
 
+How to get started, commit and PR conventions, and documentation-sync requirements →
+[CONTRIBUTING.md](CONTRIBUTING.md) (Chinese).
+
 This repo's conventions live in [AGENTS.md](AGENTS.md): changes must keep the documentation
 network in sync, and a link check runs after documentation changes (command in that file).
 

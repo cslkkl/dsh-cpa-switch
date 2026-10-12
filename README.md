@@ -225,6 +225,8 @@ pnpm check        # typecheck + lint + format + build + verify:artifacts + test
 
 欢迎提 Issue 与 PR。提交前请确保 `pnpm check` 全绿。
 
+怎么起步、提交与 PR 的纪律、文档同步要求 → [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 本仓的约定写在 [AGENTS.md](AGENTS.md)：改动要同步文档网络，
 文档改动后跑一次链接校验（命令见该文件）。
 
