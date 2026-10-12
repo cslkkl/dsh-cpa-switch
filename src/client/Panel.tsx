@@ -241,17 +241,18 @@ export function Panel(props: PanelProps): ReactNode {
   }
 
   /**
-   * 「重新检测」：状态与环境一起重读。
+   * 「重新检测」：状态、环境与**渠道插件版本**一起重读。
    *
-   * 提示块上那个按钮用它。两处都要读 —— 端口占用与代际不符都可能在
-   * 用户去处理（停掉外部实例、换掉 exe）之后变好，只看一处会显示半新半旧的结论。
+   * 提示块上那个按钮用它。三处都要读 —— 端口占用、代际不符、以及「上游发了新版」
+   * 都可能在用户去处理（停掉外部实例、换掉 exe）之后变好，只看一处会显示半新半旧的结论。
    */
   const recheck = useCallback(async (): Promise<void> => {
     await Promise.all([
       statusResource.reload({ force: true }),
       setupResource.reload({ force: true }),
+      updateResource.reload({ force: true }),
     ])
-  }, [statusResource, setupResource])
+  }, [statusResource, setupResource, updateResource])
 
   const status = statusResource.data
   /**
@@ -333,12 +334,31 @@ export function Panel(props: PanelProps): ReactNode {
        * ⚠️ 状态条那一栏也要**同时**看到 CPA 是否被停掉（更新前会停），
        * 所以两块的相邻关系是有意的。
        */}
+      {/*
+       * 渠道插件版本那一行。
+       *
+       * 只在**环境已就绪**时出现：环境还缺东西时这一行没有意义 —— 那条路由
+       * 「一键准备环境」负责，它会装上游当前的版本。
+       *
+       * 为什么放在状态条下面而不是「环境准备」块里：后者只在**缺东西**时渲染
+       * （`ok !== true`），而更新恰恰是「东西都齐了、但想换一批」的场景。
+       *
+       * ⚠️ 状态条那一栏也要**同时**看到 CPA 是否被停掉（更新前会停），
+       * 所以两块的相邻关系是有意的。
+       *
+       * ⚠️ **复用 `.status` 的设计语言**（三级色 + gap 8 + 无左边框）：它和上面那条
+       * 是同一类东西 —— 都是「读数」，不是提示块。自造一套 `.updateRow` 会让同一屏
+       * 出现两种读数排版（2026-10-12 实机截图）。
+       *
+       * ⚠️ **「已是最新」不给按钮**（`action === 'none'`）：陈述句不需要动作，
+       * 而原先挂的那个「重新检测」与提示块上同名按钮做的是两件不同的事，用户没法分辨。
+       */}
       {setupReady && update.line !== '' && (
-        <div className={css.updateRow}>
-          <span className={css.updateText}>{update.line}</span>
+        <div className={css.status}>
+          <span className={css.statusText}>{update.line}</span>
           {update.action === 'update' && (
             <Button
-              variant="primary"
+              variant="outline"
               size="sm"
               disabled={updateAction?.phase === 'working'}
               onClick={() => void updatePlugins()}
@@ -346,14 +366,14 @@ export function Panel(props: PanelProps): ReactNode {
               {t('pluginUpdateRun')}
             </Button>
           )}
-          {update.action === 'recheck' && (
+          {update.action === 'retry' && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               disabled={updateAction?.phase === 'working'}
               onClick={() => void updateResource.reload({ force: true })}
             >
-              {t('pluginUpdateRecheck')}
+              {t('pluginUpdateRetry')}
             </Button>
           )}
         </div>

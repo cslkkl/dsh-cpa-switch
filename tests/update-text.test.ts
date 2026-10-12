@@ -30,7 +30,7 @@ describe('版本一行的判定', () => {
     expect(view.line).not.toContain('已是最新')
   })
 
-  it('记过且与上游相同 → 已是最新，只给「重新检测」', () => {
+  it('⚠️ 已是最新时**不给按钮**（陈述句不需要动作，也避免与提示块那个同名按钮撞车）', () => {
     const info: PluginUpdateInfo = {
       ok: true,
       installed: { tag: 'v0.8.66' },
@@ -39,7 +39,9 @@ describe('版本一行的判定', () => {
     }
     const view = updateView(info, t)
     expect(view.line).toContain('已是最新')
-    expect(view.action).toBe('recheck')
+    // 2026-10-12 实机：这一行原本挂「重新检测」，而同屏提示块上也有一个同名按钮，
+    // 两者做的是**不同的事**（这里重查上游版本、那里重读 status+setup）—— 用户没法分辨。
+    expect(view.action).toBe('none')
   })
 
   it('记过且不同 → 两个版本号都给出来', () => {
@@ -59,7 +61,8 @@ describe('版本一行的判定', () => {
     const view = updateView({ ok: false, error: 'release 查询失败：断网' }, t)
     expect(view.line).toContain('查不到')
     expect(view.line).not.toContain('已是最新')
-    expect(view.action).toBe('recheck')
+    // 是「重试」不是「重新检测」：后者是提示块上那个按钮的词，做的事不同
+    expect(view.action).toBe('retry')
   })
 
   it('响应认不出（没有 upstream tag）时保持沉默，不编结论', () => {

@@ -39,7 +39,7 @@ export interface PluginUpdateInfo {
 }
 
 /** 这一行该给用户什么动作。 */
-export type UpdateAction = 'update' | 'recheck' | 'none'
+export type UpdateAction = 'update' | 'retry' | 'none'
 
 /** 一行的内容与动作。 */
 export interface UpdateView {
@@ -51,16 +51,22 @@ export interface UpdateView {
  * 判定该说什么、给哪个按钮。
  *
  * - 什么都不知道（还没读到 / 响应认不出）→ 不说话、不给按钮；
- * - 记过版本且与上游相同 → 「已是最新」+「重新检测」；
- * - 记过版本且不同，或**根本没记过** → 报出来 +「更新」（两种情况都值得给按钮：
- *   后者虽然不知道差多少，但确实该拉一份上游当前的）。
+ * - 记过版本且与上游相同 → **只说「已是最新」，不给按钮**；
+ * - 记过版本且不同，或**根本没记过** → 报出来 +「更新」；
+ * - 查不到上游 → 报出来 +「重试」（这一格的「重试」不能与提示块的
+ *   「重新检测」共用措辞，见下）。
+ *
+ * ⚠️ **「已是最新」不给按钮是有意的**（2026-10-12 实机截图）：那一行旁边原本挂
+ * 「重新检测」，而同一屏的提示块上也有一个「重新检测」—— 两个同名按钮做的是
+ * **两件不同的事**（这个只重查上游版本，那个重读 `/status` + `/setup`），
+ * 用户没法分辨。陈述句本来也不需要动作，去掉最省事。
  */
 export function updateView(info: PluginUpdateInfo | undefined, t: Translate): UpdateView {
   if (info === undefined) return { line: '', action: 'none' }
   if (info.ok === false) {
     return {
       line: t('pluginUpdateCheckFailedWith', { reason: info.error ?? '' }),
-      action: 'recheck',
+      action: 'retry',
     }
   }
 
@@ -72,7 +78,7 @@ export function updateView(info: PluginUpdateInfo | undefined, t: Translate): Up
     return { line: t('pluginUpdateUnknown', { latest }), action: 'update' }
   }
   if (info.hasUpdate !== true) {
-    return { line: t('pluginUpdateCurrent', { tag: installed }), action: 'recheck' }
+    return { line: t('pluginUpdateCurrent', { tag: installed }), action: 'none' }
   }
   return { line: t('pluginUpdateAvailable', { installed, latest }), action: 'update' }
 }
