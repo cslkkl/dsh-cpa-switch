@@ -46,14 +46,29 @@ interface SlotsService {
   register: (options: Record<string, unknown>, component: (seat: SlotSeat) => ReactNode) => void
 }
 
+/** `ctx.locale` 的最小面。 */
+interface LocaleService {
+  /**
+   * 注册字典。
+   *
+   * ⚠️ **返回注销函数**（宿主 `dsh-client-locale` 的实现），必须交还给 effect ——
+   * 见 {@link apply} 里那段说明。
+   */
+  register: (ns: string, dictionaries: Record<string, unknown>) => (() => void) | void
+  bind: (ns: string) => (key: LocaleKey) => string
+}
+
 /** 浏览器半边上下文。 */
 interface ClientContext {
   readonly slots: SlotsService
-  readonly locale: {
-    register: (ns: string, dictionaries: Record<string, unknown>) => void
-    bind: (ns: string) => (key: LocaleKey) => string
-  }
-  readonly effect: (callback: () => void, label: string) => void
+  readonly locale: LocaleService
+  /**
+   * 挂一次副作用；**回调的返回值是它的清理函数**。
+   *
+   * ⚠️ 这个返回值的类型不能省成 `void`：漏掉 disposer 会让重载路径出真问题
+   * （见 {@link apply}），而类型省掉之后那种写法照样编译通过。
+   */
+  readonly effect: (callback: () => void | (() => void), label: string) => void
   readonly inject: (deps: string[], callback: (scope: ClientContext) => void) => void
 }
 
@@ -74,9 +89,21 @@ export const inject = ['slots', 'locale']
  * **不要**自己去找全局的 require：宿主的 `require` 是工厂参数，不是全局。
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => {
-    ctx.locale.register(NS, { zh, en })
-  }, 'cpa-panel: dictionaries')
+  /**
+   * 文案字典。
+   *
+   * ⚠️ **必须把 `locale.register()` 的返回值（注销函数）交还给 effect**（2026-10-12 实踩）。
+   *
+   * profile 的 `patchReload: "live"` 意味着**每次设置写入**都会
+   * dispose + 重建 fiber，effect 因而重跑；而宿主 `locale.register` 对
+   * **同一命名空间的同一 locale 只允许注册一次**（`dsh-client-locale`：
+   * `already has locale "${locale}"`，命中即抛）。
+   *
+   * 丢了 disposer 的后果**不是「多一份字典」**，而是第二次注册直接抛异常 ⇒
+   * `apply()` 失败 ⇒ **整个插件挂不上**，设置页那条显示
+   * 「本页面的插件未能完成同步」。判据 `tests/client-apply.test.ts`。
+   */
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'cpa-panel: dictionaries')
 
   /**
    * 插件自己的面板，挂在组合包页面**描述与行之间**（即「包含的组件」上方）。

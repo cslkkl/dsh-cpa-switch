@@ -11,6 +11,11 @@ client/ 特有约束：
 - **不得新增会被打包的外部依赖**：`react` 与 primitives 由宿主注入，
   新增外部包要先加进 `tsdown.config.ts` 的 `CLIENT_EXTERNALS`，否则会被**内联**（见架构说明）。
 - **`inject` 导出不能删**：少了它插件挂不上，而且**不报错、只是不出现**。
+- ⚠️ **`ctx.effect` 的回调必须交还它注册出来的 disposer**（2026-10-12 实踩）：
+  profile 是 `patchReload: "live"`，**每次设置写入**都会 dispose + 重建 fiber、effect 随之重跑；
+  而宿主 `locale.register` 对**同一命名空间的同一 locale 只允许一次** ——
+  丢了 disposer 就抛 `already has locale "zh"`，于是 `apply()` 失败、**整个插件挂不上**
+  （界面上只显示「本页面的插件未能完成同步」）。判据 `tests/client-apply.test.ts`。
 - 文案改动两张表一起改；`en` 的类型是 `Record<LocaleKey, string>`，漏项编译报错。
 - **卡片外观 / 状态色 / 禁用降级的规范在本目录 [README.md](README.md)**，
   不在架构文档 —— 那是模块级约束，改动会撞 `tests/card-slots.test.ts`。
