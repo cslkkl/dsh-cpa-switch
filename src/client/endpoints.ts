@@ -37,6 +37,10 @@ export const paths = {
   start: '/api/v1/cpa/start',
   /** 某渠道的账号 + 余额。 */
   accounts: (plugin: string): string => '/api/v1/cpa/accounts?plugin=' + encodeURIComponent(plugin),
+  /** 某渠道的模型目录（含宿主算好的 `bare`，面板勾选「隐藏」用）。 */
+  models: (plugin: string): string => '/api/v1/cpa/models?plugin=' + encodeURIComponent(plugin),
+  /** 模型可见性：哪些模型进**选择器**（`GET` 读、`POST` 改某渠道的隐藏列表）。 */
+  modelVisibility: '/api/v1/cpa/model-visibility',
   /** 路由策略（`GET` 读、`POST` 写）。 */
   routing: '/api/v1/cpa/routing',
   /** 批量动作（签到 / 任务）。 */
@@ -184,6 +188,28 @@ export function startAuth(plugin: string): Promise<ApiResult> {
 /** 查登录进度。返回 `{ok, status}`，`status === 'wait'` 表示还没完成。 */
 export function authStatus(state: string): Promise<ApiResult> {
   return api(paths.authStatus(state))
+}
+
+/**
+ * 改某个渠道的模型可见性（要隐藏的那批）。
+ *
+ * ⚠️ 写成功后要作废**两个**读：可见性本身（界面用它的值画勾）
+ * 与模型目录（列表里的勾选态由两者共同决定）。漏了后者，用户勾完看到的是
+ * **自己勾的样子**（乐观），而重读一次就跳回去 —— 那正是 F33 要避免的。
+ *
+ * ⚠️ **不作废 `accounts:`**：这个域不碰 CPA 的账号状态，账号数据一个字节没变。
+ */
+export function setModelVisibility(
+  channel: string,
+  hiddenNames: readonly string[],
+): Promise<ApiResult> {
+  return post(paths.modelVisibility, { channel, names: hiddenNames }).then((result) => {
+    if (result.ok) {
+      invalidateReads(cacheKeys.modelVisibility())
+      invalidateReads(cacheKeys.models(channel))
+    }
+    return result
+  })
 }
 
 /**

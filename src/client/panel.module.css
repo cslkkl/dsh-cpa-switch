@@ -112,6 +112,58 @@
   margin-top: 2px;
 }
 
+/*
+ * 「模型」一节（折叠）。
+ *
+ * 用原生 `<details>` 而不是自绘：折叠语义、键盘操作与读屏都自带，
+ * 而这一节是**次要内容**（账号才是主角），不值得为它写一份状态机。
+ */
+.modelSummary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.modelCount {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.modelActions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.modelList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 模型可能几十个 —— 给个上限，别把页面拉得太长 */
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.modelRowLabel {
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- Environment setup block ------------------------------------------- */
 
 /* Read as a distinct region rather than another account card: a 3px leading

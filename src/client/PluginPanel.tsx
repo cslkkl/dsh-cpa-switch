@@ -20,6 +20,7 @@ import { emptyHintOf } from './empty-hint.ts'
 import { paths } from './endpoints.ts'
 import { fmt } from './format.ts'
 import { amountWithUnit, sumCredits } from './meter-text.ts'
+import { ModelVisibility } from './ModelVisibility.tsx'
 import { rememberAccountCount } from './skeleton-hint.ts'
 import { SkeletonCards, SkeletonStatus, SkeletonSummary } from './Skeleton.tsx'
 import { summaryViewOf } from './summary-hint.ts'
@@ -447,6 +448,14 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       {accountsResource.error !== undefined && (
         <div className={css.failed}>{t('loadFailedWith', { reason: accountsResource.error })}</div>
       )}
+
+      {/*
+       * 「模型」一节：勾选哪些模型出现在 **DSH 的模型选择器**里（默认折叠）。
+       *
+       * ⚠️ 位置在账号网格**之后**：账号是这一页的主角，模型是配置性的次要内容；
+       * 放前面会把账号挤到屏幕外。
+       */}
+      <ModelVisibility plugin={plugin} t={t} />
 
       {/*
        * 添加账号的弹窗。

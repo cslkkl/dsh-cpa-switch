@@ -58,4 +58,18 @@ export const cacheKeys = {
    * 键里带状态：状态一换就是另一次读，旧那条自然不会再被取到。
    */
   auth: (state: string): string => `auth:${state}`,
+  /**
+   * 宿主 `GET /models?plugin=`（该渠道的模型目录，含宿主算好的裸名）。
+   *
+   * ⚠️ 带渠道：四个渠道各有自己的目录，键不带渠道会让它们**互相覆盖**
+   * （切页签看到上一个渠道的模型列表）。
+   */
+  models: (plugin: string): string => `models:${plugin}`,
+  /**
+   * 宿主 `GET /model-visibility`（哪些模型进**选择器**）。
+   *
+   * ⚠️ **不带渠道**：那张表是一整张（按渠道分组存），一次读就够 ——
+   * 键带渠道会变成读四次同一份数据。
+   */
+  modelVisibility: (): string => 'model-visibility',
 } as const
