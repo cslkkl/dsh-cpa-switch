@@ -640,3 +640,91 @@ export function updateAccountIntent(mutate: (current: AccountIntent) => AccountI
   void _dropped
   writeJson(accountIntentPath(), { ...rest, source: 'panel' })
 }
+
+/* ── 面板「显示设置」 ─────────────────────────────────────────────────── */
+
+/**
+ * 显示偏好的落地文件。与签到账本、账号意图同属 `cpa-panel-*.json` 一族。
+ *
+ * 为什么是**独立文件**而不是加到账号意图里：两者生命周期不同 ——
+ * 意图决定「账号参不参与调度」（改错了会真的影响出号），显示偏好只决定
+ * 「面板画不画它」（改错了顶多看不见）。合成一份会让「读坏一个字段」
+ * 牵连另一个，而这两件事的后果差着量级。
+ */
+function displayPrefsPath(): string {
+  return join(storagesDir(), 'cpa-panel-display.json')
+}
+
+/**
+ * 面板显示偏好（隐藏哪些渠道、哪些号）。
+ *
+ * 键是**渠道 id** 与**凭据文件名**（`authId`），与账号意图同一种键 ——
+ * 后者已在 `auth-files` 的 `name` 上逐字对应验证过，不必再发明一套。
+ */
+export interface DisplayPrefs {
+  /** 隐藏的渠道 id（托管渠道那四个里的）。 */
+  hiddenChannels: string[]
+  /** 隐藏的号：凭据文件名。 */
+  hiddenAccounts: string[]
+  /** 写入时间，仅作展示。 */
+  updatedAt?: string
+}
+
+/** 空偏好。 */
+function emptyDisplayPrefs(): DisplayPrefs {
+  return { hiddenChannels: [], hiddenAccounts: [] }
+}
+
+/**
+ * 把一格数组**洗干净**：只留非空字符串、去重、保持顺序。
+ *
+ * ⚠️ **坏格子只丢那一格，不作废整份**：这份文件决定「用户看到哪些号」，
+ * 因为一个脏值把全部选择清空，用户会看到「我藏好的号又都冒出来了」，
+ * 而磁盘上看起来只是多了一个空串。
+ */
+function cleanKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const key = item.trim()
+    if (key === '' || out.includes(key)) continue
+    out.push(key)
+  }
+  return out
+}
+
+/**
+ * 读显示偏好。
+ *
+ * ⚠️ **只认 `source: 'panel'` 的文件**：与 {@link readAccountIntent} 同一条纪律 ——
+ * 这文件决定用户看到什么，来源不明的一律当空，而不是拿它去覆盖用户的选择。
+ *
+ * 读不到 / 坏掉 / 来源不对 ⇒ **空偏好**（什么都没藏），语义最保守：
+ * 宁可多显示（用户看得见全部），也不要凭空藏掉东西。
+ */
+export function readDisplayPrefs(): DisplayPrefs {
+  const parsed = readJson<Record<string, unknown>>(displayPrefsPath())
+  if (parsed === undefined) return emptyDisplayPrefs()
+  if (parsed['source'] !== 'panel') return emptyDisplayPrefs()
+  return {
+    hiddenChannels: cleanKeys(parsed['hiddenChannels']),
+    hiddenAccounts: cleanKeys(parsed['hiddenAccounts']),
+  }
+}
+
+/**
+ * **改**显示偏好：读当下的内容 → 交给 `mutate` → 写回（整段同步，无 `await`）。
+ *
+ * 与 `updateAccountIntent` 同样的理由：传**函数**而不是算好的值，
+ * 这样「值只能来自更早的某次读」，两个字段不会互相盖掉。
+ */
+export function updateDisplayPrefs(mutate: (current: DisplayPrefs) => DisplayPrefs): void {
+  const next = mutate(readDisplayPrefs())
+  writeJson(displayPrefsPath(), {
+    hiddenChannels: cleanKeys(next.hiddenChannels),
+    hiddenAccounts: cleanKeys(next.hiddenAccounts),
+    updatedAt: new Date().toISOString(),
+    source: 'panel',
+  })
+}
