@@ -25,7 +25,7 @@ import {
   hiddenInChannelOf,
   hiddenNamesOf,
   modelRowsOf,
-  modelsResultOf,
+  candidateRowsOf,
   sectionStateOf,
   type ModelRow,
   type ModelSectionState,
@@ -66,12 +66,17 @@ export interface ModelVisibilityState {
  */
 export function useModelVisibility(plugin: string): ModelVisibilityState {
   /**
-   * ⚠️ 两个读**分开**：模型清单是**渠道级**的（切渠道就是另一份），
+   * ⚠️ 两个读**分开**：候选行是**渠道级**的（切渠道就是另一份），
    * 而隐藏表是**全局一张**。合起来读会让每次切渠道都重读那张全局表。
+   *
+   * ⚠️ **候选行的来源只能是 `/model-rows`**（推送侧同一份数据、同一个键）——
+   * 2026-10-13 实踩：原先读 `/models`（渠道目录）时，目录的名字
+   * （`glm-5.2`）与推送行的键（`Trae/trae/glm-5.2`）**一个都对不上**，
+   * 用户勾了 18 个、选择器里 9 行一个没少，而所有请求都是 200。
    */
-  const models = useResource<unknown>({
-    key: cacheKeys.models(plugin),
-    path: paths.models(plugin),
+  const modelRows = useResource<unknown>({
+    key: cacheKeys.modelRows(plugin),
+    path: paths.modelRows(plugin),
     select: (result) => result,
   })
   const visibility = useResource<unknown>({
@@ -85,7 +90,7 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
     () => hiddenInChannelOf(visibility.data, plugin),
     [visibility.data, plugin],
   )
-  const choices = useMemo(() => modelsResultOf(models.data), [models.data])
+  const choices = useMemo(() => candidateRowsOf(modelRows.data), [modelRows.data])
   const rows = useMemo(() => modelRowsOf(choices, hidden), [choices, hidden])
 
   /**
@@ -171,9 +176,9 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
       setDraft(undefined)
       setIsOpen(false)
       visibility.reload()
-      models.reload()
+      modelRows.reload()
     })
-  }, [draft, hidden, plugin, visibility, models])
+  }, [draft, hidden, plugin, visibility, modelRows])
 
   /**
    * 弹窗该画成什么样。
@@ -182,15 +187,15 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
    * 把「读不到」说成「这个渠道还没有模型」是最容易把人引错的一句话。
    */
   const state = sectionStateOf({
-    loading: models.loading,
-    error: models.error,
+    loading: modelRows.loading,
+    error: modelRows.error,
     count: rows.length,
   })
 
   return {
     rows: draftRows,
     state,
-    error: models.error,
+    error: modelRows.error,
     saving,
     saveError,
     isOpen,

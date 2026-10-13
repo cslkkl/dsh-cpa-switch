@@ -37,7 +37,16 @@ export const paths = {
   start: '/api/v1/cpa/start',
   /** 某渠道的账号 + 余额。 */
   accounts: (plugin: string): string => '/api/v1/cpa/accounts?plugin=' + encodeURIComponent(plugin),
-  /** 某渠道的模型目录（含宿主算好的 `bare`，面板勾选「隐藏」用）。 */
+  /**
+   * 某渠道的**候选行** —— 面板勾选清单的来源（**与推送侧同一个键**）。
+   *
+   * ⚠️ **别改回 `models`（渠道目录）**：那个集合与推给宿主的行**对不上**，
+   * 勾选会静默失效（2026-10-13 实踩：目录报 20 个名字、推送只有 9 行，
+   * 用户勾了 18 个一个都没命中，而所有请求都是 200）。
+   */
+  modelRows: (plugin: string): string =>
+    '/api/v1/cpa/model-rows?plugin=' + encodeURIComponent(plugin),
+  /** 某渠道的模型目录（渠道自己的名字，**只用于展示**，不做勾选源）。 */
   models: (plugin: string): string => '/api/v1/cpa/models?plugin=' + encodeURIComponent(plugin),
   /** 模型可见性：哪些模型进**选择器**（`GET` 读、`POST` 改某渠道的隐藏列表）。 */
   modelVisibility: '/api/v1/cpa/model-visibility',

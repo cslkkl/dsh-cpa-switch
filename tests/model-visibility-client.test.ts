@@ -6,7 +6,7 @@ import {
   hiddenInChannelOf,
   hiddenNamesOf,
   modelRowsOf,
-  modelsResultOf,
+  candidateRowsOf,
   sectionStateOf,
   type ModelChoice,
 } from '../src/client/model-visibility.ts'
@@ -96,38 +96,32 @@ describe('模型可见性 · 判定', () => {
 /**
  * ⚠️⚠️ **2026-10-13 真机事故的回归判据**（维护者：「我怎么没看见可以勾选模型啊」）。
  *
- * 根因：传输层把响应体**摊平**在结果对象上（`{ok: true, groups: [...]}`），而
- * `ApiResult` 带索引签名 —— 于是 `select: (result) => result.data` **能编译通过、
- * 却永远是 `undefined`**。表现是「模型这一节根本不出现」：所有请求都是 200、
- * 零报错、零日志，我自己的守卫还把这个状态**画成了空**。
+ * 根因：传输层把响应体**摊平**在结果对象上，而 `ApiResult` 带索引签名 ——
+ * 于是 `select: (result) => result.data` **能编译通过、却永远是 `undefined`**。
+ * 表现是「模型这一块根本不出现」：所有请求都是 200、零报错、零日志，
+ * 我自己的守卫还把这个状态**画成了空**。
  *
  * 这一组守三件事，任一条都能独立拦住那次事故：
- * 1. 取数据必须按**扁平的线上形状**（`modelsResultOf` 收整个响应）；
+ * 1. 取数据必须按**扁平的线上形状**（`candidateRowsOf` 收整个响应）；
  * 2. 钩子里**不许**出现 `result.data`（源码断言 —— 就是这一行让功能消失的）；
  * 3. 界面**不许**在读不到时 `return null`（入口必须永远在，状态在弹窗里说）。
  */
 describe('模型可见性 · 真机事故回归', () => {
   /**
-   * 线上真实形状（2026-10-13 从浏览器抓的 `/api/v1/cpa/models` 响应，
-   * 这里只留两条，形状一字不改：顶层 `ok` + `groups[].models[].{id,name?,bare}`）。
+   * 线上真实形状（2026-10-13 从浏览器抓的 `/api/v1/cpa/model-rows` 响应，
+   * 形状一字不改：顶层 `ok` + `rows[].{id,bare,label}`）。
    */
   const wire = {
     ok: true,
-    groups: [
-      {
-        label: 'CN（copilot.tencent.com）',
-        count: 2,
-        models: [
-          { id: 'glm-5.3', bare: 'glm-5.3' },
-          { id: 'hy4-preview', name: 'Hy4 preview', bare: 'hy4-preview' },
-        ],
-      },
-      { label: 'Global（workbuddy.ai）', count: 0, models: [] },
+    channel: 'workbuddy',
+    rows: [
+      { id: 'wb/glm-5.3', bare: 'glm-5.3', label: 'WorkBuddy · glm-5.3' },
+      { id: 'hy4-preview', bare: 'hy4-preview', label: 'WorkBuddy · hy4-preview' },
     ],
   }
 
-  it('按线上扁平形状取模型（顶层就是 ok + groups）', () => {
-    expect(modelsResultOf(wire).map((model) => model.bare)).toEqual(['glm-5.3', 'hy4-preview'])
+  it('按线上扁平形状取候选行（顶层就是 ok + rows）', () => {
+    expect(candidateRowsOf(wire).map((row) => row.bare)).toEqual(['glm-5.3', 'hy4-preview'])
   })
 
   /**
@@ -136,22 +130,22 @@ describe('模型可见性 · 真机事故回归', () => {
    * 断言在这里是为了让「空」这件事有出处，而不是靠人记得。
    */
   it('⚠️ 传 `{data: …}`（错的取法）读到空 —— 这就是当初静默失效的形态', () => {
-    expect(modelsResultOf({ data: wire })).toEqual([])
+    expect(candidateRowsOf({ data: wire })).toEqual([])
   })
 
-  it('缺 bare 的行**跳过**（没有裸名就没法跟隐藏表对齐，画出来是假象）', () => {
+  it('缺 bare / 缺 id 的行**跳过**（提交的键就是 bare，缺了就是对不上）', () => {
     expect(
-      modelsResultOf({
+      candidateRowsOf({
         ok: true,
-        groups: [{ models: [{ id: 'x', bare: 'x' }, { id: 'y' }, { bare: 'z' }] }],
-      }).map((model) => model.bare),
-    ).toEqual(['x'])
+        rows: [{ id: 'x', bare: 'x' }, { id: 'y' }, { bare: 'z' }, { id: 'w', bare: 'w' }],
+      }).map((row) => row.bare),
+    ).toEqual(['x', 'w'])
   })
 
   it('形状坏掉（null / 空 / 非数组）返回空，不抛', () => {
-    for (const bad of [undefined, null, {}, { groups: null }, { groups: 'x' }, { groups: [{}] }]) {
-      expect(() => modelsResultOf(bad)).not.toThrow()
-      expect(modelsResultOf(bad)).toEqual([])
+    for (const bad of [undefined, null, {}, { rows: null }, { rows: 'x' }, { rows: [{}] }]) {
+      expect(() => candidateRowsOf(bad)).not.toThrow()
+      expect(candidateRowsOf(bad)).toEqual([])
     }
   })
 

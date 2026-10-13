@@ -59,7 +59,18 @@ export const cacheKeys = {
    */
   auth: (state: string): string => `auth:${state}`,
   /**
-   * 宿主 `GET /models?plugin=`（该渠道的模型目录，含宿主算好的裸名）。
+   * 宿主 `GET /model-rows?plugin=`（该渠道**会被推送的候选行**）。
+   *
+   * ⚠️ 这是**勾选清单的唯一来源** —— 它与推送侧用同一个键，所以勾了必定命中。
+   * 别拿 `models:`（渠道目录）当勾选源：两边对不上时勾选**静默失效**。
+   *
+   * ⚠️ 带渠道：清单是渠道级的，键不带渠道会让它们互相覆盖（切页签看到上一个渠道的行）。
+   */
+  modelRows: (plugin: string): string => `model-rows:${plugin}`,
+  /**
+   * 宿主 `GET /models?plugin=`（该渠道的**模型目录**，渠道自己的名字）。
+   *
+   * ⚠️ **只用于展示，不做勾选源**（见 `modelRows`）。
    *
    * ⚠️ 带渠道：四个渠道各有自己的目录，键不带渠道会让它们**互相覆盖**
    * （切页签看到上一个渠道的模型列表）。
