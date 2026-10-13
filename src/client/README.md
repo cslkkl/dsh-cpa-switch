@@ -105,7 +105,13 @@
     勾选整体颠倒，而列表看起来「真的变了」（用户以为功能生效了）
   - ⚠️ **提交的是裸名**（宿主按裸名落盘）：行 id 带别名（`wb/glm-5.3`），
     提交行 id 会失配 —— 用户勾了隐藏但选择器里照旧有它，且零报错。
-    裸名由**宿主**算好（`/models` 的 `bare`），因为浏览器半边不许引宿主模块
+    裸名由**宿主**算好，因为浏览器半边不许引宿主模块
+  - ⚠️⚠️ **勾选清单只能读 `/model-rows`（候选行），不许读 `/models`（渠道目录）**
+    （2026-10-13 实踩）：目录报的是渠道自己的名字（`glm-5.2`），而推给宿主的行叫
+    `Trae/trae/glm-5.2` —— **一个键都对不上**。维护者勾了 18 个、选择器里 9 行
+    一个没少，而所有请求都是 200、零报错。候选行来自**推送侧同一份数据**
+    （`RouteRefresher.candidatesOf` → `/api/v1/cpa/model-rows`），键逐字相同，
+    所以勾了必定命中。`models:` 那个读键保留但**只用于展示**
   - ⚠️ **入口按钮永远在**（哪怕读不到 / 读到 0 个）：状态在弹窗里说
     （加载中 / 读失败 + 原因 / 还没有模型）。第一版写成「读不到就 `return null`」，
     于是**任何接线错误都长成「这个功能不存在」**（2026-10-13 真机实踩，
@@ -458,7 +464,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [transport.ts](transport.ts)                       | 一次请求 + 异常**一律收敛成 `{ ok: false, error }`、不抛** —— 调用方只判 `ok`                                                                                                                                                                                                                                                                                                                                                                         |
 | [cache-keys.ts](cache-keys.ts)                     | 浏览器半边**读缓存键的唯一来源**：键身兼两职（读用它取键、写后当失效前缀）。⚠️ **新增读键必须加到这里**；它与宿主 `gateway.cacheKeys` 是**两套独立缓存**，同名只是巧，**不要互相 import**。判据 `tests/client-cache-keys.test.ts` 拦住别处手写的 `key: '…'`                                                                                                                                                                                           |
 | [read-cache.ts](read-cache.ts)                     | 读缓存（新鲜 / 陈旧两档 + **按前缀作废**）与可订阅 store；语义改动同步 [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                                                                                                                                                                                                          |
-| [endpoints.ts](endpoints.ts)                       | `/api/v1/cpa/*` 的**路径唯一来源**（`paths`）；**写函数自己失效缓存**。⚠️ 前缀必须对上**本半边真的有读者**的那个读键（**不是**宿主 `cacheKeys` 的名字）；抄错不报错，只是那次作废**匹配不到任何条目**（空操作）。⚠️ 写成功后界面值**取回读**（F33）：作废缓存本身不会让界面更新。判据 `tests/client-cache-keys.test.ts`                                                                                                                               |
+| [endpoints.ts](endpoints.ts)                       | `/api/v1/cpa/*` 的**路径唯一来源**（`paths`）；**写函数自己失效缓存**。⚠️ 前缀必须对上**本半边真的有读者**的那个读键（**不是**宿主 `cacheKeys` 的名字）；抄错不报错，只是那次作废**匹配不到任何条目**（空操作）。⚠️ 写成功后界面值**取回读**（F33）：作废缓存本身不会让界面更新。⚠️ **`modelRows`（候选行）≠ `models`（渠道目录）**：勾选清单只能用前者 —— 后者的名字与推送行的键对不上，勾了会静默失效。判据 `tests/client-cache-keys.test.ts`       |
 | [report.tsx](report.tsx)                           | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](../../docs/ARCHITECTURE.md)）                                                                                                                                                                                                                                                                                                                                                |
 | [model-visibility.ts](model-visibility.ts)         | 模型可见性的**判定**（不含 JSX）：文件存「隐藏的」、界面勾「显示的」，换算只有一处；**提交裸名不是行 id**（行 id 带别名会失配）。同步 `tests/model-visibility-client.test.ts`                                                                                                                                                                                                                                                                         |
 | [plan-text.ts](plan-text.ts)                       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**；**中文档位名统一带「版」**（单写「免费」会被读成「这个号免费」）；`套餐：` 前缀不在这里加（那是 [credit-text.ts](credit-text.ts) 的事）                                                                                                                                                                                                                                                         |
