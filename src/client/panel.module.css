@@ -113,25 +113,11 @@
 }
 
 /*
- * 「模型」一节（折叠）。
+ * 「模型」弹窗里的勾选清单。
  *
- * 用原生 `<details>` 而不是自绘：折叠语义、键盘操作与读屏都自带，
- * 而这一节是**次要内容**（账号才是主角），不值得为它写一份状态机。
+ * 清单可能几十行，给个高度上限并自己滚 —— 否则弹窗会被撑得比屏幕还高，
+ * 底部的「保存」按钮就点不到了。
  */
-.modelSummary {
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.modelCount {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--dsw-alias-label-tertiary);
-}
 
 .modelActions {
   display: flex;

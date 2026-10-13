@@ -350,6 +350,14 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
           </Button>
         )}
         {/*
+         * 「模型」入口（2026-10-13 维护者指定落点：工具栏上这一块空地）。
+         *
+         * ⚠️ **与上面那几个动作同层** —— 用户要的就是「每个渠道那儿点一下就选」，
+         * 收在账号网格下面展开的 `<details>` 里他会找不到（第一版就是这么做的）。
+         * 勾选清单在它自己的弹窗里，见 `ModelVisibility.tsx`。
+         */}
+        <ModelVisibility plugin={plugin} t={t} />
+        {/*
          * 自动签到开关。
          *
          * ⚠️ `Switch` 的 `label` 是**无障碍名，不显示在界面上** —— 只给一个裸开关，
@@ -448,14 +456,6 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       {accountsResource.error !== undefined && (
         <div className={css.failed}>{t('loadFailedWith', { reason: accountsResource.error })}</div>
       )}
-
-      {/*
-       * 「模型」一节：勾选哪些模型出现在 **DSH 的模型选择器**里（默认折叠）。
-       *
-       * ⚠️ 位置在账号网格**之后**：账号是这一页的主角，模型是配置性的次要内容；
-       * 放前面会把账号挤到屏幕外。
-       */}
-      <ModelVisibility plugin={plugin} t={t} />
 
       {/*
        * 添加账号的弹窗。

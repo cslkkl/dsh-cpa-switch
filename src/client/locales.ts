@@ -183,13 +183,13 @@ export const zh = {
   creditsPartlyUnreadable: '有 {count} 个账号的额度读不到',
   creditsPartlyUnreadableHint: '上面的合计不含它们；点「{action}」可重试',
   /**
-   * 「模型」一节：勾选哪些模型出现在 **DSH 的模型选择器**里（2026-10-13）。
+   * 「模型」入口（工具栏按钮 + 弹窗）：勾选哪些模型出现在 **DSH 的模型选择器**里
+   * （2026-10-13）。
    *
    * ⚠️ `modelsHint` 是本功能**唯一会造成误解**的地方：用户会以为「不勾 = 把模型删了 /
    * 不能用了」，其实只是不在选择器里出现 —— 模型在 CPA 那边照常在、接口也照常能调。
    */
   modelsTitle: '模型',
-  modelsShown: '{shown}/{total} 个出现在选择器里',
   modelsHint:
     '这里只决定**对话界面的模型下拉里出现哪些**。不勾的模型照常能调通，只是不在下拉里 —— 点「保存」后立即生效。',
   modelsEmpty: '这个渠道还没有可用的模型（先在 CPA 里加一个号）。',
@@ -383,7 +383,6 @@ export const en: Record<LocaleKey, string> = {
   creditsPartlyUnreadable: 'Credits unavailable for {count} account(s)',
   creditsPartlyUnreadableHint: 'The totals above exclude them; click "{action}" to retry',
   modelsTitle: 'Models',
-  modelsShown: '{shown}/{total} shown in the picker',
   modelsHint:
     'This only decides **which models appear in the chat model picker**. Unchecked models still work through the API — they are just hidden from the dropdown. Takes effect after you click Save.',
   modelsEmpty: 'This channel has no models yet (add an account in CPA first).',

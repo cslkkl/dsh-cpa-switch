@@ -36,13 +36,7 @@ import { useResource } from './use-resource.ts'
 export interface ModelVisibilityState {
   /** 界面要画的行（含勾选态）。 */
   readonly rows: readonly ModelRow[]
-  /**
-   * 这一块该画成什么样（**永远**有值）。
-   *
-   * ⚠️ 原来是 `loading` + `error` 两个布尔给界面自己判，而界面判错的方式是
-   * 「干脆什么都不画」（见 `ModelVisibility.tsx` 的注释）—— 判定收在这里，
-   * 界面只负责把四种状态各画成一句话。
-   */
+  /** 弹窗该画成什么样（**永远**有值 —— 入口不许因为读不到而消失）。 */
   readonly state: ModelSectionState
   /** 清单读失败的原因（`undefined` = 没失败）。 */
   readonly error: string | undefined
@@ -50,10 +44,12 @@ export interface ModelVisibilityState {
   readonly saving: boolean
   /** 保存失败的说明。 */
   readonly saveError: string | undefined
+  /** 弹窗开着。 */
+  readonly isOpen: boolean
+  readonly open: () => void
+  readonly close: () => void
   readonly toggle: (bare: string, shown: boolean) => void
   readonly toggleAll: (shown: boolean) => void
-  /** 有未保存的改动（界面据此决定是否高亮「保存」）。 */
-  readonly dirty: boolean
   readonly save: () => void
 }
 
@@ -63,7 +59,7 @@ export interface ModelVisibilityState {
  * ⚠️ **`select` 取的是整个响应对象，不是 `result.data`**（2026-10-13 实踩）：
  * 传输层把响应体**摊平**在结果对象上（`{ok: true, groups: [...]}`）。`ApiResult`
  * 带索引签名，所以 `result.data` 能编译通过、却**永远是 `undefined`** ——
- * 表现是「这个功能整块不存在」，而所有请求都是 200、零报错零日志。
+ * 表现是「模型这一节根本不出现」，而所有请求都是 200、零报错零日志。
  * 判据：`tests/model-visibility-client.test.ts` 里那条源码断言。
  *
  * @param plugin - 渠道 id。
@@ -95,24 +91,48 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
   /**
    * 草稿：用户勾了但**还没保存**的那份（存的是「要隐藏的裸名」）。
    *
+   * `undefined` = 没有未保存的改动（勾选态就按**读回来**的画）。
+   *
    * ⚠️ **渠道一换就重置**：草稿属于某个渠道的清单，切走再切回来时
    * 拿旧草稿去渲染会让用户看到「上一个渠道的勾选」—— 而那些模型名在新渠道里
    * 大多不存在（表现为勾选全空）。这也是为什么 `plugin` 在依赖里。
    */
   const [draft, setDraft] = useState<string[] | undefined>(undefined)
+  const [isOpen, setIsOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     setDraft(undefined)
     setSaveError(undefined)
+    setIsOpen(false)
   }, [plugin])
 
-  /** 以读者为准的行：草稿存在时按草稿覆盖勾选态。 */
+  /** 以草稿为准的行：有未保存的改动时按草稿覆盖勾选态。 */
   const draftRows = useMemo(() => {
     if (draft === undefined) return rows
     return rows.map((row) => ({ ...row, shown: !draft.includes(row.bare) }))
   }, [rows, draft])
+
+  /**
+   * 打开弹窗。
+   *
+   * ⚠️ **每次打开都从「读回来的那份」重新播种草稿** —— 不播种的话，
+   * 上次打开时没保存的勾选会留在草稿里，用户下次点开看到的是「自己上次乱动过的样子」，
+   * 而不是当前真正生效的样子。
+   */
+  const open = useCallback(() => {
+    setDraft(hidden)
+    setSaveError(undefined)
+    setIsOpen(true)
+  }, [hidden])
+
+  const close = useCallback(() => {
+    // 未保存的改动**丢掉**（弹窗的取消语义）：留着会让下次打开时状态对不上
+    setDraft(undefined)
+    setSaveError(undefined)
+    setIsOpen(false)
+  }, [])
 
   const toggle = useCallback(
     (bare: string, shown: boolean) => {
@@ -133,8 +153,6 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
     [rows],
   )
 
-  const dirty = draft !== undefined && [...draft].sort().join() !== [...hidden].sort().join()
-
   const save = useCallback(() => {
     const toHide = draft ?? hidden
     setSaving(true)
@@ -146,33 +164,40 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
         return
       }
       /**
-       * ⚠️ 保存成功后**清掉草稿**、并让两个读自己重来：值以**宿主回读**为准
-       * （F33）。只清草稿而不重读的话，界面会停在「我以为的样子」，
+       * ⚠️ 保存成功后**清掉草稿、关窗**、并让两个读自己重来：值以**宿主回读**
+       * 为准（F33）。只清草稿而不重读的话，界面会停在「我以为的样子」，
        * 而宿主那边可能因为归一化（别名 → 裸名）与提交的不完全一样。
        */
       setDraft(undefined)
+      setIsOpen(false)
       visibility.reload()
       models.reload()
     })
   }, [draft, hidden, plugin, visibility, models])
 
+  /**
+   * 弹窗该画成什么样。
+   *
+   * ⚠️ 判「失败」在判「空」之前（见 `sectionStateOf` 的注释）：
+   * 把「读不到」说成「这个渠道还没有模型」是最容易把人引错的一句话。
+   */
+  const state = sectionStateOf({
+    loading: models.loading,
+    error: models.error,
+    count: rows.length,
+  })
+
   return {
     rows: draftRows,
-    /**
-     * ⚠️ 判「失败」在判「空」之前（见 `sectionStateOf` 的注释）：
-     * 把「读不到」说成「这个渠道还没有模型」是最容易把人引错的一句话。
-     */
-    state: sectionStateOf({
-      loading: models.loading,
-      error: models.error,
-      count: rows.length,
-    }),
+    state,
     error: models.error,
     saving,
     saveError,
+    isOpen,
+    open,
+    close,
     toggle,
     toggleAll,
-    dirty,
     save,
   }
 }
