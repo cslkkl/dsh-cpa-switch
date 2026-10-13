@@ -28,7 +28,7 @@ import { readHiddenModels, updateHiddenModels } from '../state.ts'
 import type { OpsResult } from './result.ts'
 import type { LoggerLike } from '../credentials.ts'
 
-/** 本域的依赖：只有「改完之后要做什么」。 */
+/** 本域的依赖：只要「改完之后要做什么」与「候选行从哪来」。 */
 export interface ModelVisibilityDeps {
   /**
    * 清单需要重推（写成功之后调）。
@@ -37,8 +37,29 @@ export interface ModelVisibilityDeps {
    * 而那与「勾选没保存」在界面上长得一样。
    */
   readonly onChanged?: (() => void) | undefined
+  /**
+   * 某个渠道**会被推送的全部行**（**不含隐藏过滤**）—— 面板勾选清单的来源。
+   *
+   * ## 为什么必须由路由侧给（2026-10-13 实踩）
+   *
+   * 面板原先是拿「渠道插件的模型目录」列清单的，而那个集合与**推给宿主的行**
+   * 不是同一个：trae 实测目录报 20 个裸名（`glm-5.2`、`kimi-k2.6`…），
+   * 而路由侧推的行 id 长成 `trae/glm-5.2` / `Trae/trae/glm-5.2` —— 一个都对不上。
+   * 于是维护者勾了 18 个，选择器里那 9 行**一个都没少**，而且**零报错**。
+   *
+   * 所以这个口子只能接在**推送侧同一份数据**上；本域自己不去读 CPA 猜一遍
+   * （猜出来的东西就是当初那个对不上的清单）。
+   */
+  readonly candidateRows?: ((channel: string) => readonly CandidateRow[]) | undefined
   /** 日志（重推失败要能看见）。 */
   readonly logger?: LoggerLike | undefined
+}
+
+/** 一个候选行（= 路由侧「不隐藏的话会推送」的一行）。 */
+export interface CandidateRow {
+  readonly id: string
+  readonly bare: string
+  readonly label: string
 }
 
 /** 模型可见性域。 */
@@ -46,10 +67,18 @@ export interface ModelVisibilityOps {
   /** 读被隐藏的模型（按渠道分组）。 */
   readonly get: () => OpsResult
   /**
+   * 读某个渠道的**候选行**（面板勾选清单的来源）。
+   *
+   * ⚠️ **空数组 ≠ 这个渠道没有模型**：还没算过一轮（CPA 刚起、读还没成功）时也是空。
+   * 界面要按「还不知道」处理（显示加载中），不要显示成「没有模型」——
+   * 分不清的话，冷启动那一瞬用户会看到一句**假话**。
+   */
+  readonly rows: (channel: unknown) => OpsResult
+  /**
    * 写某个渠道的隐藏列表。
    *
    * @param channel - 渠道 id（必须是托管渠道）。
-   * @param names - 该渠道要隐藏的模型名（面板提交的是渠道报的 id，这里**规范化成裸名**）。
+   * @param names - 该渠道要隐藏的模型名（面板提交的是行裸名，这里仍规范化一次作双保险）。
    */
   readonly set: (channel: unknown, names: unknown) => OpsResult
 }
@@ -68,6 +97,33 @@ export function createModelVisibilityOps(deps: ModelVisibilityDeps = {}): ModelV
   function get(): OpsResult {
     const { hidden } = readHiddenModels()
     return { ok: true, hidden: { ...hidden } }
+  }
+
+  /**
+   * 读候选行。
+   *
+   * ⚠️ **形状与隐藏表分开**（面板要两个都拿到才算得出勾选态）：这个口子只回
+   * 「有哪些行」，不回「藏了哪些」—— 那两个是不同的读（一个来自路由侧算出来的
+   * 清单，一个来自状态文件），合成一个响应会让「谁读了什么」说不清。
+   */
+  function rows(channel: unknown): OpsResult {
+    const id = String(channel ?? '').trim()
+    if (!(CHANNEL_IDS as readonly string[]).includes(id)) {
+      return {
+        ok: false,
+        error: `不认识的渠道：${id === '' ? '(空)' : id}。`,
+        reason: 'unknown-channel',
+      }
+    }
+    return {
+      ok: true,
+      channel: id,
+      rows: (deps.candidateRows?.(id) ?? []).map((row) => ({
+        id: row.id,
+        bare: row.bare,
+        label: row.label,
+      })),
+    }
   }
 
   function set(channel: unknown, names: unknown): OpsResult {
@@ -108,5 +164,5 @@ export function createModelVisibilityOps(deps: ModelVisibilityDeps = {}): ModelV
     return get()
   }
 
-  return { get, set }
+  return { get, rows, set }
 }

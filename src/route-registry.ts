@@ -36,12 +36,11 @@ import {
   ROUTE_PREFIXES,
   channelLabel,
   channelOf,
-  channelOfPrefix,
   channelOrder,
   providerIdOf,
   providerLabelOf,
 } from './channels/registry.ts'
-import { buildAliasTable, type AliasTable } from './model-alias.ts'
+import { aliasFor, buildAliasTable, stripChannelPrefixes, type AliasTable } from './model-alias.ts'
 import { capsOf, reasoningDefaultOf, reasoningEffortsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
 import { readCachedRoutes, writeCachedRoutes } from './state.ts'
@@ -515,11 +514,15 @@ function invertByChannel(
 }
 
 /** 剥掉开头的已知渠道前缀（`wb/glm-4.6` → `glm-4.6`）；认不出前缀就原样返回。 */
+/**
+ * 剥掉 id 的渠道前缀（**反复剥**，见 `stripChannelPrefixes`）。
+ *
+ * ⚠️ 转调 `model-alias.ts` 的那一份，**不要在这里自己写一遍**：
+ * 目录护栏的键（`guardKeyOf`）与「隐藏模型」的键都走它 —— 两处口径漂开就会出现
+ * 「用户隐藏的模型被护栏当成缩水拦回」（2026-10-13 实踩）。
+ */
 function stripChannelPrefix(id: string): string {
-  const slash = id.indexOf('/')
-  if (slash <= 0) return id
-  const known = channelOfPrefix(id.slice(0, slash)) !== undefined
-  return known ? id.slice(slash + 1) : id
+  return stripChannelPrefixes(id)
 }
 
 /**
@@ -598,6 +601,14 @@ interface BuiltProfile {
   /** 按渠道分好组的清单（每个有模型的渠道一组）。 */
   readonly groups: readonly ChannelGroupProfile[]
   readonly channelOf: ReadonlyMap<string, string>
+  /**
+   * **过滤之前**的全部候选行（含被用户隐藏的）—— 面板勾选清单的来源。
+   *
+   * ⚠️ 与 `groups` 的区别只有一个：`groups` 是**过滤之后**要推给宿主的，
+   * 这里是「不隐藏的话会推哪些」。面板必须拿这份，否则勾掉的行会从清单里消失、
+   * 用户没法勾回来（单向操作）。
+   */
+  readonly candidates: readonly RowCandidate[]
 }
 
 /**
@@ -689,6 +700,45 @@ function buildCpaRouteProfile(
    */
   const isHidden = deps.isHiddenModel
   const hiddenAll = rows.length > 0 && isHidden !== undefined
+  /**
+   * ## 同一（渠道, 裸名）只留一行（2026-10-13）
+   *
+   * CPA 目录里同一个 trae 模型会同时存在三种 id 形态 —— `glm-5.2`、
+   * `trae/glm-5.2`（**我们**写的别名）、`Trae/trae/glm-5.2`（上游又套了一层前缀）。
+   * 三行**裸名相同**（剥掉反复前缀之后），于是选择器里同一个模型占三个条目，
+   * 而用户勾一次「隐藏」三个一起消失 —— 那是**看起来对、实际很乱**的中间态。
+   *
+   * 保留哪一条：**优先我们自己的别名形态**（`aliasFor(bare, channel)`，它是写进
+   * CPA 配置的那一份、最稳定），其次**不带斜杠的裸名行**，最后按 id 字典序 ——
+   * 三条都是确定性的，同一份目录每轮算出同一结果（护栏、缓存、判据都依赖这一点）。
+   *
+   * ⚠️ 去重**不改变**「同一模型在多个渠道各占一行」那条语义：键里带渠道，
+   * 跨渠道的同名模型照旧各留一行（那正是别名机制存在的理由）。
+   */
+  const byKey = new Map<string, { id: string; bare: string; label: string; channel: string }>()
+  for (const row of rows) {
+    const key = `${row.channel}\u0000${row.bare}`
+    const current = byKey.get(key)
+    if (current === undefined) {
+      byKey.set(key, row)
+      continue
+    }
+    if (preferRow(row, current) < 0) byKey.set(key, row)
+  }
+  rows.splice(0, rows.length, ...[...byKey.values()])
+  /**
+   * ## 候选行 = **过滤之前**的那批（2026-10-13）
+   *
+   * 交出去给面板当勾选清单用（见 {@link RouteRefresher.candidatesOf}）。
+   * ⚠️ **必须在过滤之前抓**：隐藏掉的行也要在清单里，否则用户没法把它勾回来
+   * （面板只列「当前会推送的」＝勾掉的那些就消失了，等于单向操作）。
+   */
+  const candidates: RowCandidate[] = rows.map((row) => ({
+    id: row.id,
+    bare: row.bare,
+    label: row.label,
+    channel: row.channel,
+  }))
   const kept =
     isHidden === undefined ? rows : rows.filter((row) => !isHidden(row.channel, row.bare))
   if (kept.length === 0) {
@@ -848,6 +898,11 @@ function buildCpaRouteProfile(
     })),
     /** 护栏按渠道放行要用（见 `refresh`）—— 它是这一份清单的行归属，不推给宿主。 */
     channelOf: new Map(rows.map((row) => [row.id, row.channel])),
+    /**
+     * 候选行（**过滤之前**的那批，按渠道分组）—— 面板的勾选清单读它。
+     * 不推给宿主，只在进程内流传。
+     */
+    candidates,
   }
 }
 
@@ -1175,7 +1230,7 @@ export function shrunkRows(
  * `attachRouteRegistry` 交出来的刷新函数。
  *
  * 它是一个**可调用对象**（不是裸函数）：多出来的 {@link RouteRefresher.settled}
- * 让调用方能在需要时等后台重读链收场。
+ * 与 {@link RouteRefresher.candidatesOf} 让调用方能在需要时问它别的事。
  */
 export interface RouteRefresher {
   (trigger?: string): Promise<SyncResult>
@@ -1187,6 +1242,72 @@ export interface RouteRefresher {
    * 判据只能靠 `tick()` 猜时间，那就是**不稳定的判据**。
    */
   settled(): Promise<void>
+  /**
+   * 某个渠道**现在会被推送的全部行**（**不含隐藏过滤**）—— 面板的勾选清单用它。
+   *
+   * ## 为什么不让面板自己算（2026-10-13 实踩）
+   *
+   * 原先面板从「渠道插件的模型目录」（`/models`）列清单，而**推给宿主的是路由侧的
+   * 行** —— 两者不是同一个集合：trae 实测目录报 20 个裸名（`glm-5.2`、
+   * `kimi-k2.6`…），而路由侧的行 id 是 `trae/glm-5.2`、`Trae/trae/glm-5.2`
+   * 这种形态，**一个都对不上**。于是维护者勾了 18 个，选择器里那 9 行**一个都没少**，
+   * 而且**零报错**（勾选保存成功、清单也真的重推了，只是没有一个键命中）。
+   *
+   * 所以勾选清单的来源必须是**推送侧同一份数据、同一个键**：这里是那一份。
+   * 空数组 = 还没有成功算过一轮（调用方按「还不知道」处理，别当成「没有模型」）。
+   */
+  candidatesOf(channel: string): readonly CandidateRow[]
+}
+
+/** 一个「会被推送」的候选行（面板勾选清单要的形态）。 */
+export interface CandidateRow {
+  /** 行列 id（推给宿主的那个，可能带别名）。 */
+  readonly id: string
+  /** 裸名 —— **隐藏表的键**，也是面板提交回来的东西。 */
+  readonly bare: string
+  /** 展示名（上游给的或 `渠道 · 模型`）。 */
+  readonly label: string
+}
+
+/** 进程内流传的候选行：比交出去的多一个渠道（分组要用）。 */
+interface RowCandidate extends CandidateRow {
+  readonly channel: string
+}
+
+/** 同一（渠道, 裸名）的几行里谁更该留下（负数 = `a` 更该留）。 */
+function preferRow(
+  a: { id: string; bare: string; channel: string },
+  b: { id: string; bare: string; channel: string },
+): number {
+  /** 我们自己的别名形态最优先：它是写进 CPA 配置的那一份（稳定、可预期）。 */
+  const rankOf = (row: { id: string; bare: string; channel: string }): number => {
+    if (row.id === aliasFor(row.bare, row.channel)) return 0
+    if (!row.id.includes('/')) return 1
+    return 2
+  }
+  const ra = rankOf(a)
+  const rb = rankOf(b)
+  if (ra !== rb) return ra - rb
+  return a.id.localeCompare(b.id)
+}
+
+/**
+ * 候选行按渠道分组（面板是**按渠道**问的：`candidatesOf(plugin)`）。
+ *
+ * ⚠️ 认不出归属的行（`channel === ''`）**丢掉**：面板要按渠道列清单，
+ * 而认不出归属的行本来也不会出现在任何渠道的页签下
+ * （`buildCpaRouteProfile` 对它们同样不产出行，见那里的注释）。
+ */
+function groupCandidates(rows: readonly RowCandidate[]): Map<string, CandidateRow[]> {
+  const grouped = new Map<string, CandidateRow[]>()
+  for (const row of rows) {
+    if (row.channel === '') continue
+    const list = grouped.get(row.channel)
+    const item: CandidateRow = { id: row.id, bare: row.bare, label: row.label }
+    if (list === undefined) grouped.set(row.channel, [item])
+    else list.push(item)
+  }
+  return grouped
 }
 
 /**
@@ -1286,6 +1407,13 @@ export function attachRouteRegistry(
   let lastGoodSeq = 0
   let pushedSeq = 0
   let computeSeq = 0
+  /**
+   * 最近一轮算出来的**候选行**（按渠道分组）—— 面板勾选清单读它。
+   *
+   * ⚠️ **只在算成功时更新**：读残了还留着上一轮的清单，面板至少还能显示
+   * 「上次知道的那些」，而不是空列表（空列表会让用户以为「一个模型都没有」）。
+   */
+  let candidates: ReadonlyMap<string, readonly CandidateRow[]> = new Map()
 
   /**
    * 被护栏拦下的那一份 + 它的序号 —— **等重试用完就放行它**。
@@ -1521,6 +1649,7 @@ export function attachRouteRegistry(
         groups: readonly ChannelGroupProfile[]
         channelOf: ReadonlyMap<string, string>
         aliases: AliasTable
+        candidates: readonly RowCandidate[]
       }
     | { reason: string } => {
     try {
@@ -1528,7 +1657,12 @@ export function attachRouteRegistry(
       const ids = catalogIds(catalog)
       const aliases = aliasTableOf(channels, ids)
       const built = buildCpaRouteProfile(catalog, channels, aliases, deps)
-      return { groups: built.groups, channelOf: built.channelOf, aliases }
+      return {
+        groups: built.groups,
+        channelOf: built.channelOf,
+        aliases,
+        candidates: built.candidates,
+      }
     } catch (error) {
       /**
        * ⚠️ **用户全藏了不算「读失败」**（2026-10-13）：那个状态下重试、退避、
@@ -1618,6 +1752,14 @@ export function attachRouteRegistry(
     }
 
     const built: GoodSnapshot = { groups: outcome.groups, channelOf: outcome.channelOf }
+
+    /**
+     * 候选行在这里落地（**过滤之前**的那批，见 {@link RouteRefresher.candidatesOf}）。
+     *
+     * ⚠️ 放在护栏**之前**：护栏拦下这一轮只说明「不敢推清单」，与「用户能勾哪些模型」
+     * 无关 —— 放在后面的话，一次被拦就顺带把候选行也冻住了，面板会显示旧清单。
+     */
+    candidates = groupCandidates(outcome.candidates)
 
     /**
      * ## 目录护栏：**写盘与推送之前**的最后一道闸
@@ -1888,13 +2030,15 @@ export function attachRouteRegistry(
   deps.logger?.info?.('cpa-panel: subscribed to app-boot/config-reload')
 
   /**
-   * 交出去的是**可调用对象**：`refresh` 本体 + `settled`。
+   * 交出去的是**可调用对象**：`refresh` 本体 + `settled` + `candidatesOf`。
    *
-   * 为什么不把 `settled` 塞进 deps：它是**调用方**（判据、将来的收尾逻辑）要的，
+   * 为什么不把后两个塞进 deps：它们是**调用方**（判据、面板的勾选清单）要的，
    * 不是本函数要的依赖。加在返回面上，现有调用点 `ensureRoutesFresh(trigger)`
    * 逐字不变。
    */
   const refresher = refresh as RouteRefresher
   refresher.settled = settled
+  refresher.candidatesOf = (channel: string): readonly CandidateRow[] =>
+    candidates.get(channel) ?? []
   return refresher
 }

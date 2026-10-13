@@ -1991,6 +1991,91 @@ describe('思考档位声明', () => {
   })
 
   /**
+   * # 候选行（面板勾选清单的来源，2026-10-13）
+   *
+   * 这一组守的是**「勾了必定命中」**：面板列的键与推送过滤的键必须是同一个。
+   * 第一次翻车就是因为两边来源不同 —— 面板读渠道目录（`glm-5.2`），
+   * 推送侧的行却叫 `Trae/trae/glm-5.2`，**一个都对不上**，而零报错。
+   */
+  describe('候选行', () => {
+    const FILES = [
+      { name: 'q1', provider: 'qoder' },
+      { name: 't1', provider: 'trae' },
+    ]
+    const MODELS = { q1: ['dfmodel', 'qmodel'], t1: ['glm-5.2'] }
+    const CATALOG = ['dfmodel', 'qmodel', 'glm-5.2']
+
+    it('候选行 = 会被推送的那些行，按渠道分组', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry } = fakeEntry(BASELINE)
+      const refresh = await attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))
+      await refresh('boot')
+
+      expect(refresh.candidatesOf('qoder').map((row) => row.bare)).toEqual(['dfmodel', 'qmodel'])
+      expect(refresh.candidatesOf('trae').map((row) => row.bare)).toEqual(['glm-5.2'])
+      // 没有这个渠道时是空数组（调用方按「还不知道」处理，不是「没有模型」）
+      expect(refresh.candidatesOf('zcode')).toEqual([])
+    })
+
+    /**
+     * ⚠️ **被隐藏的行也要在候选里** —— 否则用户勾掉之后就再也勾不回来
+     * （清单里没有它 = 单向操作）。
+     */
+    it('⚠️ 隐藏掉的行仍在候选行里（否则勾不回来）', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry } = fakeEntry(BASELINE)
+      const refresh = await attachRouteRegistry(fakeHost(entry).host, {
+        ...depsFor(cpa),
+        isHiddenModel: (channel, bare) => channel === 'qoder' && bare === 'dfmodel',
+      })
+      await refresh('boot')
+
+      expect(refresh.candidatesOf('qoder').map((row) => row.bare)).toEqual(['dfmodel', 'qmodel'])
+    })
+
+    /**
+     * ⚠️⚠️ **候选行的键必须与推送的行键一致**（同一渠道内逐行相等）——
+     * 这条是那次事故的**直接回归**：两边来源不同时，用户的勾选会静默失效。
+     */
+    it('⚠️ 候选行的裸名与推送行的裸名一致（勾了才命中）', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+      const refresh = await attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))
+      await refresh('boot')
+
+      const pushedBares = new Set(
+        (pushed.at(-1)?.rows ?? []).map((row) => String(row.id).replace(/^[^/]+\//, '')),
+      )
+      for (const row of refresh.candidatesOf('qoder')) {
+        expect([...pushedBares]).toContain(row.bare)
+      }
+    })
+
+    /**
+     * ⚠️ **同一个（渠道, 裸名）只留一行**：目录里同一个 trae 模型会同时有
+     * `glm-5.2` / `trae/glm-5.2`（我们的别名）/ `Trae/trae/glm-5.2`（上游又套一层）
+     * 三种 id —— 不去重的话选择器里同一个模型占三个条目，而勾一次三个一起消失。
+     *
+     * 保留哪一条：**我们自己的别名形态**（写进 CPA 配置的那份，最稳定）。
+     */
+    it('⚠️ 同一模型的三种 id 形态只留一行，且留的是别名形态', async () => {
+      const cpa = fakeCpa({
+        files: [{ name: 't1', provider: 'trae' }],
+        models: { t1: ['glm-5.2', 'trae/glm-5.2', 'Trae/trae/glm-5.2'] },
+        catalog: ['glm-5.2', 'trae/glm-5.2', 'Trae/trae/glm-5.2'],
+      })
+      const { entry, pushed } = fakeEntry(BASELINE)
+      const refresh = await attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))
+      await refresh('boot')
+
+      expect(pushed.at(-1)?.ids).toEqual(['trae/glm-5.2'])
+      expect(refresh.candidatesOf('trae')).toEqual([
+        { id: 'trae/glm-5.2', bare: 'glm-5.2', label: 'Trae' },
+      ])
+    })
+  })
+
+  /**
    * ⚠️ **关掉开关必须连默认一起撤** —— 留下 `reasoning` 就是个半截状态：
    * 界面没有 Effort 行，而每个请求仍被钉在 `high` 上，正是这个开关要逃开的东西。
    */ it('⚠️ 开关关闭时默认档位也要撤掉（否则逃生通道漏了一半）', async () => {

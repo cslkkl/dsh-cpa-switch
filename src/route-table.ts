@@ -340,11 +340,28 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
     },
     {
       /**
+       * 某渠道的**候选行**：不隐藏的话会被推送的那些行（面板勾选清单读它）。
+       *
+       * ⚠️ **与 `/models` 是两件事**，别看名字像就合并：
+       * - `/models`（渠道插件的模型目录）= **渠道自己的**名字（`glm-5.2`），
+       *   用来展示「这个渠道有哪些模型」；
+       * - 本路由 = **推送侧的行** —— 勾选**必须**用这份，否则勾了完全没用，
+       *   且零报错（2026-10-13 实踩：目录 20 个名字 vs 推送 9 行，一个都对不上）。
+       */
+      path: '/api/v1/cpa/model-rows',
+      methods: ['GET'],
+      handle: async (request) => {
+        const url = new URL(request.url)
+        return json(ops.modelVisibility.rows(url.searchParams.get('plugin')))
+      },
+    },
+    {
+      /**
        * 模型可见性：哪些模型出现在 **DSH 的模型选择器**里
        * （`GET` 读被隐藏的、`POST` 改某个渠道的隐藏列表）。
        *
        * body: `{channel, names: string[]}` —— `names` 是**要隐藏的**模型
-       * （面板提交的是渠道报的 id，宿主负责规范化成裸名）。
+       * （面板提交的是行裸名，宿主仍规范化一次作双保险）。
        *
        * ⚠️ 它**不改 CPA 的账号状态**，但会**重推一次模型清单** ——
        * 不重推的话用户勾完要等下一次目录变化才生效（可能几小时）。

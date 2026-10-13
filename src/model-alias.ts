@@ -59,25 +59,66 @@ export function aliasFor(model: string, channel: string): string {
 }
 
 /**
- * 把一个**渠道报的模型 id** 规范化成**裸名**（别名前缀剥掉）。
+ * 把一个 id 的**渠道前缀反复剥掉**，直到剩下的是裸名。
  *
- * ⚠️ **两处必须用同一个实现**（2026-10-13）：
+ * ⚠️ **必须反复剥，不能只剥一层**（2026-10-13 实踩）：
+ * CPA 目录里同一个 trae 模型会同时存在**三种形态** ——
+ * `glm-5.2`（裸名）、`trae/glm-5.2`（**我们**写的别名）、
+ * `Trae/trae/glm-5.2`（上游又给我们的别名套了一层它自己的前缀）。
+ *
+ * 只剥一层时第三条的裸名会算成 `trae/glm-5.2` —— 于是：
+ * - 用户勾「隐藏 glm-5.2」**匹配不到它**（选择器里那一行照旧在，零报错）；
+ * - 同一模型在选择器里占三个条目（`Trae · glm-5.2` 出现三次）。
+ *
+ * 剥的条件始终是「前缀能反查成**某个托管渠道**」（`channelOfPrefix`）——
+ * 第三方自带的 `vendor/xxx` 不会被当别名，剥不动就原样返回。
+ */
+export function stripChannelPrefixes(id: string): string {
+  let name = String(id ?? '').trim()
+  /**
+   * 上限只为防呆（正常最多两层）：写死循环次数上限，
+   * 免得哪天 `channelOfPrefix` 出了怪值把这里变成死循环。
+   */
+  for (let round = 0; round < 4; round += 1) {
+    const slash = name.indexOf('/')
+    if (slash <= 0) return name
+    const channel = channelOfPrefix(name.slice(0, slash))
+    if (channel === undefined) return name
+    name = name.slice(slash + 1)
+  }
+  return name
+}
+
+/**
+ * 把一个**渠道报的模型 id** 规范化成**裸名**（反复剥掉**本渠道**的前缀）。
+ *
+ * ⚠️ **两处必须用同一个实现**：
  * - 路由侧的行身份是**裸名**（`route-registry` 的 `row.bare`）；
- * - 面板勾选「隐藏哪个模型」时，渠道报给它的可能是**别名形态**（`wb/glm-5.3`）。
+ * - 面板勾选「隐藏哪个模型」时的键也是裸名。
  *
- * 两边口径不一致的后果是**静默的**：用户勾了隐藏，清单里那一行照样在 ——
- * 所以这个函数只有一份，宿主的两处（路由 / 可见性域）都从**这里**派生。
+ * 两边口径不一致的后果是**静默的**：用户勾了隐藏，清单里那一行照样在。
  *
- * 只剥**本渠道自己的**别名前缀（`aliasPrefixOf` 来自注册表）：其它斜杠 id
- * （第三方自带的 `vendor/xxx`）原样保留 —— 与 `channelOfPrefix` 的
- * 「认不出就不当我们的别名」是同一条纪律。
+ * 与 {@link stripChannelPrefixes} 的区别：那个剥**任何**托管渠道的前缀
+ * （给目录护栏用，它只关心「这个 id 属于哪个渠道」）；这个只剥**本渠道**的，
+ * 认不出或属于别人的前缀**原样保留** —— 猜的后果是隐藏键张冠李戴。
  *
- * 大小写不敏感：上游实测报过 `Trae/...` 这种大写前缀。
+ * @param channel - 渠道 id（面板/清单所属的那个）。
+ * @param id - 渠道报的 id，可能是 `glm-5.2` / `trae/glm-5.2` / `Trae/trae/glm-5.2`。
  */
 export function bareModelNameOf(channel: string, id: string): string {
-  const name = String(id ?? '').trim()
-  const prefix = `${channelPrefix(channel)}/`.toLowerCase()
-  return name.toLowerCase().startsWith(prefix) ? name.slice(prefix.length) : name
+  const target = String(channel ?? '')
+    .trim()
+    .toLowerCase()
+  let name = String(id ?? '').trim()
+  /** 上限只为防呆（正常最多两层）。 */
+  for (let round = 0; round < 4; round += 1) {
+    const slash = name.indexOf('/')
+    if (slash <= 0) return name
+    const owner = channelOfPrefix(name.slice(0, slash))
+    if (owner === undefined || owner.toLowerCase() !== target) return name
+    name = name.slice(slash + 1)
+  }
+  return name
 }
 
 /**
@@ -127,6 +168,11 @@ export function buildAliasTable(
    *
    * 只看「前缀是不是一个渠道 id」，不猜别的 —— 前缀不是已知渠道的斜杠 id
    * （如第三方自带的 `vendor/xxx`）原样留着，交给下层按裸名处理。
+   *
+   * ⚠️ **裸名要反复剥前缀**（2026-10-13）：目录里有 `Trae/trae/glm-5.2` 这种
+   * **双前缀** id（上游给我们的别名又套了一层它自己的前缀）。只剥一层会把裸名
+   * 算成 `trae/glm-5.2` —— 于是那个模型既**藏不掉**（用户勾的是 `glm-5.2`），
+   * 又在选择器里**多占两个条目**（同一个 trae 模型出现三次）。
    */
   for (const id of knownIds) {
     const slash = id.indexOf('/')
@@ -136,7 +182,7 @@ export function buildAliasTable(
     if (channel === undefined) continue
     const key = id.toLowerCase()
     if (reverse.has(key)) continue
-    reverse.set(key, { model: id.slice(slash + 1), channel })
+    reverse.set(key, { model: stripChannelPrefixes(id), channel })
   }
 
   return {

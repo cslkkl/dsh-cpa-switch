@@ -21,6 +21,7 @@ import { createAccountsOps, type AccountsOps } from './accounts.ts'
 import { createActionsOps, type ActionsOps } from './actions.ts'
 import { createEnableOps, type EnableOps } from './enable.ts'
 import { createModelVisibilityOps, type ModelVisibilityOps } from './model-visibility.ts'
+import type { CandidateRow as CandidateModelRow } from './model-visibility.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
 import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
 import { createSchedulingOps, type SchedulingOps } from './scheduling.ts'
@@ -52,6 +53,13 @@ export interface OpsDeps {
    * （装配即推、目录护栏、重读链）。
    */
   readonly onModelsVisibilityChanged?: (() => void) | undefined
+  /**
+   * 某个渠道**会被推送的全部行**（不含隐藏过滤）—— 面板勾选清单的来源。
+   *
+   * ⚠️ **必须接到路由注册表**（推送侧同一份数据）：面板勾的键与推送行的键必须是
+   * 同一个 —— 不一致的后果是**静默的**（勾选保存成功、清单也重推了，但没有一个键命中）。
+   */
+  readonly candidateModelRows?: ((channel: string) => readonly CandidateModelRow[]) | undefined
   /**
    * 运行态：只有更新域用（换 dll 前要停 CPA）。其余各域一律经 `gateway`。
    *
@@ -106,6 +114,11 @@ export function createOperations(deps: OpsDeps): Operations {
       ...(deps.onModelsVisibilityChanged === undefined
         ? {}
         : { onChanged: deps.onModelsVisibilityChanged }),
+      /**
+       * 候选行**只能来自路由侧**（推送侧同一份数据、同一个键）——
+       * 拿渠道目录凑一份，就是当初那个「勾了完全没用」的清单。
+       */
+      ...(deps.candidateModelRows === undefined ? {} : { candidateRows: deps.candidateModelRows }),
       ...(deps.logger === undefined ? {} : { logger: deps.logger }),
     }),
   }

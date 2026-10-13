@@ -176,6 +176,14 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
      * 用户看到的是「勾了没反应」，与「勾选没保存」长得一模一样。
      */
     onModelsVisibilityChanged: () => void ensureRoutesFresh('model-visibility').catch(() => {}),
+    /**
+     * 面板的勾选清单来源 = **路由侧算出来的候选行**（推送侧同一份数据）。
+     *
+     * ⚠️ 别改成「读渠道目录」：那正是这个功能第一次翻车的地方 —— 目录里的名字
+     * （`glm-5.2`）与推送行的键（`Trae/trae/glm-5.2`）一个都对不上，
+     * 用户勾了 18 个、选择器里 9 行一个没少，而**零报错**。
+     */
+    candidateModelRows: (channel) => ensureRoutesFresh.candidatesOf(channel),
     runtime,
     setup,
   })
