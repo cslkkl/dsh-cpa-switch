@@ -159,12 +159,16 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       ⑤ **「未签到」是灰底标签**（不再是看起来像括号的空心描边）。
       判据与决策见 [.agents/notes/2026-10-12-model-selector-grouping.md](.agents/notes/2026-10-12-model-selector-grouping.md)
       与 [.agents/notes/2026-10-12-reasoning-effort-retriage.md](.agents/notes/2026-10-12-reasoning-effort-retriage.md)。
-- [ ] **待真机复验：模型可见性（2026-10-13 那批，拉取最新 + 重启 DSH）** ——
-      面板每个渠道页签下新增「模型」一节（默认折叠），勾 = 出现在对话界面的模型下拉里：
+- [ ] **待真机复验：模型可见性（2026-10-13 那批）** —— 面板每个渠道页签的**工具栏上**
+      有一个「模型」按钮（与「刷新 / 全部签到 / 全部任务」同排），点开勾选
+      **哪些模型出现在对话界面的模型下拉里**：
       ① **取消勾选某个模型 → 保存 → 对话界面的下拉里它消失**；
       ② **面板里它照旧在**（这正是本功能的要点：勾选的地方在面板、生效的地方在选择器）；
       ③ 勾回来 → 保存 → 下拉里它回来；
       ④ 同渠道其它模型不受影响；同名模型在**别的渠道**不受影响。
+      ⚠️ **已真机验过一半（2026-10-13）**：按钮出现、弹窗列出 32 个模型、
+      取消勾选 `glm-4.6` 保存后**清单里那一行真的没了**（32 → 31）且其它渠道一个没少。
+      剩下待验：对话界面下拉里它是否消失（那一步是宿主的渲染，不是我们的清单）。
       判据与理由见[决策记录](.agents/notes/2026-10-13-model-visibility-in-panel.md)。
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 只能靠人工表，每次新模型都要补。
       ⚠️ **但「等谁」要说准**：CPA 侧**通路已存在**，缺的是**渠道插件没填值** ——
@@ -245,6 +249,16 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
   再启用插件。所以 `PanelBoundary` 必需，且**必须是类组件**
   （`getDerivedStateFromError` 无 hook 等价物）—— `verify-artifacts.cjs` 的 `react`
   shim 因此必须提供 `Component`，缺了它脚本在加载阶段就抛。
+- ⚠️ **`/api/v1/cpa/*` 的响应是「扁平的」，但索引签名会让错取字段编译通过** ——
+  传输层把响应体**摊平**在结果对象上（`{ok: true, groups: [...]}`），而 `ApiResult` 带
+  `[key: string]: unknown`。于是 `useResource({ select: (result) => result.data })`
+  **既能编译、又永远是 `undefined`**；表现是**那块界面根本不存在**（2026-10-13 实踩：
+  维护者「我怎么没看见可以勾选模型啊」，而所有请求都是 200、零报错零日志）。
+  两条纪律：**`select` 取整个 `result`，字段在适配器里按线上形状取**；
+  **界面不许因为「读不到 / 空」就 `return null`** —— 入口永远立着，状态在界面里说
+  （「加载中」/「读失败 + 原因」/「还没有」），否则任何接线错误都长成
+  「这个功能不存在」。判据 `tests/model-visibility-client.test.ts` 的
+  「真机事故回归」（含源码断言 `result.data` 不许出现、视图不许 `return null`）。
 
 **模型路由的三条不变量（一条因果链，改任一条先读另两条）**
 
