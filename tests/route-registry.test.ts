@@ -1927,6 +1927,67 @@ describe('思考档位声明', () => {
       // 别人的 provider 还在（没被误删）
       expect(pushed.at(-1)?.allProviderIds).toContain('cliproxy')
     })
+
+    /**
+     * ⚠️⚠️ **2026-10-13 真机事故的回归判据**：维护者勾掉了 workbuddy 的 31 个模型、
+     * 只留一个，**保存成功却什么都没变** —— 因为**目录护栏**把这一轮当成「读残」拦了
+     * （日志原话：「比上一份少 31 行 → 不写盘、继续用上一份」）。
+     *
+     * 护栏的职责是拦**读残**，而「用户藏掉的行」是**用户的选择**。不豁免的话，
+     * 藏一个也拦、藏一批也拦，而用户看到的是「勾了完全没反应」
+     * （保存还是成功的，所以看起来更像功能坏了）。
+     *
+     * ⚠️ 判据必须**分两轮**：先正常推一轮建立基线，再隐藏 —— 否则没有「上一份」，
+     * 护栏根本不参与，用例会假绿。
+     */
+    it('⚠️ 隐藏的模型不算缩水（否则护栏把用户的勾选原样拦回）', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+
+      const host = fakeHost(entry).host
+      const refresh = await attachRouteRegistry(host, depsFor(cpa))
+      await refresh('boot')
+      expect((pushed.at(-1)?.ids ?? []).length).toBe(4)
+
+      const hidden = new Set(['qoder:dfmodel', 'workbuddy:glm-5.2', 'workbuddy:kimi-k3'])
+      await attachRouteRegistry(host, {
+        ...depsFor(cpa),
+        isHiddenModel: (channel, bare) => hidden.has(`${channel}:${bare}`),
+      })('refresh')
+
+      // 藏掉的 3 个必须真的从清单里消失（而不是被护栏拦回原样）
+      expect(pushed.at(-1)?.ids).toEqual(['qmodel'])
+    })
+
+    /**
+     * ⚠️ **反例：豁免不许外溢** —— 粒度是「藏掉的那些行」，不是「有隐藏就整体放行」。
+     * 少了这条，一个「只要用户藏过东西就放行一切」的实现也能让上一条全绿
+     * —— 而那正好把护栏要治的病放回来。
+     */
+    it('⚠️ 豁免不外溢：同渠道**没被藏**的行少了照样拦', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+
+      const host = fakeHost(entry).host
+      const refresh = await attachRouteRegistry(host, depsFor(cpa))
+      await refresh('boot')
+      expect((pushed.at(-1)?.ids ?? []).length).toBe(4)
+
+      // 目录**真的**少了 glm-5.2（不是用户藏的）；同时用户藏了 dfmodel
+      /**
+       * 「轮」以 `auth-files` 列表读的次数为标尺（见 `setCatalogRounds` 的注释），
+       * 所以第二轮的目录就是缺了 `glm-5.2` 的那份。
+       */
+      cpa.setCatalogRounds([CATALOG, ['dfmodel', 'qmodel', 'kimi-k3']])
+      await attachRouteRegistry(host, {
+        ...depsFor(cpa),
+        isHiddenModel: (channel, bare) => channel === 'qoder' && bare === 'dfmodel',
+      })('refresh')
+
+      await tick()
+      // 护栏拦下 ⇒ 继续用上一份（4 行），而不是接受缺了 glm-5.2 的 3 行
+      expect((pushed.at(-1)?.ids ?? []).length).toBe(4)
+    })
   })
 
   /**

@@ -1120,10 +1120,16 @@ function guardKeyOf(id: string, channel: string): string {
  * ⚠️ **认不出渠道的行按缩水处理**（保守）：从**老**磁盘缓存恢复的基线没有
  * 行归属表，那时宁可多跑一轮重读，也不要放过一次真的读残。
  *
+ * ⚠️ **用户自己隐藏的模型不算缩水**（2026-10-13 实踩，见 `isHidden`）：那是
+ * **用户的选择**，不是读残 —— 不豁免的话，勾掉一批模型会被护栏原样拦回
+ * （「比上一份少 31 行 → 不写盘、继续用上一份」），用户看到的是
+ * **勾了完全没反应**（而且保存是成功的，所以更像功能坏了）。
+ *
  * @param previous - 上一份成功快照（行 id + 行归属）。
  * @param next - 这一轮算出来的行 id。
  * @param nextChannelOf - 这一轮的行归属（认不出归属的行不参与比较）。
  * @param allowedChannels - 允许合法缩水的渠道（本轮被跳过 / 凭据不可用）。
+ * @param isHidden - 「这个（渠道, 裸名）是不是被用户藏了」；藏了的行**不参与比较**。
  * @returns 被拦下的行 id；**空数组 = 放行**。
  */
 export function shrunkRows(
@@ -1131,6 +1137,7 @@ export function shrunkRows(
   next: readonly string[],
   nextChannelOf: ReadonlyMap<string, string>,
   allowedChannels: ReadonlySet<string>,
+  isHidden?: ((channel: string, bare: string) => boolean) | undefined,
 ): string[] {
   const have = new Set<string>()
   for (const id of next) {
@@ -1153,6 +1160,12 @@ export function shrunkRows(
     }
     if (have.has(guardKeyOf(id, channel))) continue
     if (allowedChannels.has(channel)) continue
+    /**
+     * ⚠️ **用户藏掉的行也放行**：裸名从行 id 剥前缀得到（与 `guardKeyOf` 同一个
+     * 口径），所以别名形态（`wb/glm-4.6`）与裸名（`glm-4.6`）都能对上 ——
+     * 用行 id 直接比会漏掉带别名的那一半。
+     */
+    if (isHidden?.(channel, stripChannelPrefix(id)) === true) continue
     blocked.push(id)
   }
   return blocked
@@ -1633,6 +1646,12 @@ export function attachRouteRegistry(
         modelIdsOf(built),
         built.channelOf,
         allowedChannels,
+        /**
+         * ⚠️ **必须传**：不传的话，用户勾掉一批模型会被护栏原样拦回
+         * （2026-10-13 真机实踩：藏 31 个 → 「比上一份少 31 行 → 不写盘」→
+         * 用户看到的是「勾了完全没反应」，而保存本身是成功的）。
+         */
+        deps.isHiddenModel,
       )
       if (blocked.length > 0) {
         /**
