@@ -192,6 +192,7 @@ export const zh = {
   modelsShown: '{shown}/{total} 个出现在选择器里',
   modelsHint:
     '这里只决定**对话界面的模型下拉里出现哪些**。不勾的模型照常能调通，只是不在下拉里 —— 点「保存」后立即生效。',
+  modelsEmpty: '这个渠道还没有可用的模型（先在 CPA 里加一个号）。',
   modelsSelectAll: '全选',
   modelsSelectNone: '全不选',
   save: '保存',
@@ -385,6 +386,7 @@ export const en: Record<LocaleKey, string> = {
   modelsShown: '{shown}/{total} shown in the picker',
   modelsHint:
     'This only decides **which models appear in the chat model picker**. Unchecked models still work through the API — they are just hidden from the dropdown. Takes effect after you click Save.',
+  modelsEmpty: 'This channel has no models yet (add an account in CPA first).',
   modelsSelectAll: 'Select all',
   modelsSelectNone: 'Select none',
   save: 'Save',

@@ -34,6 +34,41 @@ export interface ModelRow {
 }
 
 /**
+ * 从宿主 `/models` 的响应里取出模型清单。
+ *
+ * ⚠️ **入参是整个 `ApiResult`（扁平的那个），不是它的某个字段**（2026-10-13 实踩）：
+ * 传输层把响应体**摊平**在结果对象上（`{ok: true, groups: [...]}`），而 `ApiResult`
+ * 带索引签名（`[key: string]: unknown`），所以写成 `result.data` **既能编译通过、
+ * 又永远读到 `undefined`** —— 界面上的表现是「这一节根本不出现」，**零报错零日志**。
+ * 维护者真机就是这么撞上的（所有请求 200）。
+ *
+ * 形状坏掉时返回空数组（不抛）：这里是 UI，崩掉比空更糟。
+ */
+export function modelsResultOf(result: unknown): ModelChoice[] {
+  const groups = (result as { groups?: unknown } | undefined)?.groups
+  if (!Array.isArray(groups)) return []
+  const out: ModelChoice[] = []
+  for (const group of groups) {
+    const models = (group as { models?: unknown } | null)?.models
+    if (!Array.isArray(models)) continue
+    for (const model of models) {
+      const row = model as { id?: unknown; name?: unknown; bare?: unknown }
+      /**
+       * ⚠️ `bare` 是宿主算好的裸名（浏览器半边不许引宿主模块），**缺了就跳过这一行**：
+       * 没有它就没法跟「被隐藏的表」对齐，画出来只会是「勾了没反应」的假象。
+       */
+      if (typeof row.id !== 'string' || typeof row.bare !== 'string') continue
+      out.push({
+        id: row.id,
+        bare: row.bare,
+        ...(typeof row.name === 'string' ? { name: row.name } : {}),
+      })
+    }
+  }
+  return out
+}
+
+/**
  * 把「宿主的模型清单」与「被隐藏的表」合成界面要的行。
  *
  * @param models - 宿主 `/models` 给的那些模型（已带 `bare`）。
@@ -65,6 +100,9 @@ export function hiddenNamesOf(rows: readonly ModelRow[]): string[] {
 /**
  * 从宿主的可见性表里取**某个渠道**被隐藏的裸名。
  *
+ * ⚠️ 入参是**整个 `ApiResult`**（扁平的 `{ok, hidden}`），不是 `.data`
+ * —— 见 {@link modelsResultOf} 的同款说明（2026-10-13 那个静默 bug）。
+ *
  * ⚠️ 形状坏掉时按「什么都没藏」处理（保守方向：宁可多显示模型，
  * 也不要凭空让用户少一个模型可选）。
  */
@@ -74,4 +112,33 @@ export function hiddenInChannelOf(payload: unknown, channel: string): string[] {
   const list = (hidden as Record<string, unknown>)[channel]
   if (!Array.isArray(list)) return []
   return list.filter((item): item is string => typeof item === 'string')
+}
+
+/** 「模型」一节的四种状态。 */
+export type ModelSectionState = 'loading' | 'error' | 'empty' | 'ready'
+
+/**
+ * 「模型」一节该显示成什么样。
+ *
+ * ⚠️ **这一节必须永远画出来**（2026-10-13 实踩）：原先的写法是
+ * 「读失败或读到 0 个就 `return null`」，于是**任何**接线错误（比如把扁平响应
+ * 读成 `result.data`）的表现都是「这一节根本不存在」—— 维护者真机上就是
+ * 「我怎么没看见可以勾选模型啊」，而所有请求都是 200、**零报错零日志**。
+ *
+ * 所以判据变了：**可见性优先于整洁**。加载中说加载中、失败时说失败原因、
+ * 没模型时说没模型 —— 用户至少知道「这个地方存在、现在是什么状态」。
+ */
+export function sectionStateOf(input: {
+  readonly loading: boolean
+  readonly error: string | undefined
+  readonly count: number
+}): ModelSectionState {
+  /**
+   * 顺序有讲究：**失败优先于「空」**。先判空的话，一次失败的读（此时 count 也是 0）
+   * 会显示成「这个渠道还没有模型」—— 把「读不到」说成「没有」，是最容易把人
+   * 引到错误方向的一句话。
+   */
+  if (input.error !== undefined) return 'error'
+  if (input.loading) return 'loading'
+  return input.count === 0 ? 'empty' : 'ready'
 }

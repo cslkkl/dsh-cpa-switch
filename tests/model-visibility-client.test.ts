@@ -1,11 +1,33 @@
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import {
   hiddenInChannelOf,
   hiddenNamesOf,
   modelRowsOf,
+  modelsResultOf,
+  sectionStateOf,
   type ModelChoice,
 } from '../src/client/model-visibility.ts'
+
+/**
+ * ⚠️ 这两份**源码文本**（不是 import）：钩子引了 React 与 UI 包，Node 侧 import 不到
+ * —— 与 `tests/card-slots.test.ts` 同一个理由与同一种断言方式。
+ *
+ * ⚠️ **断言前必须剥掉注释**：这两份文件的注释里**故意写着**坏写法（`result.data`、
+ * `return null`）来说明当初为什么错的 —— 不剥注释会拿「墓志铭」判红自己
+ * （`card-slots.test.ts` 2026-10-05 踩过同一个坑）。
+ */
+const stripComments = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+
+const hook = stripComments(
+  readFileSync(new URL('../src/client/use-model-visibility.ts', import.meta.url), 'utf8'),
+)
+const view = stripComments(
+  readFileSync(new URL('../src/client/ModelVisibility.tsx', import.meta.url), 'utf8'),
+)
 
 /**
  * 模型可见性的界面判定（2026-10-13）。
@@ -68,5 +90,94 @@ describe('模型可见性 · 判定', () => {
     expect(hiddenInChannelOf({ hidden: { workbuddy: [1, 'ok', null] } }, 'workbuddy')).toEqual([
       'ok',
     ])
+  })
+})
+
+/**
+ * ⚠️⚠️ **2026-10-13 真机事故的回归判据**（维护者：「我怎么没看见可以勾选模型啊」）。
+ *
+ * 根因：传输层把响应体**摊平**在结果对象上（`{ok: true, groups: [...]}`），而
+ * `ApiResult` 带索引签名 —— 于是 `select: (result) => result.data` **能编译通过、
+ * 却永远是 `undefined`**。表现是「模型这一节根本不出现」：所有请求都是 200、
+ * 零报错、零日志，我自己的守卫还把这个状态**画成了空**。
+ *
+ * 这一组守三件事，任一条都能独立拦住那次事故：
+ * 1. 取数据必须按**扁平的线上形状**（`modelsResultOf` 收整个响应）；
+ * 2. 钩子里**不许**出现 `result.data`（源码断言 —— 就是这一行让功能消失的）；
+ * 3. 界面**不许**在读不到时 `return null`（入口必须永远在，状态在弹窗里说）。
+ */
+describe('模型可见性 · 真机事故回归', () => {
+  /**
+   * 线上真实形状（2026-10-13 从浏览器抓的 `/api/v1/cpa/models` 响应，
+   * 这里只留两条，形状一字不改：顶层 `ok` + `groups[].models[].{id,name?,bare}`）。
+   */
+  const wire = {
+    ok: true,
+    groups: [
+      {
+        label: 'CN（copilot.tencent.com）',
+        count: 2,
+        models: [
+          { id: 'glm-5.3', bare: 'glm-5.3' },
+          { id: 'hy4-preview', name: 'Hy4 preview', bare: 'hy4-preview' },
+        ],
+      },
+      { label: 'Global（workbuddy.ai）', count: 0, models: [] },
+    ],
+  }
+
+  it('按线上扁平形状取模型（顶层就是 ok + groups）', () => {
+    expect(modelsResultOf(wire).map((model) => model.bare)).toEqual(['glm-5.3', 'hy4-preview'])
+  })
+
+  /**
+   * ⚠️ **`result.data` 那条路必须读不到东西** —— 这条是给未来的自己看的：
+   * 若哪天有人又写成 `.data`，它会给出空清单（也就是当初的静默失效）。
+   * 断言在这里是为了让「空」这件事有出处，而不是靠人记得。
+   */
+  it('⚠️ 传 `{data: …}`（错的取法）读到空 —— 这就是当初静默失效的形态', () => {
+    expect(modelsResultOf({ data: wire })).toEqual([])
+  })
+
+  it('缺 bare 的行**跳过**（没有裸名就没法跟隐藏表对齐，画出来是假象）', () => {
+    expect(
+      modelsResultOf({
+        ok: true,
+        groups: [{ models: [{ id: 'x', bare: 'x' }, { id: 'y' }, { bare: 'z' }] }],
+      }).map((model) => model.bare),
+    ).toEqual(['x'])
+  })
+
+  it('形状坏掉（null / 空 / 非数组）返回空，不抛', () => {
+    for (const bad of [undefined, null, {}, { groups: null }, { groups: 'x' }, { groups: [{}] }]) {
+      expect(() => modelsResultOf(bad)).not.toThrow()
+      expect(modelsResultOf(bad)).toEqual([])
+    }
+  })
+
+  /**
+   * ⚠️ **源码断言**：钩子不许把扁平响应当嵌套的读。
+   *
+   * 这一行就是那次事故的全部代码 —— `result.data` 在扁平形状下恒为 `undefined`，
+   * 而 TypeScript 因为索引签名**不会报错**。
+   */
+  it('⚠️ 钩子不许用 `result.data`（扁平响应下它是 undefined，且编译期不报错）', () => {
+    expect(hook).not.toContain('result.data')
+  })
+
+  /**
+   * ⚠️ 界面不许在读不到时把自己藏起来 —— 那正是「怎么没看见」的观感来源。
+   */
+  it('⚠️ 入口按钮不许因为「读不到 / 没模型」而消失', () => {
+    expect(view).not.toContain('return null')
+  })
+
+  it('节的四种状态：失败优先于空（别把「读不到」说成「没有」）', () => {
+    expect(sectionStateOf({ loading: true, error: undefined, count: 0 })).toBe('loading')
+    expect(sectionStateOf({ loading: false, error: undefined, count: 0 })).toBe('empty')
+    expect(sectionStateOf({ loading: false, error: undefined, count: 3 })).toBe('ready')
+    expect(sectionStateOf({ loading: false, error: 'boom', count: 0 })).toBe('error')
+    // ⚠️ 读失败**同时** count 也是 0 —— 顺序判反就会说成「这个渠道还没有模型」
+    expect(sectionStateOf({ loading: false, error: 'boom', count: 5 })).toBe('error')
   })
 })

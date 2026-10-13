@@ -41,71 +41,83 @@ export function ModelVisibility(props: ModelVisibilityProps): ReactNode {
   const models = useModelVisibility(plugin)
 
   /**
-   * 读失败时**什么都不画**（连标题都不画）：这一节是辅助信息，
-   * 画一个「读取失败」的空壳只会让面板看起来坏了 —— 账号那一块已经在说自己的事。
-   * 读成功但一个模型都没有时同理（渠道没号 ⇒ 没模型）。
+   * ⚠️⚠️ **这一节必须永远画出来**（2026-10-13 真机事故）：
+   * 原先写的是「读失败或读到 0 个就 `return null`」，于是**任何接线错误**
+   * （当时是把扁平响应读成了 `result.data`，恒为 `undefined`）的表现都是
+   * 「这个功能不存在」—— 维护者的原话是「我怎么没看见可以勾选模型啊」，
+   * 而所有请求都是 200、**零报错零日志**。
+   *
+   * 所以判据变了：**可见性优先于整洁**。加载中说加载中、失败时说失败原因、
+   * 没模型时说没模型 —— 用户至少知道「这个地方存在、现在是什么状态」。
    */
-  if (models.error !== undefined) return null
-  if (!models.loading && models.rows.length === 0) return null
-
   return (
     <details className={css.section}>
       <summary className={css.modelSummary}>
         {t('modelsTitle')}
-        <span className={css.modelCount}>
-          {t('modelsShown', {
-            shown: String(models.rows.filter((row) => row.shown).length),
-            total: String(models.rows.length),
-          })}
-        </span>
+        {models.state === 'ready' && (
+          <span className={css.modelCount}>
+            {t('modelsShown', {
+              shown: String(models.rows.filter((row) => row.shown).length),
+              total: String(models.rows.length),
+            })}
+          </span>
+        )}
       </summary>
 
       {/* ⚠️ 说清「不勾 ≠ 删掉」——本功能唯一会造成的误解 */}
       <p className={css.hint}>{t('modelsHint')}</p>
 
-      <div className={css.modelActions}>
-        <Button variant="ghost" size="sm" onClick={() => models.toggleAll(true)}>
-          {t('modelsSelectAll')}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => models.toggleAll(false)}>
-          {t('modelsSelectNone')}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!models.dirty || models.saving}
-          onClick={models.save}
-        >
-          {t('save')}
-        </Button>
-      </div>
+      {models.state === 'loading' && <div className={css.hint}>{t('loading')}</div>}
+
+      {models.state === 'error' && (
+        <div className={css.error}>{t('loadFailedWith', { reason: models.error ?? '' })}</div>
+      )}
+
+      {models.state === 'empty' && <div className={css.hint}>{t('modelsEmpty')}</div>}
+
+      {models.state === 'ready' && (
+        <>
+          <div className={css.modelActions}>
+            <Button variant="ghost" size="sm" onClick={() => models.toggleAll(true)}>
+              {t('modelsSelectAll')}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => models.toggleAll(false)}>
+              {t('modelsSelectNone')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!models.dirty || models.saving}
+              onClick={models.save}
+            >
+              {t('save')}
+            </Button>
+          </div>
+
+          <div className={css.modelList}>
+            {models.rows.map((row) => (
+              <div className={css.modelRow} key={row.bare}>
+                {/*
+                 * ⚠️ 外层是 `<div>` 不是 `<label>`：官方 `Switch` 是 `<button>`，
+                 * 被 label 包着会双触发（点一下又弹回来）。同一个坑见 PluginPanel。
+                 */}
+                <Switch
+                  checked={row.shown}
+                  label={row.label}
+                  onChange={(next) => models.toggle(row.bare, next)}
+                />
+                <span className={css.modelRowLabel} title={row.bare}>
+                  {row.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {models.saveError !== undefined && (
         <div className={css.error}>
           {t('failedWith', { action: t('save'), reason: models.saveError })}
-        </div>
-      )}
-
-      {models.loading ? (
-        <div className={css.hint}>{t('loading')}</div>
-      ) : (
-        <div className={css.modelList}>
-          {models.rows.map((row) => (
-            <div className={css.modelRow} key={row.bare}>
-              {/*
-               * ⚠️ 外层是 `<div>` 不是 `<label>`：官方 `Switch` 是 `<button>`，
-               * 被 label 包着会双触发（点一下又弹回来）。同一个坑见 PluginPanel。
-               */}
-              <Switch
-                checked={row.shown}
-                label={row.label}
-                onChange={(next) => models.toggle(row.bare, next)}
-              />
-              <span className={css.modelRowLabel} title={row.bare}>
-                {row.label}
-              </span>
-            </div>
-          ))}
         </div>
       )}
     </details>

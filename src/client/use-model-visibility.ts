@@ -25,8 +25,10 @@ import {
   hiddenInChannelOf,
   hiddenNamesOf,
   modelRowsOf,
-  type ModelChoice,
+  modelsResultOf,
+  sectionStateOf,
   type ModelRow,
+  type ModelSectionState,
 } from './model-visibility.ts'
 import { useResource } from './use-resource.ts'
 
@@ -34,8 +36,14 @@ import { useResource } from './use-resource.ts'
 export interface ModelVisibilityState {
   /** 界面要画的行（含勾选态）。 */
   readonly rows: readonly ModelRow[]
-  /** 模型清单还没读到。 */
-  readonly loading: boolean
+  /**
+   * 这一块该画成什么样（**永远**有值）。
+   *
+   * ⚠️ 原来是 `loading` + `error` 两个布尔给界面自己判，而界面判错的方式是
+   * 「干脆什么都不画」（见 `ModelVisibility.tsx` 的注释）—— 判定收在这里，
+   * 界面只负责把四种状态各画成一句话。
+   */
+  readonly state: ModelSectionState
   /** 清单读失败的原因（`undefined` = 没失败）。 */
   readonly error: string | undefined
   /** 正在保存。 */
@@ -49,29 +57,14 @@ export interface ModelVisibilityState {
   readonly save: () => void
 }
 
-/** 从宿主 `/models` 的返回里取出模型清单（结构坏了按空处理，不崩）。 */
-function modelChoicesOf(data: unknown): ModelChoice[] {
-  const groups = (data as { groups?: unknown } | undefined)?.groups
-  if (!Array.isArray(groups)) return []
-  const out: ModelChoice[] = []
-  for (const group of groups) {
-    const models = (group as { models?: unknown } | null)?.models
-    if (!Array.isArray(models)) continue
-    for (const model of models) {
-      const row = model as { id?: unknown; name?: unknown; bare?: unknown }
-      if (typeof row.id !== 'string' || typeof row.bare !== 'string') continue
-      out.push({
-        id: row.id,
-        bare: row.bare,
-        ...(typeof row.name === 'string' ? { name: row.name } : {}),
-      })
-    }
-  }
-  return out
-}
-
 /**
  * 读一个渠道的模型可见性。
+ *
+ * ⚠️ **`select` 取的是整个响应对象，不是 `result.data`**（2026-10-13 实踩）：
+ * 传输层把响应体**摊平**在结果对象上（`{ok: true, groups: [...]}`）。`ApiResult`
+ * 带索引签名，所以 `result.data` 能编译通过、却**永远是 `undefined`** ——
+ * 表现是「这个功能整块不存在」，而所有请求都是 200、零报错零日志。
+ * 判据：`tests/model-visibility-client.test.ts` 里那条源码断言。
  *
  * @param plugin - 渠道 id。
  */
@@ -83,12 +76,12 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
   const models = useResource<unknown>({
     key: cacheKeys.models(plugin),
     path: paths.models(plugin),
-    select: (result) => result.data,
+    select: (result) => result,
   })
   const visibility = useResource<unknown>({
     key: cacheKeys.modelVisibility(),
     path: paths.modelVisibility,
-    select: (result) => result.data,
+    select: (result) => result,
   })
 
   /** 已生效的隐藏项（读回来的那份）。 */
@@ -96,7 +89,7 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
     () => hiddenInChannelOf(visibility.data, plugin),
     [visibility.data, plugin],
   )
-  const choices = useMemo(() => modelChoicesOf(models.data), [models.data])
+  const choices = useMemo(() => modelsResultOf(models.data), [models.data])
   const rows = useMemo(() => modelRowsOf(choices, hidden), [choices, hidden])
 
   /**
@@ -165,7 +158,15 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
 
   return {
     rows: draftRows,
-    loading: models.loading,
+    /**
+     * ⚠️ 判「失败」在判「空」之前（见 `sectionStateOf` 的注释）：
+     * 把「读不到」说成「这个渠道还没有模型」是最容易把人引错的一句话。
+     */
+    state: sectionStateOf({
+      loading: models.loading,
+      error: models.error,
+      count: rows.length,
+    }),
     error: models.error,
     saving,
     saveError,
