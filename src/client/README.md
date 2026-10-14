@@ -378,6 +378,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 - ⚠️ **光带宽度用固定像素，不用百分比** —— 百分比在窄块上塌成一条线。宽度只写一处（`--cpa-sweep-width`），`@keyframes` 只写 `to`，起点复用它。
 - ⚠️ **没有 `animation-delay`，也不许引入延迟变量**：所有块同相位扫过，错峰就是从这里回来的。
 - ⚠️ **裁剪加在承载体上，绝不加在真实 `.card` 上** —— `.card` 一旦 `overflow: hidden`，里面按钮与开关的**焦点环会被剪掉**（outline 画在元素框外）。骨架卡里没有可交互元素，所以裁它不花钱。
+- ⚠️ **骨架卡不许另挂一个类去改外观** —— 边框、圆角、内边距都由真实 `.card` 说了算（汇总三格用真实 `.summaryCell`，同理）。曾经有一条 `.skeletonCard { border-color: transparent }` 把边框抹成透明，于是同屏上下两半一个有框一个没有（2026-10-14）。骨架的「像」正是靠这条一致性，任何一处另立外观都会让它与到达后的内容对不上。
 
 其余口径：只动 `transform`（不碰 `background-position`）；高光取 `var(--dsw-alias-bg-base)`（亮=白、暗=深，跟随主题）+ `color-mix(… 65%, transparent)`（不透明的背景色带子像硬边条纹），**不写颜色字面量**；周期 2–3 秒、`linear`、`infinite`；`prefers-reduced-motion: reduce` 里只停动画、骨架留着。
 
