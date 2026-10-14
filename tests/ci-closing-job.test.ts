@@ -9,6 +9,9 @@
  *   2. 判定写到 job 级 `if:` —— 条件为假时本 job 变 `skipped`，而 GitHub 把
  *      `skipped` 当 Success，于是「没跑」被当成「通过」。
  *   3. 判红条件漏掉 `skipped` —— 上游失败级联出来的 `skipped` 不算红。
+ *   4. 判红体不真的失败（`exit 0`）—— 条件成立也照样绿。这一条是 2026-10-14 补的：
+ *      当时把 `exit 1` 改成 `exit 0`，本文件其余 7 条判据**一条都没响** ——
+ *      `if:` 钉得再准，「判了会怎样」没人钉，收口 job 就只是一句安慰。
  *
  * 这里不跑 workflow、也不做 YAML 解析（本仓没有 yaml 依赖，为一条判据引一个不值）：
  * 只按缩进读 `jobs:` 块的一级 job，取 `needs` 与 `if:`。写法变了这条判据会先红，
@@ -137,5 +140,26 @@ describe('CI 收口 job', () => {
       "    if: contains(needs.*.result, 'failure')",
     )
     expect(jobLevelIfs(broken)).not.toEqual(['if: always()'])
+  })
+
+  /**
+   * 判红体必须**真的失败**。
+   *
+   * 上面那条钉的是「什么时候判」，这一条钉的是「判了会怎样」—— 少了它，
+   * 把 `exit 1` 改成 `exit 0` 就能让收口 job 永远绿，而本文件一条判据都不响
+   * （2026-10-14 实测：改掉后 7 条全过）。这正是这个 job 存在的理由。
+   */
+  it('判红体真的会失败（run 块里有非零退出）', () => {
+    expect(closing, '收口 job 的判定步骤没有 run 块').toMatch(/^\s*run:\s*\|/mu)
+    expect(
+      closing,
+      'run 块里没有非零退出 —— 条件成立时这一步会「成功」，收口 job 就永远绿',
+    ).toMatch(/^\s*exit\s+[1-9]\d*\s*$/mu)
+  })
+
+  /** 反向控制：判定体改成永不失败必须被判出来。 */
+  it('反向控制：判红体不再失败会被判出来', () => {
+    const broken = closing.replace(/exit [1-9]\d*/u, 'exit 0')
+    expect(broken).not.toMatch(/^\s*exit\s+[1-9]\d*\s*$/mu)
   })
 })
