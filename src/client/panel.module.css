@@ -33,13 +33,17 @@
 
 /* ---- Status bar -------------------------------------------------------- */
 
-/* One line, tertiary: this is a readout, not a heading. `margin-left: auto`
-   pushes the console link to the far end so the row has a clear anchor. */
+/* One line, tertiary: this is a readout, not a heading. `min-height` matches the
+   28px compact control this row now hosts (the Update button and the console
+   link), so readings and buttons share one optically-even line instead of the
+   text hugging the top. `margin-left: auto` on `.link` pushes the console link
+   to the far end so the row keeps a clear anchor. */
 .status {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-height: 28px;
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -47,16 +51,35 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The console link, wearing the **same outline button** as its siblings
+   (`variant="outline" size="sm"`): this row now mixes readings with real
+   buttons, so a dashed-underline text link is the odd one out (2026-10-14
+   real-machine feedback).
+   ⚠️ Host `Button` renders a native `<button>` (no `asChild`/`href`), and this
+   has to stay an `<a>` (it opens a new tab), so it borrows the button's geometry
+   and tokens by hand: `28px / 12px / 18px / 0 10px / --dsw-radius-sm` plus the
+   `0.5px solid --dsw-alias-border-l3` outline — the same source values as the
+   host's `Button.module.css`, so both themes follow the tokens, no literals. */
 .link {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
   margin-left: auto;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
   text-decoration: none;
-  border-bottom: 1px dashed currentColor;
+  cursor: pointer;
 }
 
 .link:hover {
   color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 /* ---- Notice ------------------------------------------------------------ */
