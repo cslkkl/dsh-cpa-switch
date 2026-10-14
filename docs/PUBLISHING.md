@@ -34,6 +34,34 @@ OIDC 万一坏了，备用路径是所有者本机 `npm publish --access public`
 - **`ci.yml` 不许写回仓库**（`permissions: contents: read`）。
 - ⚠️ **`release-drafter.yml` 必须用 Linux runner** —— 理由见根 [AGENTS.md](../AGENTS.md) 活跃坑。
 
+## `main` 上的规则集（不在 `.github/` 里，所以单独说）
+
+`main` 有一条规则集 `main-protection`（2026-10-15 建）：**必需检查 = `CI Success`**，
+且只认 GitHub Actions 这一个来源。它让 [ci.yml](../.github/workflows/ci.yml) 末尾那个
+收口 job 红了时真的挡住合并，而不只是显示一个红叉。
+
+⚠️ **必需检查也拦直推**（实测，2026-10-15）：不带 bypass 时 `git push origin main` 被拒 ——
+
+```
+remote: error: GH013: Repository rule violations found for refs/heads/main.
+remote: - Required status check "CI Success" is expected.
+```
+
+而本仓发布正是「**推 main、再打标签**」，所以这条规则给所有者留了 bypass
+（`actor_type: User`、`bypass_mode: always`）。**去掉 bypass 就等于把发布路堵死**：
+要么改成每次发布都走 PR，要么发布前把规则集临时改成 `disabled`。
+
+⚠️ 同一枚硬币的反面：**bypass 也让所有者自己的合并不受必需检查约束**，所以对本仓它是
+「一个显眼的名字 + 合并框里的红字提醒」，不是硬闸（只有所有者一个人能合并）。
+要变成硬闸，得先改发布流程 —— 那是另一件事，别顺手删 bypass 了事。
+
+查规则集走 API（网页在 `Settings → Rules → Rulesets`）：
+
+```powershell
+gh api repos/cslkkl/dsh-cpa-switch/rulesets
+gh api repos/cslkkl/dsh-cpa-switch/rulesets/25096667
+```
+
 ## 版本号语义
 
 | 档位      | 什么时候                                 | 例                |
