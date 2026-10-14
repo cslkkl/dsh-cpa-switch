@@ -302,6 +302,49 @@ export function Panel(props: PanelProps): ReactNode {
           )}
           {status.hasAdminKey !== true && <Tag tone="warning">{t('noAdminKey')}</Tag>}
           {/*
+           * 渠道插件版本这一段读数，与上面的状态读数**同一行**。
+           *
+           * 为什么并进状态条而不是单起一行：它原先是独立的 `.status`，而这一行是
+           * **加载后才出现**的（版本查询是第二次独立读，比主读更晚），于是到达那一刻
+           * 下方整块被顶高一格（2026-10-14 真机反馈）。同一件事的两条读数摆两行，就是
+           * 自己制造位移。
+           *
+           * 并进来的代价/收益：`.status` 已是 `flex-wrap` 的读数行，追加一段只是多一个
+           * `.statusText` + 按钮，**不新增行、也不新增几何** —— 段落缺席时高度不变，所以
+           * 「加载后才出现」不再造成任何下移。
+           *
+           * 位置：放在管理控制台链接**之前** —— 那个链接用 `margin-left: auto` 顶到最右，
+           * 放进它前面才不会把两段读数挤开。
+           *
+           * ⚠️ 仍只在**环境已就绪**时出现：环境缺东西时这一行没有意义，那条路由
+           * 「一键准备环境」负责（与原先一致）。
+           */}
+          {setupReady && update.line !== '' && (
+            <>
+              <span className={css.statusText}>{update.line}</span>
+              {update.action === 'update' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={updateAction?.phase === 'working'}
+                  onClick={() => void updatePlugins()}
+                >
+                  {t('pluginUpdateRun')}
+                </Button>
+              )}
+              {update.action === 'retry' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={updateAction?.phase === 'working'}
+                  onClick={() => void updateResource.reload({ force: true })}
+                >
+                  {t('pluginUpdateRetry')}
+                </Button>
+              )}
+            </>
+          )}
+          {/*
            * CPA 自带管理控制台的入口。
            *
            * 本插件启动 CPA 时带了 `-no-browser`（否则每次拉起都会自动弹浏览器），
@@ -318,63 +361,6 @@ export function Panel(props: PanelProps): ReactNode {
             >
               {t('console')}
             </a>
-          )}
-        </div>
-      )}
-
-      {/*
-       * 渠道插件版本一行。
-       *
-       * 只在**环境已就绪**时出现：环境还缺东西时这一行没有意义 —— 那条路由
-       * 「一键准备环境」负责，它会装上游当前的版本。
-       *
-       * 为什么放在状态条下面而不是「环境准备」块里：后者只在**缺东西**时渲染
-       * （`ok !== true`），而更新恰恰是「东西都齐了、但想换一批」的场景。
-       *
-       * ⚠️ 状态条那一栏也要**同时**看到 CPA 是否被停掉（更新前会停），
-       * 所以两块的相邻关系是有意的。
-       */}
-      {/*
-       * 渠道插件版本那一行。
-       *
-       * 只在**环境已就绪**时出现：环境还缺东西时这一行没有意义 —— 那条路由
-       * 「一键准备环境」负责，它会装上游当前的版本。
-       *
-       * 为什么放在状态条下面而不是「环境准备」块里：后者只在**缺东西**时渲染
-       * （`ok !== true`），而更新恰恰是「东西都齐了、但想换一批」的场景。
-       *
-       * ⚠️ 状态条那一栏也要**同时**看到 CPA 是否被停掉（更新前会停），
-       * 所以两块的相邻关系是有意的。
-       *
-       * ⚠️ **复用 `.status` 的设计语言**（三级色 + gap 8 + 无左边框）：它和上面那条
-       * 是同一类东西 —— 都是「读数」，不是提示块。自造一套 `.updateRow` 会让同一屏
-       * 出现两种读数排版（2026-10-12 实机截图）。
-       *
-       * ⚠️ **「已是最新」不给按钮**（`action === 'none'`）：陈述句不需要动作，
-       * 而原先挂的那个「重新检测」与提示块上同名按钮做的是两件不同的事，用户没法分辨。
-       */}
-      {setupReady && update.line !== '' && (
-        <div className={css.status}>
-          <span className={css.statusText}>{update.line}</span>
-          {update.action === 'update' && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={updateAction?.phase === 'working'}
-              onClick={() => void updatePlugins()}
-            >
-              {t('pluginUpdateRun')}
-            </Button>
-          )}
-          {update.action === 'retry' && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={updateAction?.phase === 'working'}
-              onClick={() => void updateResource.reload({ force: true })}
-            >
-              {t('pluginUpdateRetry')}
-            </Button>
           )}
         </div>
       )}
