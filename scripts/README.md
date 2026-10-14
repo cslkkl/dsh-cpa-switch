@@ -7,6 +7,8 @@
 | `verify-artifacts.cjs`  | 用宿主加载器协议加载 `lib/` 产物，断言关键契约                                                                         | `pnpm build` 之后；`pnpm check` 与 CI 都会跑        |
 | `check-layering.cjs`    | 按分层矩阵检查 `src/` 的 import 方向                                                                                   | 改动跨模块依赖后；`pnpm check` 与 CI 都会跑         |
 | `check-doc-paths.cjs`   | 文档里提到的 `src/**` / `tests/**` / `scripts/**` 路径必须存在                                                         | 搬文件 / 改名 / 删模块后；`pnpm check` 与 CI 都会跑 |
+| `check-release.mjs`     | **发布态不变量**：`files` / `locale` / `icon` / `engines.dsh` 与各 peer 下限、发布流不许改版本号                       | 改声明面 / 发布流后；`pnpm check` 与发布流都会跑    |
+| `release-guard.mjs`     | **发布噪音守卫**：自上一个标签以来的改动会不会改变 npm 上的产物（stdin 读路径）                                        | 推标签发布时由 `publish.yml` 跑；本机复核发布时     |
 | `verify-alias-yaml.mts` | 核对 `oauth.model-alias` 段的 YAML 形状                                                                                | 改了别名渲染之后                                    |
 | `snapshot-catalog.mjs`  | **只读观测探针**：把宿主侧模型目录打成快照（切语言前后对比用）；不进门禁，由 agent 在本机跑                            | 排查模型路由 / 选择器问题时                         |
 | `probe-cpa-stream.mjs`  | **输出链路探针**：对本地 CPA 直发 chat 请求，原样抓 SSE / 原始响应并做帧级判读；**发真实请求、消耗渠道额度**，不进门禁 | 排查「思考去了哪 / DSML 泄漏 / 回放 400」类问题时   |
@@ -69,6 +71,59 @@ pnpm check:doc-paths       # 退出码 0 = 通过，1 = 有死路径 / 白名单
 判据：[`tests/doc-paths-guard.test.ts`](../tests/doc-paths-guard.test.ts) —— 脚本自己出过一次
 **静默** bug（扩展名交替写成 `ts|tsx`，`.tsx` 被截成 `.ts`，一次报出 7 处假违规），
 自证用例把它钉住了。
+
+### check-release.mjs
+
+把「一个已发布的产物必须满足什么」从 [docs/PUBLISHING.md](../docs/PUBLISHING.md) 的散文
+搬进门禁。发布流在 publish 之前单独跑一次（`publish.yml` 的 `Check release state` 步），
+`pnpm check` 跑的是同一份脚本。
+
+**为什么需要它**：这一组全是**错了也不报错**的声明。宿主直接从包里读 `locale/*.json` 与
+`package.json`，**那条路径上我们一行代码都不跑** —— 所以文件在不在、`exports` 与 `files`
+有没有真的带上它们，只能在这里查；缺一处宿主就**静默回落**（标题回落成包名、描述回落成
+`package.json.description`、图标回落成默认图），插件页什么都不报。另一半是声明自洽
+（`engines.dsh` 与每个 `@deepseek-ai/dsh*` peer 的下限），打架时按我们宣传的范围装上来的
+用户拿不到一个能用的宿主。
+
+⚠️ **发布流文件名是一个常量**（`.github/workflows/publish.yml`）：写错它，「发布流不许改
+版本号」那条断言会因为**文件不存在而整段跳过** —— 一条永远不会红的断言等于没有。
+所以文件不存在时按前提不成立**报错**（退出码 2），不静默通过。
+
+**不读产物**：它只看 `package.json` / `LICENSE` / `locale/*.json` / 发布流文件，
+**不需要 `lib/`**，所以挂在 `pnpm check` 链的 build 之前。
+
+```powershell
+pnpm check:release         # 退出码 0 = 全绿，1 = 有断言失败，2 = 前提不成立
+```
+
+判据：[`tests/release-workflow.test.ts`](../tests/release-workflow.test.ts) —— 含自证
+（临时仓里只有清单、没有发布流时必须给 2）与「`pnpm version` 这类真命令抓得住、
+注释与 `echo` 不算」。
+
+### release-guard.mjs
+
+**发布噪音守卫**：自上一个标签以来的改动，**到底会不会改变 npm 上的那个产物**。
+
+**为什么需要它**：[docs/PUBLISHING.md](../docs/PUBLISHING.md) 写着「使用者观察不到变化的
+改动不发版」（纯文档 / 测试 / CI / 注释），但那是散文 —— 而一批只有文档的改动照样能被
+发布流一路放行，发出一个与上一版**产物完全相同**的版本号，npm 上还不可撤销。判据落在这里。
+
+判定口径是**按排除**：认不出来的路径一律算「产物会变」。漏发一版（人要再回答一次）比拦掉
+一次本该发的更轻。它只看**路径** —— 行为等价的改动（改个常量名、挪一句文案）从这里看与真
+改动长得一样，那部分由人回答。
+
+⚠️ **前缀表里有几条前提，改之前先核对**：测试目录是 `tests/`（写成 `test/` 会让本仓的测试
+改动被当成产物改动，守卫静默失效）；构建配置在**仓根** `tsdown.config.ts`，它决定 `lib/`
+长什么样、**属于产物**，不能排除；`scripts/` 整个可以排除，因为本仓没有哪个脚本产出 `lib/`。
+
+```powershell
+git diff --name-only v0.14.0..HEAD | node scripts/release-guard.mjs
+# 退出码 0 = 产物会变，允许发布 / 1 = 只有非产物改动，这一版不该发 / 2 = 用法错
+```
+
+它由 `publish.yml` 的 `Guard against release noise` 步跑（**只跑 tag 触发**，基线是
+`git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude=<正在发布的那个标签>`）。
+本机复核某次发布时也可以直接管道进去。
 
 ### verify-artifacts.cjs
 
@@ -134,13 +189,22 @@ node scripts/probe-cpa-stream.mjs --case replay --model wb/deepseek-v4.1-flash
 ## 归属与依赖
 
 - 被谁依赖：`package.json` 的 `verify:artifacts` 脚本；CI 的 `Verify build artifacts` 步
-- 依赖：只用 `node:fs` / `node:path`，**不装任何依赖**（脚本要能在 frozen 安装后直接跑）
-- 前提：先有 `lib/` 产物
+- 被谁依赖（发布链路）：`check-release.mjs` ← `package.json` 的 `check:release`（挂在
+  `check` 链上）与 `publish.yml` 的 `Check release state` 步；`release-guard.mjs` ←
+  `publish.yml` 的 `Guard against release noise` 步（**只跑 tag 触发**）
+- 依赖：只用 `node:fs` / `node:path`（`check-release.mjs` 另用 `node:url` 判「是不是直接
+  跑」），**不装任何依赖**（脚本要能在 frozen 安装后直接跑）
+- 前提：先有 `lib/` 产物（`verify-artifacts.cjs`）。`check-release.mjs` 与
+  `release-guard.mjs` **不需要构建产物** —— 前者读清单与文件、后者只读 stdin
 
 ## 变更影响路由
 
 - 改产物形状（`tsdown.config.ts` 的 banner/footer/intro/externals）→ 同步本脚本的断言
 - 新增脚本 → 回填本文件的表格
+- 改 `package.json` 的 `files` / `exports` / `engines` / 各 peer 下限 → 跑 `pnpm check:release`
+  （它就是这些声明的判据）
+- 改发布流（`publish.yml`）的入口或步骤 → 跑 `pnpm check:release`（发布流不许改版本号）
+  并回看 [`tests/release-workflow.test.ts`](../tests/release-workflow.test.ts)（发布流那几条判据）
 
 ## 参考
 
