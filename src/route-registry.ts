@@ -579,6 +579,21 @@ function catalogIds(catalog: { data?: unknown[] }): string[] {
 }
 
 /**
+ * 一行的**展示名**（`WorkBuddy · glm-5.3`）—— 唯一一份，两处共用。
+ *
+ * ⚠️ **面板勾选清单与选择器条目必须是同一个字符串**（2026-10-14 实踩）：
+ * 候选行原先交出去的是**渠道名**（`WorkBuddy`），于是弹窗里每一行都显示同一个词
+ * —— 三四十行长得一模一样，用户根本分不清勾的是哪个模型（真机截图即如此）。
+ * 根因是「推给选择器的显示名」与「候选行的 label」各算了一份，其中一份漏了模型名。
+ *
+ * 所以这里就是那条判据的唯一 home：`toModel` 的 `name` 与候选行的 `label`
+ * 都从它取（判据 `tests/route-registry.test.ts` 的「候选行展示名 = 推送行的 name」）。
+ */
+function displayNameOf(row: { label: string; bare: string }): string {
+  return `${row.label} · ${row.bare}`
+}
+
+/**
  * 一个渠道分组：`id` 是模型选择器的**分组身份**（`cpa-<渠道>`），`profile` 是推给宿主的那份。
  *
  * 为什么 id 与 profile 分开而不是塞进 profile 里：`profile` 的键就是宿主的
@@ -732,11 +747,16 @@ function buildCpaRouteProfile(
    * 交出去给面板当勾选清单用（见 {@link RouteRefresher.candidatesOf}）。
    * ⚠️ **必须在过滤之前抓**：隐藏掉的行也要在清单里，否则用户没法把它勾回来
    * （面板只列「当前会推送的」＝勾掉的那些就消失了，等于单向操作）。
+   *
+   * ⚠️ **`label` 取展示名（`WorkBuddy · glm-5.3`），不是渠道名**（2026-10-14 实踩）：
+   * 原先这里交出去的是 `row.label`（= 渠道名），弹窗里每一行都是「WorkBuddy」，
+   * 全是同一个词 —— 用户没法分辨自己在勾哪个模型。它必须与推送行的 `name` 同源
+   * （{@link displayNameOf}），否则两份显示名必然漂开。
    */
   const candidates: RowCandidate[] = rows.map((row) => ({
     id: row.id,
     bare: row.bare,
-    label: row.label,
+    label: displayNameOf(row),
     channel: row.channel,
   }))
   const kept =
@@ -812,7 +832,7 @@ function buildCpaRouteProfile(
     const maxOutputTokens = caps?.maxOutputTokens ?? routeMaxOutputTokens
     return {
       id: row.id,
-      name: `${row.label} · ${row.bare}`,
+      name: displayNameOf(row),
       /**
        * 窗口：**只在有出处时写**。校准表里的条目可以只带档位标记而不带窗口
        * （两条证据轴独立）—— 那时**一个字段都不写**，让宿主落自己的兜底
@@ -1265,7 +1285,13 @@ export interface CandidateRow {
   readonly id: string
   /** 裸名 —— **隐藏表的键**，也是面板提交回来的东西。 */
   readonly bare: string
-  /** 展示名（上游给的或 `渠道 · 模型`）。 */
+  /**
+   * 展示名 —— **与推给选择器的 `name` 逐字相同**（`WorkBuddy · glm-5.3`）。
+   *
+   * ⚠️ **不是渠道名**（2026-10-14 实踩）：曾经这里给的是渠道名，于是勾选弹窗里
+   * 每一行都显示「WorkBuddy」，几十行长得一模一样，用户分不清在勾哪个模型 ——
+   * 零报错。两侧同源见 {@link displayNameOf}。
+   */
   readonly label: string
 }
 
