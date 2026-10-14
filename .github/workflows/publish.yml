@@ -10,15 +10,15 @@
 # 静默回到「能跑但发不出去」的状态。
 #
 # ⚠️ **不要加 `environment:`** —— 本包的 npm Trusted Publisher 是**不带 environment**
-# 配的；加一个会让 OIDC claims 对不上，发布以 404 失败（组织规范也把 environment 名
-# 列为 per-repo，不是必须统一的东西）。
+# 配的；加一个会让 OIDC claims 对不上，发布以 404 失败。要加就得先在 npm 侧
+# 把 Trusted Publisher 改成带 environment 的那一种，两边必须逐字一致。
 #
 # ⚠️ 这个 workflow 只负责**发布**，不负责改版本号。版本号必须在打标签前
 # 已经在 `package.json` 里 bump 过（`pnpm version … --no-git-tag-version`），
 # 且 **build 在 bump 之后** —— 顺序反了产物里就是旧版本号，而 npm 上不可覆盖。
 # 见 [docs/PUBLISHING.md](../docs/PUBLISHING.md)。
 #
-# ## 四条行为底线（跨仓规范 §3.8）
+# ## 这个发布流保证的四件事
 #
 # 1. **手动与 tag 双入口**，且 tag 触发自带门禁：标签名必须等于 `v` + 清单版本。
 #    手动入口是**补发/修复**通道，`tag` 必须显式给，`--verify-tag` 保证标签已存在。
@@ -31,9 +31,10 @@
 #
 # - tag 触发时守卫的基线必须 `--exclude` 掉正在发布的那个标签（否则 `describe` 取到它自己，
 #   范围为空，一次正常发布被判成「没有可发布的」）。
-# - 清草稿**按 action 自己的行匹配**，不是照抄通知的整句话 —— 本仓的做法更硬：
-#   [release-drafter.yml](release-drafter.yml) 规定正文模板里**根本不许出现**那类说明，
-#   于是没有需要 sed 掉的行（照抄一句会随模板改写而静默失效）。
+# - 草稿正文里若有一行说明，发布流要清它就得**按草稿 action 自己的行匹配**，不能按那句
+#   通知的措辞去匹配 —— 措辞会变，按措辞写的 sed 会在它被改写的那一刻静默失效。
+#   本仓不靠 sed 解决这条：[release-drafter.yml](release-drafter.yml) 取舍 2 规定正文模板
+#   里**根本不许出现**那类说明，正文只有改动条目，所以没有需要清的行。
 # - 建 Release 前先查它存不存在（否则重跑与既有标签撞车）。
 # - 发布流自己不许 bump 版本号 —— 判据是 `scripts/check-release.mjs` 里那条断言。
 name: publish
