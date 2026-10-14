@@ -1,0 +1,23 @@
+# pnpm 工作区根。只有一个包也要显式声明 —— 不声明，pnpm 就把这个目录当成
+# 非工作区目录，装出来的依赖树与 CI 那份不是同一棵。
+packages:
+  - '.'
+
+# pnpm 11 的工作区设置只从这里读，**不读 package.json 的 `pnpm` 字段**
+# （那个字段会被忽略，并打印一条点名本文件的警告）。写在这里是为了让新克隆与 CI
+# 拿到同一个答案，而不是各自回去答 `pnpm approve-builds` 的交互提问。
+#
+# **故意没有 allowBuilds** —— 这是实测后的决定，不是漏写：
+# 装上依赖后逐包扫过整棵树（node_modules 下 197 份 package.json，与锁文件里的
+# 176 个包对得上，另有 @scope 目录与嵌套），**没有任何一个包声明
+# preinstall / install / postinstall**。本仓的构建器是 tsdown，它走 rolldown
+# （tsdown 0.22.14 的依赖里是 `rolldown` + `rolldown-plugin-dts`，见 tsdown 清单），
+# 不是 esbuild；vite 确实把 esbuild 列为**可选** peer，但本仓没有采用它
+# —— `node_modules/esbuild` 根本不存在。没有构建脚本要跑，pnpm 就没有东西可拦，
+# 在这里写一张 allowBuilds 只会是一张空表。
+#
+# 哪天有依赖真的需要跑构建脚本，信号是**响的**，不必靠这段注释兜底：
+# pnpm 11 的 `strictDepBuilds` 默认开着，`pnpm install` 会以
+# `ERR_PNPM_IGNORED_BUILDS` **失败**（本机 pnpm 11.17.0 实测：exit 1），
+# 并往本文件末尾补一条占位（`allowBuilds:` 下挂「包名: set this to true or false」）。
+# 走到那一步再把它改成 true，而不是现在先写一张猜出来的表。

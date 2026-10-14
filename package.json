@@ -11,11 +11,17 @@
     "cpa",
     "plugin"
   ],
+  "author": "cslkkl",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cslkkl/dsh-cpa-switch.git"
   },
+  "bugs": {
+    "url": "https://github.com/cslkkl/dsh-cpa-switch/issues"
+  },
+  "homepage": "https://github.com/cslkkl/dsh-cpa-switch#readme",
   "icon": "./icon.svg",
+  "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
     ".": {
@@ -28,6 +34,7 @@
   },
   "files": [
     "lib/",
+    "!lib/**/*.map",
     "cordis.patch.yml",
     "icon.svg",
     "locale/*.json",
@@ -74,6 +81,11 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-credentials": ">=0.1.7-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
