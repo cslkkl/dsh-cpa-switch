@@ -1,0 +1,18 @@
+# Actions 版本漂移由它送到眼前：每周一开一个 PR，CI 先在它上面跑一遍。
+#
+# **只开 `github-actions` 一个生态。** 本仓的 npm 依赖大多坐在宿主的预发布线上
+# （peer 范围是 `>=0.1.7-rc.2` 这类），给它们自动开 PR 只是噪音 —— 那些手动 bump。
+#
+# 分组：一次 PR 收掉全部 action，而不是每个 action 一个 PR。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ['*']
