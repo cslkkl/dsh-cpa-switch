@@ -59,7 +59,26 @@ describe('扫光 · 挂载点是**块**，不是骨头', () => {
     const card = css.slice(css.indexOf('\n.card {'))
     expect(card.slice(0, card.indexOf('}'))).not.toContain('overflow')
     const skeleton = readFileSync(new URL('../src/client/Skeleton.tsx', import.meta.url), 'utf8')
-    expect(skeleton).toContain('css.skeletonCard')
+    expect(skeleton).toMatch(/className=\{`\$\{css\.card\} \$\{BLOCK\}`\}/)
+  })
+
+  it('⚠️ 骨架卡**保留**真实卡片的边框（与汇总格一样看得见框）', () => {
+    // 曾经这里有一条 `.skeletonCard { border-color: transparent }`：汇总三格用真实
+    // `.summaryCell`（带框），骨架卡却被抹掉边框，同屏上下两半一个有框一个没有。
+    // 骨架的契约是「容器一律复用真实类」（src/client/README.md），边框只由 `.card` 说了算。
+    //
+    // 源码那一半（骨架卡就是「真实 `.card` + 承载体」）由上面那条判据钉住，这里只管样式。
+    //
+    // 两条一起判，缺一条都会漏：
+    //   1. 骨架**只新增承载体这一个类** —— 多出来的「骨架专用外观类」正是边框消失的来源
+    //      （⚠️ 按**全文件**判，不按某一段切片：切片判不到文件末尾追加的规则，
+    //      这是本轮反证实测出来的漏）；
+    //   2. 真实 `.card` 的边框本身还在 —— 否则第 1 条在「大家一起没框」时照样通过。
+    expect([...new Set(css.match(/\.skeleton[A-Za-z]*/g) ?? [])]).toEqual(['.skeletonBlock'])
+    const card = css.slice(css.indexOf('\n.card {'))
+    expect(card.slice(0, card.indexOf('}'))).toContain(
+      'border: 0.5px solid var(--dsw-alias-border-l2)',
+    )
   })
 
   it('汇总**整行一道光**（不是每格一道）', () => {

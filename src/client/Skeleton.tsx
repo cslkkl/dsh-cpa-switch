@@ -109,13 +109,17 @@ export function SkeletonSummary(): ReactNode {
  * ⚠️ **槽位为空也照样渲染外框** —— 真实卡片就是这么做的（空槽位保留高度），
  * 骨架照做才能与它等高。
  *
- * ⚠️ `skeletonCard` 只是「`.card` + 承载体」：`.card` 提供 222px 与六个槽位的
- * 几何，`.skeletonBlock` 提供裁剪与那一道光。**两者的顺序不能反**，否则后面的
- * 类会覆盖前面的定位。
+ * ⚠️ 容器就是「`.card` + 承载体」：`.card` 提供 222px、六个槽位的几何**与那圈边框**，
+ * `.skeletonBlock` 提供裁剪与那一道光。**两者的顺序不能反**，否则后面的类会覆盖
+ * 前面的定位。
+ *
+ * ⚠️ **不许再挂一个类去改边框**：汇总那三格用的是真实 `.summaryCell`（本来就带框），
+ * 骨架卡也照做 —— 边框只由 `.card` 说了算。曾经这里多一个 `.skeletonCard` 把
+ * `border-color` 抹成透明，于是同屏上下两半一个有框一个没有（2026-10-14）。
  */
 export function SkeletonCard(): ReactNode {
   return (
-    <div className={`${css.card} ${css.skeletonCard} ${BLOCK}`} aria-hidden="true">
+    <div className={`${css.card} ${BLOCK}`} aria-hidden="true">
       <div className={css.cardHead}>
         <Bone shape="nickname" />
         <div className={css.headSwitch}>

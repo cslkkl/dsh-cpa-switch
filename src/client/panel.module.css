@@ -866,14 +866,6 @@
   }
 }
 
-/* Skeleton card = the real card plus the sweep carrier.
-   Two classes, two jobs: `.card` owns the 222px and the six slots, this one owns
-   nothing but "this card is a skeleton" (and it keeps the two apart so the sweep
-   never touches the real `.card`). */
-.skeletonCard {
-  border-color: transparent;
-}
-
 /* Bone shapes, keyed by the shape the component declares. TS says *which* slot a
    bone stands in; the width and height of that slot are declared here.
    ⚠️ The attribute is a **string-valued** flag on purpose: `data-x={false}` still
