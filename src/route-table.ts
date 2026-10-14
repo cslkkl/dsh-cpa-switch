@@ -347,6 +347,10 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
        *   用来展示「这个渠道有哪些模型」；
        * - 本路由 = **推送侧的行** —— 勾选**必须**用这份，否则勾了完全没用，
        *   且零报错（2026-10-13 实踩：目录 20 个名字 vs 推送 9 行，一个都对不上）。
+       *
+       * ⚠️ 每行的 `label` 是**展示名**（`WorkBuddy · glm-5.3`，与推给选择器的
+       * `name` 同源），**不是渠道名** —— 给渠道名的话弹窗里几十行全长一样
+       * （2026-10-14 实踩）。
        */
       path: '/api/v1/cpa/model-rows',
       methods: ['GET'],

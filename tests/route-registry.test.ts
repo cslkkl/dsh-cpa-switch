@@ -2052,6 +2052,37 @@ describe('思考档位声明', () => {
     })
 
     /**
+     * ⚠️⚠️ **候选行的展示名必须与推送给选择器的 `name` 逐字相同**（2026-10-14 实踩）。
+     *
+     * 事故：候选行的 `label` 交出去的是**渠道名**（`WorkBuddy`），于是勾选弹窗里
+     * 三四十行**全是同一个词**（真机截图就是一片 `WorkBuddy`）—— 用户没法分辨
+     * 自己在勾哪个模型，而**零报错**。
+     *
+     * 守两件事：① 两侧显示名同源（都走 `displayNameOf`）；
+     * ② 同渠道内各行**展示名互不相同**（全是同一个词正是这次的形态）。
+     */
+    it('⚠️ 候选行的展示名 = 推送行的 name，且同渠道内互不相同', async () => {
+      const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+      const { entry, pushed } = fakeEntry(BASELINE)
+      const refresh = await attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))
+      await refresh('boot')
+
+      const nameByBare = new Map(
+        (pushed.at(-1)?.rows ?? []).map((row) => [
+          String(row.id).replace(/^[^/]+\//, ''),
+          String(row.name),
+        ]),
+      )
+      const rows = refresh.candidatesOf('qoder')
+      for (const row of rows) {
+        expect(row.label).toBe(nameByBare.get(row.bare))
+      }
+      // 全是同一个词 = 这次的事故形态
+      expect(new Set(rows.map((row) => row.label)).size).toBe(rows.length)
+      expect(rows.length).toBeGreaterThan(1)
+    })
+
+    /**
      * ⚠️ **同一个（渠道, 裸名）只留一行**：目录里同一个 trae 模型会同时有
      * `glm-5.2` / `trae/glm-5.2`（我们的别名）/ `Trae/trae/glm-5.2`（上游又套一层）
      * 三种 id —— 不去重的话选择器里同一个模型占三个条目，而勾一次三个一起消失。
@@ -2070,7 +2101,7 @@ describe('思考档位声明', () => {
 
       expect(pushed.at(-1)?.ids).toEqual(['trae/glm-5.2'])
       expect(refresh.candidatesOf('trae')).toEqual([
-        { id: 'trae/glm-5.2', bare: 'glm-5.2', label: 'Trae' },
+        { id: 'trae/glm-5.2', bare: 'glm-5.2', label: 'Trae · glm-5.2' },
       ])
     })
   })
