@@ -261,3 +261,33 @@ describe('骨架 · 接的是「还没有内容」的三处，且读屏说得出
     expect(en.loading).toBeTruthy()
   })
 })
+
+/*
+ * 与「数据到达不位移」同一条纪律，但主角不是骨架，而是**加载后才出现的一行读数**。
+ */
+describe('数据到达不新增行 · 版本读数并进状态条', () => {
+  it('⚠️ `Panel.tsx` 只有**一个** `.status` 行（版本读数不另起一行）', () => {
+    // 渠道插件版本这一行原先是独立的 `.status`，而它是**第二次独立读**（比主读更晚），
+    // 于是到达那一刻下方整块被顶高一格（2026-10-14 真机反馈）。现在它并进状态条那个
+    // `.status`，缺席/出现都只是多一个 `.statusText`，不新增行。
+    expect(panel.match(/className=\{css\.status\}/g)).toHaveLength(1)
+  })
+
+  it('版本读数与它的按钮在状态条**内**、管理控制台链接之前', () => {
+    // 从状态条那个 div 切到「更新跑完那一次的结果」（updateResult）——那之后就是
+    // 另一个独立块了。用 updateResult 当右界，避免依赖注释的缩进。
+    const statusRow = panel.slice(
+      panel.indexOf('<div className={css.status}>'),
+      panel.indexOf("{updateResult !== '' && <div"),
+    )
+    expect(statusRow).toContain('update.line')
+    expect(statusRow).toContain('pluginUpdateRun')
+    expect(statusRow).toContain('pluginUpdateRetry')
+    // 顺序：读数在 console 链接之前（那个链接用 `margin-left: auto` 顶到最右）
+    expect(statusRow.indexOf('update.line')).toBeLessThan(statusRow.indexOf("t('console')"))
+  })
+
+  it('⚠️ 版本读数**仍**受 `setupReady` 约束（环境没就绪时这一段没有意义）', () => {
+    expect(panel).toContain("setupReady && update.line !== '' && (")
+  })
+})
