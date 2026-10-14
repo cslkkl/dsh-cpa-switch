@@ -1,4 +1,4 @@
-# 发布：推 `v*` 标签即自动发到 npm。
+# 发布：推 `v<版本>` 标签即自动发到 npm。
 #
 # 认证走 **Trusted Publishing（OIDC）**，仓库里不存任何 npm token ——
 # 配置步骤见根 [AGENTS.md](../AGENTS.md) 的待办区。
@@ -9,15 +9,40 @@
 # ⚠️ 不要加 `NPM_TOKEN` secret —— OIDC 已替代它。加了反而会在 token 过期后
 # 静默回到「能跑但发不出去」的状态。
 #
+# ⚠️ **不要加 `environment:`** —— 本包的 npm Trusted Publisher 是**不带 environment**
+# 配的；加一个会让 OIDC claims 对不上，发布以 404 失败（组织规范也把 environment 名
+# 列为 per-repo，不是必须统一的东西）。
+#
 # ⚠️ 这个 workflow 只负责**发布**，不负责改版本号。版本号必须在打标签前
 # 已经在 `package.json` 里 bump 过（`pnpm version … --no-git-tag-version`），
 # 且 **build 在 bump 之后** —— 顺序反了产物里就是旧版本号，而 npm 上不可覆盖。
 # 见 [docs/PUBLISHING.md](../docs/PUBLISHING.md)。
+#
+# ## 四条行为底线（跨仓规范 §3.8）
+#
+# 1. **手动与 tag 双入口**，且 tag 触发自带门禁：标签名必须等于 `v` + 清单版本。
+#    手动入口是**补发/修复**通道，`tag` 必须显式给，`--verify-tag` 保证标签已存在。
+# 2. **正文读 Release Drafter 草稿**，读不到或为空时回落 `--generate-notes`；
+#    **读不到时必须发 `::warning::`** —— 「没草稿」（正常）与「配置坏了」不能长一个样。
+# 3. **草稿发布后退役**：删掉 tag 不以 `v` 开头的那一条，正式 Release 一律不碰。
+# 4. **npm 发布走 OIDC**，全程无 token。
+#
+# ## 四个静默陷阱（都不报错，逐个有防线）
+#
+# - tag 触发时守卫的基线必须 `--exclude` 掉正在发布的那个标签（否则 `describe` 取到它自己，
+#   范围为空，一次正常发布被判成「没有可发布的」）。
+# - 清草稿**按 action 自己的行匹配**，不是照抄通知的整句话 —— 本仓的做法更硬：
+#   [release-drafter.yml](release-drafter.yml) 规定正文模板里**根本不许出现**那类说明，
+#   于是没有需要 sed 掉的行（照抄一句会随模板改写而静默失效）。
+# - 建 Release 前先查它存不存在（否则重跑与既有标签撞车）。
+# - 发布流自己不许 bump 版本号 —— 判据是 `scripts/check-release.mjs` 里那条断言。
 name: publish
 
 on:
   push:
-    tags: ['v*']
+    # 只认 `v` + 数字开头的标签（`v0.15.2`）。`v*` 会把 `vnext`、`v-test` 这类
+    # 非版本标签也收进来，而它们没有对应的清单版本，门禁会红在一次没意义的推送之后。
+    tags: ['v[0-9]*']
   # 手动重跑：补一个漏掉的 Release、或补正文。
   #
   # ⚠️ **`tag` 必须显式给** —— `workflow_dispatch` 用的是**该 ref 上的 workflow 文件**，
@@ -39,6 +64,13 @@ permissions:
   # 症状与「推 tag 不建 Release」一模一样，看不出是权限问题。
   contents: write
 
+# 同一时刻只允许一轮发布：两轮并发会抢同一个 npm 版本号与同一个 Release。
+# ⚠️ `cancel-in-progress: false` —— **发布不能被取消**：npm 那边可能已经发出去了，
+# 中途杀掉就留下「npm 有、GitHub 没有」这个状态，而它只能靠一次重跑补回来。
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: windows-latest
@@ -52,6 +84,11 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # ⚠️ **必须全量历史**：守卫要 `git describe` 找上一个标签，
+          # 回落要 `--generate-notes`（它按提交算正文）。浅克隆下两者都拿不到东西，
+          # 而症状是「守卫说没有上一个标签」/「正文空」——都不报错。
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -66,6 +103,35 @@ jobs:
           # 这里显式钉住 registry 以免继承本机/runner 的镜像配置。
           registry-url: https://registry.npmjs.org
 
+      # 发布噪音守卫：这次改动到底会不会改变 npm 上的产物。
+      #
+      # 只跑 tag 触发 —— 手动触发是「补发/修复」通道（`--verify-tag` 保证标签已存在），
+      # 它本来就该被放行；而且手动触发时 `github.ref_name` 是 `main`，拿来当基线是错的。
+      #
+      # ⚠️ **基线必须 `--exclude` 掉正在发布的那个标签**：tag 触发时 HEAD 就是被打标签的
+      # 那个提交，不排除的话 `git describe` 取到它自己，`<tag>..HEAD` 为空，
+      # 一次**正常的发布**会被判成「没有任何改动」——这个坑不报错，只在第一次推标签时
+      # 以「没有可发布的」的形态出现。
+      - name: Guard against release noise
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $base = git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude=${{ github.ref_name }} 2>$null
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($base)) {
+            # 首次发布没有上一个标签，守卫无从比对 —— 不适用，直接放行。
+            Write-Output "no earlier tag — the first release is not subject to the guard"
+            exit 0
+          }
+          $changed = git diff --name-only "$base..HEAD"
+          if (-not $changed) {
+            Write-Error "no changes at all since $base; there is nothing to release"
+            exit 1
+          }
+          Write-Output "changes in ${base}..HEAD:"
+          # 退出码 0 = 产物会变（放行）/ 1 = 只有非产物改动（这一版不该发）/ 2 = 用法错。
+          $changed | node scripts/release-guard.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install
         run: pnpm install --frozen-lockfile --config.node-linker=hoisted
 
@@ -73,6 +139,12 @@ jobs:
       # **标签打错位置比不发更糟**：发出去的版本号不可撤销，只能发下一个版本。
       - name: Check
         run: pnpm check
+
+      # 发布态不变量单独一步：`pnpm check` 里已经含它（同一条链），单列只为让
+      # 「发布态不变量红了」一眼看得出是哪一类问题，而不是埋在大门禁的尾部。
+      # 位置固定在 build 之后（`pnpm check` 里已经构建过）：将来有断言要看产物时不必挪。
+      - name: Check release state
+        run: pnpm check:release
 
       # ⚠️ tag 与 package.json 必须一致：标签是 `v0.3.0` 就该发 0.3.0。
       # 对不上时 npm 会成功发**另一个**版本号（标签名不参与 npm 版本判定），
@@ -109,29 +181,26 @@ jobs:
           }
           exit $code
 
-      # ⚠️ **推 tag 不会自动产生 Release** —— tag 是 git 引用，Release 是挂在它上面的
-      # 独立页面对象，必须显式创建。漏了这一步的症状是「标签页有 tag、右边没有
-      # Release」，而 npm 那边**一切正常**，所以从发布日志上看不出少了什么
-      # （v0.1.2 就这么漏掉了；v0.2.0 的 Release 是人类手工补的）。
-      #
       # 正文来源优先级：`docs/releases/<tag>.md`（**可选覆盖**）→ **草稿**
-      # （Release Drafter 自动维护，默认来源）→ git log 摘要。
+      # （Release Drafter 自动维护，默认来源）→ `--generate-notes`（GitHub 自己的生成器）。
       #
       # ⚠️ **人工那份在前**：「覆盖」必须真的覆盖，否则写了等于没写 —— 那是静默失效。
       # 不写那份时草稿就是默认来源，所以**手写不再是必须步骤**。
       #
       # ⚠️ **每一步都打印用了哪个来源**（`::notice::`，会显示在 Actions 的注解里）。
-      # 回落是静默的：不打印就分不清「正文来自草稿」与「正文来自 git log」，
+      # 回落是静默的：不打印就分不清「正文来自草稿」与「正文来自回落」，
       # 而这两者的差别正是本机制要保证的东西。
+      #
+      # ⚠️ **「读不到草稿」与「没有草稿」必须分开报**：前者是**配置坏了**（action 没跑成、
+      # 权限不对、草稿 tag 被改过），发 `::warning::`；后者（读到了但本轮没有打过标签的 PR）
+      # 是正常情况，发 `::notice::`。混成一句的话，「发布成功但正文来自回落」是静默失败。
       #
       # ⚠️ 草稿的 tag 固定是 `next`（理由见 [release-drafter.yml](../release-drafter.yml)：
       # 用版本号当草稿 tag 会与正式标签撞车，而 `gh release edit` **不会**把草稿
       # 变成已发布 —— 那种失败没有任何报错）。所以这里**按 tag 从列表里挑 draft**，
       # 不用 `gh release view next`：按 tag 查的端点拿不到草稿。
-      #
-      # ⚠️ **必须幂等**：重跑这条 workflow（`workflow_dispatch`）时 Release 可能已存在，
-      # 那就改成更新正文，而不是报错退出 —— 否则「补正文」这个最常见的诉求反而修不了。
-      - name: Create GitHub Release
+      - name: Pick release body
+        id: notes
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -139,43 +208,111 @@ jobs:
           $tag = $env:RELEASE_TAG
           $notes = "docs/releases/$tag.md"
           $bodyFile = Join-Path $env:RUNNER_TEMP 'release-body.md'
+          $source = 'generate'
 
           if (Test-Path $notes) {
             # 人工那份是**可选覆盖**：存在就赢。
-            Write-Output "::notice::release notes come from $notes (hand-written override)"
+            $source = 'docs'
             Copy-Item $notes $bodyFile
+            Write-Output "::notice::release notes come from $notes (hand-written override)"
           } else {
             # ⚠️ **必须 `-join` 成「一个字符串」**：PowerShell 会把多行输出存成**字符串数组**，
             # 那时 `.Length` 是**元素个数**（实测报 8，而正文 161 字符）—— 而日志里那句
             # 「来自草稿（N chars）」正是用来确认来源的，数字错会误导。
             $draft = (gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" `
               --jq '[.[] | select(.draft) | select(.tag_name == "next") | .body][0] // ""' 2>$null) -join "`n"
+            $read = $LASTEXITCODE -eq 0
 
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($draft)) {
+            if (-not $read) {
+              $source = 'generate'
+              Write-Output "::warning::cannot read the Release Drafter draft (next) — falling back to --generate-notes."
+              Write-Output "::warning::if the configuration is broken (the action never ran / permissions missing / the draft tag was renamed), this warning is the only signal."
+            } elseif ([string]::IsNullOrWhiteSpace($draft)) {
+              $source = 'generate'
+              Write-Output "::notice::the draft was read but has no entries (no labelled pull requests this round) — falling back to --generate-notes"
+            } else {
+              $source = 'draft'
               # 带上首行当**指纹**：草稿首行是 `## 修复` 这类分类标题，
-              # 而 git log 回落的首行是 `## What's Changed` —— 一眼分得出走了哪条路。
+              # 而回落的首行是 `## What's Changed` —— 一眼分得出走了哪条路。
               $preview = ($draft -split "`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -First 1)
               Write-Output "::notice::no $notes — release notes come from the Release Drafter draft ($($draft.Length) chars, starts with: $preview)"
               Set-Content -Path $bodyFile -Value $draft -Encoding utf8
-            } else {
-              Write-Output "::notice::no $notes and no draft — falling back to git log"
-              $prev = (git describe --tags --abbrev=0 "$tag^" 2>$null)
-              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($prev)) {
-                $range = $tag
-              } else {
-                $range = "$prev..$tag"
-              }
-              $lines = git log --pretty=format:'- %s' $range
-              "## What's Changed`n`n$($lines -join "`n")" | Set-Content -Path $bodyFile -Encoding utf8
             }
           }
 
-          # 先看有没有 —— `gh release view` 对「不存在」返回非零，正好当开关用。
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "source=$source" -Encoding utf8
+
+      # ⚠️ **推 tag 不会自动产生 Release** —— tag 是 git 引用，Release 是挂在它上面的
+      # 独立页面对象，必须显式创建。漏了这一步的症状是「标签页有 tag、右边没有
+      # Release」，而 npm 那边**一切正常**，所以从发布日志上看不出少了什么
+      # （v0.1.2 就这么漏掉了；v0.2.0 的 Release 是人类手工补的）。
+      #
+      # ⚠️ **必须幂等**：重跑这条 workflow（`workflow_dispatch`）时 Release 可能已存在，
+      # 那就改成更新正文，而不是报错退出 —— 否则「补正文」这个最常见的诉求反而修不了。
+      # 查存在性在**创建之前**（`gh release view` 对「不存在」返回非零，正好当开关用）。
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $source = '${{ steps.notes.outputs.source }}'
+          $bodyFile = Join-Path $env:RUNNER_TEMP 'release-body.md'
+
           gh release view $tag --json tagName 2>$null | Out-Null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Output "release $tag already exists — updating notes"
+          $exists = $LASTEXITCODE -eq 0
+
+          if ($source -eq 'generate') {
+            # 回落走 GitHub 自己的生成器（按提交算正文、带 contributors 分区），
+            # **不是手搓一行行 `git log` 摘要** —— 那种正文只有提交标题，可读性差。
+            if ($exists) {
+              # ⚠️ `gh release edit` **没有** `--generate-notes`（那是 create 独有的），
+              # 所以已有 Release 时改走 generate-notes 端点取一次正文，再写回去。
+              gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name=$tag `
+                --jq .body | Set-Content -Path $bodyFile -Encoding utf8
+              Write-Output "release $tag already exists — regenerating notes (body source: generate-notes)"
+              gh release edit $tag --notes-file $bodyFile
+            } else {
+              Write-Output "creating the Release: $tag (body source: generate-notes)"
+              # `--verify-tag`：不让 gh 去猜或新建标签，标签必须已存在。
+              gh release create $tag --title $tag --generate-notes --verify-tag
+            }
+          } elseif ($exists) {
+            Write-Output "release $tag already exists — updating notes (body source: $source)"
             gh release edit $tag --notes-file $bodyFile
           } else {
-            # `--verify-tag`：不让 gh 去猜或新建标签，标签必须已存在。
+            Write-Output "creating the Release: $tag (body source: $source)"
             gh release create $tag --title $tag --notes-file $bodyFile --verify-tag
           }
+
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # 正文取走之后，**草稿必须让位**，否则下一次发布会读到上一批的正文。
+      #
+      # Release Drafter 拿「最近一个正式 Release」当分界线，自己不记得哪份草稿被消费过。
+      # 后果不是空草稿，而是**陈旧**草稿 —— 实踩：0.3.0 发完之后 `next` 里还是 0.3.0 之前
+      # 那批，于是正文是**上一批**的，而草稿看上去毫无异常。
+      #
+      # ⚠️ 条件必须是「这次正文**确实来自草稿**」：人工覆盖（`docs/releases/<tag>.md`）
+      # 那份赢的时候草稿根本没被消费，删掉就是白白丢掉一批永远发不出去的正文。
+      #
+      # ⚠️ 只删 tag **不以 `v` 开头**的那一条草稿：不按标题匹配，也不碰任何正式
+      # `v<版本>` Release。`gh release delete` 默认**连标签一起删**，所以这里显式关掉。
+      - name: Retire the drafter draft
+        if: steps.notes.outputs.source == 'draft'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $draftTag = (gh release list --limit 30 --json tagName,isDraft `
+            --jq '[.[] | select(.isDraft) | .tagName] | map(select(startswith("v") | not)) | .[0] // ""') -join "`n"
+          $draftTag = $draftTag.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($draftTag)) {
+            Write-Output "::notice::no draft with a non-v tag — nothing to retire"
+            exit 0
+          }
+
+          gh release delete $draftTag --yes --cleanup-tag=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output "retired the draft $draftTag (Release Drafter rebuilds it after the next merge)"
