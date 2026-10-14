@@ -1,16 +1,16 @@
 /**
- * 发布流的四条底线（组织跨仓规范 §3.8）—— 钉在本仓
+ * 发布流保证的四件事 —— 钉在本仓
  * [publish.yml](../.github/workflows/publish.yml) 上。
  *
- * 为什么需要它：这四条**全都不报错**。少一个 `--exclude`、把 `::warning::` 写成
+ * 为什么需要它：这几条**全都不报错**。少一个 `--exclude`、把 `::warning::` 写成
  * `::notice::`、忘了退役草稿、回落退回手搓 `git log` —— 每一种都能一路绿灯发布成功，
  * 只是行为悄悄变了一档。而「发布流只写在 YAML 与散文里」时，改错它唯一的信号是
  * **下一次真发布**，那时版本号已经不可撤销了。
  *
  * 本文件做三件事：
- * 1. **把四条底线做成判据**（在真实 `publish.yml` 上断言，不是断言一个副本）；
+ * 1. **把这几条做成判据**（在真实 `publish.yml` 上断言，不是断言一个副本）；
  * 2. **自证**：解析器真的解析出了东西（步数、每个 step 都是映射），
- *    而且 `scripts/check-release.mjs` 读不到的发布流文件时报退出码 2 而不是静默跳过；
+ *    而且 `scripts/check-release.mjs` 读不到发布流文件时报退出码 2 而不是静默跳过；
  * 3. **反向控制**：从合成文本里逐条删掉要素，对应的判据必须**变红** ——
  *    一条永远不会红的判据等于没有，这里逐条证明它会红。
  */
@@ -23,6 +23,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const WORKFLOW = new URL('../.github/workflows/publish.yml', import.meta.url)
 const raw = readFileSync(WORKFLOW, 'utf8')
+
+/** 草稿（Release Drafter）的配置 —— 陷阱四的判据要看它。 */
+const DRAFTER = new URL('../.github/release-drafter.yml', import.meta.url)
+const drafterRaw = readFileSync(DRAFTER, 'utf8')
 
 /** YAML 注释行（本仓的 workflow 里 `#` 只出现在整行注释，不做行尾注释）。 */
 const isComment = (line: string): boolean => /^\s*#/u.test(line)
@@ -49,6 +53,11 @@ function blockOf(text: string, key: string): string | null {
     (line) => line.trim() !== '' && !isComment(line) && indentOf(line) <= keyIndent,
   )
   return (end < 0 ? rest : rest.slice(0, end)).join('\n')
+}
+
+/** 取出 Release Drafter 配置里 `template:` 那一段的正文。 */
+function drafterTemplate(text: string): string {
+  return blockOf(text, 'template') ?? ''
 }
 
 /** 段里缩进最浅那一层（= 该段的直接子键）的键名。 */
@@ -128,9 +137,9 @@ function stepNamed(pattern: RegExp): Step | undefined {
   return steps.find((step): step is Step => step !== null && pattern.test(step.name))
 }
 
-// --- 四条底线的判据（全部吃正文，吃正文才能被反向控制喂合成文本） ----------------------
+// --- 四件事的判据（全部吃正文，吃正文才能被反向控制喂合成文本） ----------------------
 
-/** 底线一：手动与 tag 双入口。 */
+/** 其一：手动与 tag 双入口。 */
 function hasBothEntryPoints(text: string): boolean {
   const on = blockOf(text, 'on')
   if (on === null) return false
@@ -138,13 +147,13 @@ function hasBothEntryPoints(text: string): boolean {
   return keys.includes('workflow_dispatch') && keys.includes('push')
 }
 
-/** 底线一：tag 触发只认 `v[0-9]*`（`v*` 会把无版本可对的标签也收进来）。 */
+/** 其一：tag 触发只认 `v[0-9]*`（`v*` 会把无版本可对的标签也收进来）。 */
 function hasTagTrigger(text: string): boolean {
   const push = blockOf(blockOf(text, 'on') ?? '', 'push')
   return push !== null && push.includes("'v[0-9]*'")
 }
 
-/** 底线一：tag 触发自带门禁 —— 标签名必须等于 `v` + 清单版本。 */
+/** 其一：tag 触发自带门禁 —— 标签名必须等于 `v` + 清单版本。 */
 function hasTagVersionGate(text: string): boolean {
   const step = stepsOf(text).find(
     (item): item is Step => item !== null && item.name === 'Verify tag matches package version',
@@ -171,7 +180,7 @@ function hasExcludeBaseline(text: string): boolean {
   )
 }
 
-/** 底线二：读不到草稿必须发 `::warning::`，且与「读到了但为空」分开报。 */
+/** 其二：读不到草稿必须发 `::warning::`，且与「读到了但为空」分开报。 */
 function hasDraftReadWarning(text: string): boolean {
   const step = stepsOf(text).find(
     (item): item is Step => item !== null && item.name === 'Pick release body',
@@ -183,7 +192,7 @@ function hasDraftReadWarning(text: string): boolean {
   )
 }
 
-/** 底线二：回落是 `--generate-notes`，不是手搓的 `git log --pretty=format:`。 */
+/** 其二：回落是 `--generate-notes`，不是手搓的 `git log --pretty=format:`。 */
 function hasGenerateNotes(text: string): boolean {
   const step = stepsOf(text).find(
     (item): item is Step => item !== null && item.name === 'Create GitHub Release',
@@ -192,7 +201,7 @@ function hasGenerateNotes(text: string): boolean {
   return step.raw.includes('--generate-notes') && !step.raw.includes('--pretty=format')
 }
 
-/** 底线三：正文确实来自草稿时，退役那条 tag 不以 `v` 开头的草稿。 */
+/** 其三：正文确实来自草稿时，退役那条 tag 不以 `v` 开头的草稿。 */
 function hasDraftRetirement(text: string): boolean {
   const step = stepsOf(text).find(
     (item): item is Step => item !== null && item.name === 'Retire the drafter draft',
@@ -207,7 +216,7 @@ function hasDraftRetirement(text: string): boolean {
   )
 }
 
-/** 底线四：OIDC 换发布权。 */
+/** 其四：OIDC 换发布权。 */
 function hasOidcPublish(text: string): boolean {
   const permissions = blockOf(text, 'permissions')
   const step = stepsOf(text).find((item): item is Step => item !== null && item.name === 'Publish')
@@ -221,7 +230,7 @@ function hasOidcPublish(text: string): boolean {
 }
 
 /**
- * 底线四的另一半：**全程无 token**。
+ * 其四的另一半：**全程无 token**。
  *
  * 只看**非注释行** —— 本仓文件头刻意写着「不要加 `NPM_TOKEN`」这句提醒，
  * 把注释也算进来会让这条判据被自己的提醒弄红。
@@ -319,14 +328,14 @@ describe('解析器自证（判据不能靠「两边都空」通过）', () => {
   })
 })
 
-describe('四条底线钉在本仓 publish.yml 上', () => {
-  it('底线一：手动与 tag 双入口，且 tag 触发自带版本门禁', () => {
+describe('这个发布流保证的四件事，钉在本仓 publish.yml 上', () => {
+  it('其一：手动与 tag 双入口，且 tag 触发自带版本门禁', () => {
     expect(hasBothEntryPoints(raw)).toBe(true)
     expect(hasTagTrigger(raw)).toBe(true)
     expect(hasTagVersionGate(raw)).toBe(true)
   })
 
-  it('底线二：正文三级来源，读不到草稿发 ::warning::，读到了但为空发 ::notice::', () => {
+  it('其二：正文三级来源，读不到草稿发 ::warning::，读到了但为空发 ::notice::', () => {
     expect(hasDraftReadWarning(raw)).toBe(true)
 
     // 人工覆盖仍然排在草稿之前（本仓刻意的设计，别被「统一」掉）。
@@ -338,17 +347,17 @@ describe('四条底线钉在本仓 publish.yml 上', () => {
     expect(handWritten).toBeLessThan(draft)
   })
 
-  it('底线二：回落是 --generate-notes（不是手搓 git log）', () => {
+  it('其二：回落是 --generate-notes（不是手搓 git log）', () => {
     expect(hasGenerateNotes(raw)).toBe(true)
   })
 
-  it('底线三：草稿退役，且只删 tag 不以 v 开头的那条、不碰正式 Release', () => {
+  it('其三：草稿退役，且只删 tag 不以 v 开头的那条、不碰正式 Release', () => {
     expect(hasDraftRetirement(raw)).toBe(true)
     const retire = stepNamed(/Retire the drafter draft/u)
     expect(retire?.if).toBe("steps.notes.outputs.source == 'draft'")
   })
 
-  it('底线四：OIDC 发布，全程无 token', () => {
+  it('其四：OIDC 发布，全程无 token', () => {
     expect(hasOidcPublish(raw)).toBe(true)
     expect(hasNoTokenInCode(raw)).toBe(true)
     // ⚠️ 不要加 environment：本包的 Trusted Publisher 是**不带 environment** 配的。
@@ -361,6 +370,74 @@ describe('四条底线钉在本仓 publish.yml 上', () => {
 
   it('并发组开着，且发布不许被取消', () => {
     expect(hasConcurrency(raw)).toBe(true)
+  })
+})
+
+/**
+ * 陷阱四：草稿正文里若有说明行，清它就得按草稿 action 自己的行去匹配。
+ *
+ * 本仓不靠「清」解决这条：`publish.yml` 把草稿 body **原样**复制进正式 Release，
+ * 所以 [release-drafter.yml](../.github/release-drafter.yml) 的取舍 2 规定 `template`
+ * 里根本不许出现那类说明 —— 正文只有改动条目，没有需要清的行。
+ *
+ * 这里钉的正是**这个结构**：模板正文里没有描述「这是草稿 / 尚未发布」的行。
+ * 有人把那种说明粘进模板时本判据会红，提示他发布流不会替他把那行清掉 ——
+ * 它会原样出现在正式 Release 上。
+ */
+
+/** 模板正文的内容行（去掉空行与 YAML 注释）。 */
+function templateContentLines(body: string): string[] {
+  return body
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !isComment(line))
+}
+
+/**
+ * 正文里那些**会被原样发进正式 Release、却在说「这是草稿」**的行。
+ *
+ * 只认这一类措辞，而不是「非 `$CHANGES` 的行一律算」：模板将来加个普通标题是合法的
+ * （那行进正式 Release 没有坏处），按后者判会给出**假红** —— 本仓被假红咬过不止一次。
+ */
+const DRAFT_NOTICE = /草稿|请勿发布|尚未发布|未发布|not published|Release Drafter/iu
+
+function templateNoticeLines(body: string): string[] {
+  return templateContentLines(body).filter(
+    (line) => !line.includes('$CHANGES') && DRAFT_NOTICE.test(line),
+  )
+}
+
+describe('草稿的 template 里没有需要在发布时清掉的行', () => {
+  it('自证：真的从 .github/release-drafter.yml 里取到了 template 正文', () => {
+    const template = drafterTemplate(drafterRaw)
+    expect(template).toContain('$CHANGES')
+    // 取到的就是正文本身，不是整份配置（否则下面的判据在判别的东西）。
+    expect(template).not.toContain('categories:')
+    expect(templateContentLines(template).length).toBeGreaterThan(0)
+  })
+
+  it('模板正文当前只有 `$CHANGES` 这一行 —— 想加别的内容先回看取舍 2', () => {
+    // 这条是结构判据：正文里多任何一行，那行都会**原样**出现在正式 Release 上，
+    // 而发布流不会替你去清它。要加就先想清楚它该不该出现在正式 Release 里。
+    expect(templateContentLines(drafterTemplate(drafterRaw))).toEqual(['$CHANGES'])
+  })
+
+  it('模板正文里没有「这是草稿 / 尚未发布」这类说明行', () => {
+    expect(templateNoticeLines(drafterTemplate(drafterRaw))).toEqual([])
+  })
+
+  it('⚠️ 反向控制：把那种说明行粘进模板，判据必须变红', () => {
+    const withNotice = '$CHANGES\n\n**Draft by Release Drafter — not published.**\n'
+    expect(templateContentLines(withNotice)).toContain(
+      '**Draft by Release Drafter — not published.**',
+    )
+    expect(templateNoticeLines(withNotice)).toEqual([
+      '**Draft by Release Drafter — not published.**',
+    ])
+    // 说明行在前面也一样抓得住（不靠「最后一行」这种位置假设）。
+    expect(templateNoticeLines('**草稿 · 请勿发布**\n$CHANGES\n')).toEqual(['**草稿 · 请勿发布**'])
+    // 空白与注释不算内容：模板尾部多几行空行不该弄红这条判据。
+    expect(templateNoticeLines('$CHANGES\n\n\n# 说明\n')).toEqual([])
   })
 })
 
@@ -380,12 +457,12 @@ describe('门禁接线（脚本真的在链上、在 CI 里跑）', () => {
     )
   })
 
-  it('⚠️ 发布态脚本读的是 publish.yml —— 不是组织模板里的 release.yml', () => {
+  it('⚠️ 发布态脚本读的是本仓的发布流文件 .github/workflows/publish.yml', () => {
     expect(releaseCheck.RELEASE_WORKFLOW).toBe('.github/workflows/publish.yml')
   })
 
   it('⚠️ 自证：发布流文件不存在时报退出码 2，不静默跳过那条断言', () => {
-    // 只有清单、没有发布流 → 前提不成立（照抄模板时就是这个形态，它会静默通过）。
+    // 只有清单、没有发布流 → 前提不成立（文件名写错时就是这个形态，它会静默通过）。
     expect(runSilently(tempRoot({ 'package.json': '{}' }))).toBe(2)
     // 连清单都没有 → 同样是前提不成立。
     expect(runSilently(tempRoot({}))).toBe(2)
