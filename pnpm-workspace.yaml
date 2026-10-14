@@ -8,16 +8,17 @@ packages:
 # 拿到同一个答案，而不是各自回去答 `pnpm approve-builds` 的交互提问。
 #
 # **故意没有 allowBuilds** —— 这是实测后的决定，不是漏写：
-# 装上依赖后逐包扫过整棵树（node_modules 下 197 份 package.json，与锁文件里的
-# 176 个包对得上，另有 @scope 目录与嵌套），**没有任何一个包声明
+# 装上依赖后逐包扫过整棵树（含 @scope 目录与嵌套依赖），**没有任何一个包声明
 # preinstall / install / postinstall**。本仓的构建器是 tsdown，它走 rolldown
 # （tsdown 0.22.14 的依赖里是 `rolldown` + `rolldown-plugin-dts`，见 tsdown 清单），
 # 不是 esbuild；vite 确实把 esbuild 列为**可选** peer，但本仓没有采用它
 # —— `node_modules/esbuild` 根本不存在。没有构建脚本要跑，pnpm 就没有东西可拦，
 # 在这里写一张 allowBuilds 只会是一张空表。
 #
+# ⚠️ **别把包数写在这里**：它随每次依赖变动就漂，而漂了没人会回来改 ——
+# 要精确值现查（pnpm 自己的计数 / 锁文件），不抄。
+#
 # 哪天有依赖真的需要跑构建脚本，信号是**响的**，不必靠这段注释兜底：
-# pnpm 11 的 `strictDepBuilds` 默认开着，`pnpm install` 会以
-# `ERR_PNPM_IGNORED_BUILDS` **失败**（本机 pnpm 11.17.0 实测：exit 1），
-# 并往本文件末尾补一条占位（`allowBuilds:` 下挂「包名: set this to true or false」）。
-# 走到那一步再把它改成 true，而不是现在先写一张猜出来的表。
+# `strictDepBuilds` 默认开着，`pnpm install` 会以 `ERR_PNPM_IGNORED_BUILDS`
+# **失败**（本机实测：exit 1）。走到那一步再决定放行哪一个，而不是现在先写一张
+# 猜出来的表。

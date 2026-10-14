@@ -19,6 +19,11 @@
  * 为了不引 semver 依赖，这里只实现本仓清单里真正出现过的范围写法
  * （`^x.y.z` / `~x.y.z` / `>=x.y.z` / 精确版本）。**解析不出来的写法一律判红**，
  * 而不是放过 —— 宁可让人来补一条判据，也不要静默通过。
+ *
+ * ⚠️ 「整串」必须恰好是「一个运算符 + 一个版本」（2026-10-14 补）。早先那个正则只锚
+ * 开头，于是 `>=4.0.4 <6` 这种**带上下界的复合范围被静默截断成** `>=4.0.4` ——
+ * 一个无上界的范围被判成「落在 peer 之内」，正是这条判据最该防的假绿。
+ * 复合范围现在整串判红（见「解析不了的写法判红」那组用例）。
  * 两侧都带预发布段（`-rc.2`）且字面不同时同样判红：逐段比较要引入 semver 的
  * 预发布序，本仓没有这种键，遇到了应该有人来看一眼。
  *
@@ -72,7 +77,12 @@ function compare(left: Version, right: Version): number {
 
 function parseRange(raw: string): ParsedRange | undefined {
   const text = raw.trim()
-  const matched = /^(\^|~|>=|=)?\s*(.+)$/u.exec(text)
+  /**
+   * ⚠️ 整串匹配，不是只锚开头。`(.+)` 会接受 `4.0.4 <6`、`4.0.4 || ^6.0.0` 这类
+   * 尾部带子句的写法，然后被静默当成前半段 —— 那是假绿（一个更宽的范围会被判成
+   * 「落在 peer 之内」）。认不出来就返回 `undefined`，由调用方判红。
+   */
+  const matched = /^(\^|~|>=|=)?\s*(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/u.exec(text)
   if (matched === null) return undefined
   const version = parseVersion(matched[2] ?? '')
   if (version === undefined) return undefined
@@ -181,6 +191,21 @@ describe('范围判据本身有牙齿', () => {
   it('解析不了的写法判红，不静默放过', () => {
     expect(within('workspace:*', '^4.0.4')).toBe(false)
     expect(within('^4.0.4', 'latest')).toBe(false)
+  })
+
+  /**
+   * ⚠️ 复合范围必须整串判红，不能只读前半段（2026-10-14 补）。
+   *
+   * 这三条都是**假绿**形态：早先的正则只锚开头，于是带上下界的写法被截断成无上界的
+   * `>=`，一个更宽的范围会被判成「落在 peer 之内」。前两条是实测出来的反例。
+   */
+  it('带上下界的复合范围一律判红（不许截断成前半段）', () => {
+    expect(within('>=4.0.4', '>=4.0.4 <6')).toBe(false)
+    expect(within('>=4.0.5', '>=4.0.4 <5')).toBe(false)
+    expect(within('^4.0.4', '^4.0.4 || ^6.0.0')).toBe(false)
+    // 反向：这不是把 `>=` 一刀切禁掉 —— 单一运算符照旧能判出「落在里面」。
+    expect(within('>=4.0.4', '>=4.0.4')).toBe(true)
+    expect(within('4.0.4', '>=4.0.4')).toBe(true)
   })
 })
 

@@ -7,6 +7,7 @@ const ROOT = new URL('../', import.meta.url)
 /** 读 `package.json`。这是版本与入口声明的**唯一事实源**。 */
 function readPackageJson(): {
   version: string
+  main?: string
   types?: string
   files: string[]
   exports: Record<string, unknown>
@@ -56,6 +57,9 @@ describe('版本一致性', () => {
  *
  * 这类漂移**静默**：`types` 指向一个构建从不产出的路径时，消费方拿到的是
  * 无类型模块 —— 没有报错，只是没有类型。声明与产物布局必须同批改。
+ *
+ * `main` 与 `types` / `exports[.]` 一起收：只看 `main` 的读取方（老的那批工具链、
+ * 部分宿主装载路径）拿到一个没有入口的包时同样**不报错** —— 声明了它就得一起守。
  */
 describe('入口声明与产物布局一致', () => {
   it('types 与 exports[.].types 指向真实存在的文件', () => {
@@ -64,7 +68,7 @@ describe('入口声明与产物布局一致', () => {
     if (!existsSync(libDir)) return
 
     const rootExport = pkg.exports['.'] as { types?: string; default?: string } | undefined
-    const declared = [pkg.types, rootExport?.types, rootExport?.default].filter(
+    const declared = [pkg.main, pkg.types, rootExport?.types, rootExport?.default].filter(
       (v): v is string => typeof v === 'string',
     )
     expect(declared.length, 'package.json 没有声明类型或主入口').toBeGreaterThan(0)
@@ -81,7 +85,7 @@ describe('入口声明与产物布局一致', () => {
   it('声明的入口被 files 覆盖（否则不会进发布包）', () => {
     const pkg = readPackageJson()
     const rootExport = pkg.exports['.'] as { types?: string; default?: string } | undefined
-    const declared = [pkg.types, rootExport?.types, rootExport?.default].filter(
+    const declared = [pkg.main, pkg.types, rootExport?.types, rootExport?.default].filter(
       (v): v is string => typeof v === 'string',
     )
 
