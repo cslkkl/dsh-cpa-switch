@@ -27,6 +27,7 @@ import { summaryViewOf } from './summary-hint.ts'
 import { useAccountLogin } from './use-account-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
+import { useIntentDrift } from './use-intent-drift.ts'
 import { useResource } from './use-resource.ts'
 import { CYCLE_WINDOW_DAYS, upcomingCycles } from './upcoming-cycles.ts'
 import type { Translate } from './locales.ts'
@@ -45,6 +46,13 @@ interface AccountsPayload {
   readonly accounts: readonly NormalizedAccount[]
   /** 顶层 `checkin_auto` —— 与 `/auto-checkin` 是同一个响应同一个字段。 */
   readonly autoCheckin?: boolean
+  /**
+   * 用户禁用过、**现在却启用了**的账号（凭据文件名）。
+   *
+   * 宿主只报告不动手（那条读有缓存、会被预取）；写由本侧发起，见
+   * `use-intent-drift.ts` 与宿主 `src/intent-drift.ts`。
+   */
+  readonly intentDrift: readonly string[]
   readonly capabilities: Capabilities
   readonly unit: CreditUnit
 }
@@ -84,9 +92,15 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     select: (result) => {
       const data = result.data as { accounts?: unknown; autoCheckin?: unknown } | undefined
       if (data === undefined || typeof data !== 'object') return undefined
+      const raw = data as { accounts?: unknown; autoCheckin?: unknown; intentDrift?: unknown }
       return {
-        accounts: Array.isArray(data.accounts) ? (data.accounts as NormalizedAccount[]) : [],
-        autoCheckin: data.autoCheckin === true,
+        accounts: Array.isArray(raw.accounts) ? (raw.accounts as NormalizedAccount[]) : [],
+        autoCheckin: raw.autoCheckin === true,
+        // 形状坏掉时按「没有漂移」处理：它是**动作的触发信号**，
+        // 认不出来宁可不写，也不能凭一个坏字段去改用户账号。
+        intentDrift: Array.isArray(raw.intentDrift)
+          ? raw.intentDrift.filter((name): name is string => typeof name === 'string')
+          : [],
         capabilities,
         unit: meta.unit,
       }
@@ -109,6 +123,20 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     plugin,
     accounts: accountsResource.data?.accounts,
     onAccountDisabled,
+  })
+
+  /**
+   * 上游把你的禁用撤销了？按你的选择恢复一次，并说一句。
+   *
+   * 判定、为什么不在这里再判一遍、以及「为什么只往禁用方向」见
+   * `use-intent-drift.ts` 与宿主 `src/intent-drift.ts`。
+   */
+  useIntentDrift({
+    plugin,
+    drift: accountsResource.data?.intentDrift ?? [],
+    t,
+    onReport: actions.report,
+    onReload: () => void reload({ force: true }),
   })
 
   /** 添加账号弹窗（自己一套 `idle`/`starting`/`wait`/`error` 状态机）。 */

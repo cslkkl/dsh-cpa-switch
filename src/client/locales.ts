@@ -103,6 +103,14 @@ export const zh = {
   disableHint: '禁用后它完全不参与调度',
   select: '设为唯一',
   selectHint: '只用这个账号，同渠道其余自动禁用',
+  /**
+   * 上游把用户禁用的号重新启用之后，面板按用户的选择恢复一句。
+   *
+   * ⚠️ **不写「上游定时任务」**：撤销可能来自 09:00 / 21:00 的定时任务、
+   * 上游的强制刷新、或别处对凭据的操作 —— 我们只知道「它变成了启用」，
+   * 不知道是谁干的。报一个我们并不知道的原因，就是把猜测说成事实。
+   */
+  driftRestored: '恢复你禁用的 {count} 个账号',
   addAccount: '添加账号',
   startLogin: '开始登录',
   cancel: '取消',
@@ -326,6 +334,7 @@ export const en: Record<LocaleKey, string> = {
   disableHint: 'A disabled account never takes requests',
   select: 'Use only this',
   selectHint: 'Use only this account and disable the rest of the channel',
+  driftRestored: 'Restore {count} account(s) you disabled',
   addAccount: 'Add account',
   startLogin: 'Sign in',
   cancel: 'Cancel',

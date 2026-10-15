@@ -58,6 +58,13 @@ export const paths = {
   accountSelect: '/api/v1/cpa/account-select',
   /** 单卡启用 / 禁用。 */
   accountEnabled: '/api/v1/cpa/account-enabled',
+  /**
+   * 把被上游重新启用的**用户禁用**号禁回去（`POST {plugin}`）。
+   *
+   * 宿主侧判定只认「意图里写着禁用、实际却启用了」这一种漂移 —— 反向不动
+   * （见 `src/intent-drift.ts`）。
+   */
+  accountDrift: '/api/v1/cpa/account-drift',
   /** 自动签到开关（`GET` 读、`POST` 写）。 */
   autoCheckin: (plugin: string): string =>
     '/api/v1/cpa/auto-checkin?plugin=' + encodeURIComponent(plugin),
@@ -149,6 +156,20 @@ export function setAccountEnabled(
   enabled: boolean,
 ): Promise<ApiResult> {
   return post(paths.accountEnabled, { plugin, authIndex, enabled }).then((result) => {
+    if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
+    return result
+  })
+}
+
+/**
+ * 把**被上游重新启用**的用户禁用号禁回去。
+ *
+ * 谁调它：面板读到 `/accounts` 的 `intentDrift` 非空时（见 `use-intent-drift.ts`）。
+ * 判定与「为什么只往一个方向」在宿主侧 `src/intent-drift.ts` —— 这一侧只负责发请求
+ * 与作废该渠道的账号读。
+ */
+export function restoreDisabledAccounts(plugin: string): Promise<ApiResult> {
+  return post(paths.accountDrift, { plugin }).then((result) => {
     if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
     return result
   })
