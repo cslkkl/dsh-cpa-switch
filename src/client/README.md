@@ -96,6 +96,20 @@
 - **`use-disabled-overrides.ts`** —— 启用态的**即时覆盖层**（按渠道认领）。
   - 后端**一确认就自我删除**，所以它不会像以前那样「粘住」一次失败的显示
   - `plugin` 变化时整层清掉：覆盖层是渠道级状态，跟着渠道走
+- **`use-intent-drift.ts`** —— 上游把用户禁用的号重新启用后，**按用户的选择恢复**一次
+  （2026-10-15）。
+  - 触发信号是宿主 `/accounts` 的 `intentDrift`（那份读**只报告不动手**：
+    它有缓存、会被预取，谁都不该因为「看了一眼」就改账号）
+  - ⚠️ **判定不在这里**：哪些号算漂移、为什么只能单向，只有宿主
+    [intent-drift.ts](../intent-drift.ts) 一处 —— 两侧各判一次必然漂
+  - ⚠️ **同一条漂移只处理一次**：认领键是「渠道 + 清单内容」（内容不是数组引用 ——
+    清单每次渲染都是新数组，不认领就会每轮发一次写请求）
+  - ⚠️ 回执按**扁平形状**取（`result.fixed`）：宿主 `/api/v1/cpa/*` 的响应体摊平在
+    结果对象上，`result.data` 能编译却恒为 `undefined`（2026-10-13 的静默事故）
+  - 提示复用渠道动作那套 toast（`driftRestored`）—— 界面**不许**静默改用户账号
+  - 为什么需要：渠道插件自带的额度生命周期会在 09:00 / 21:00 之后撤销用户的禁用，
+    用户看到「我没动它，号全亮起来了」、而「设为唯一」按钮整排消失（零报错）。决策见
+    [决策记录](../../.agents/notes/2026-10-15-user-disabled-intent-is-authoritative.md)
 - **`use-account-login.ts`** —— 「添加账号」弹窗的状态机（`idle` / `starting` / `wait` / `error`）。
   - 授权轮询也走 `useResource` 的 `pollMs`（`POLL_MS = 2500`）；还没有 `state` 时不轮询
   - 到**终态**后 `invalidateReads(cacheKeys.accounts(plugin))` 让账号列表自己刷新
