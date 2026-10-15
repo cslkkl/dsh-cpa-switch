@@ -8,11 +8,12 @@
  */
 
 import { accountsPathOf, channelOf } from '../channels/registry.ts'
+import { disabledDriftOf } from '../intent-drift.ts'
 import { bareModelNameOf } from '../model-alias.ts'
 import { normalizeAccounts } from '../channels/normalize.ts'
 import { applyLedger } from '../checkin-ledger.ts'
 import { cacheKeys, type CpaGateway } from '../gateway.ts'
-import { localDay, readCheckinLedger } from '../state.ts'
+import { localDay, readAccountIntent, readCheckinLedger } from '../state.ts'
 import { messageOf, type OpsResult, requireRunning } from './result.ts'
 
 /** 只读账号域需要的依赖：**只有通道**（不写、也不通知任何人）。 */
@@ -100,6 +101,20 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
       const baseRecord = base as
         { server_time?: unknown; schedule?: unknown; checkin_auto?: unknown } | undefined
 
+      /**
+       * 用户禁用过、**现在却启用了**的账号（凭据文件名）。
+       *
+       * ⚠️ **这是读路径，只报告不动手**：发现漂移的写操作由 `enable.restoreDisabled`
+       * 承担，面板读到非空清单才会去调它。在这里顺手 PATCH 会让「读」变成「写」——
+       * 而这条读有缓存、会被预取、会在多处消费，谁都不该因为「看了一眼」就改账号。
+       *
+       * 判定（含为什么只能单向）在 `intent-drift.ts`。
+       */
+      const intentDrift = disabledDriftOf(
+        readAccountIntent().enabled,
+        accounts.map((account) => ({ name: account.authId, disabled: account.disabled })),
+      )
+
       return {
         ok: true,
         data: {
@@ -111,6 +126,7 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
           schedule: baseRecord?.schedule,
           autoCheckin: baseRecord?.checkin_auto,
           accounts,
+          intentDrift,
         },
       }
     } catch (error) {

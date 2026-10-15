@@ -20,8 +20,10 @@
  * @module dsh-cpa-switch/ops/enable
  */
 
+import { channelOf } from '../channels/registry.ts'
 import type { LoggerLike } from '../credentials.ts'
 import type { CpaGateway } from '../gateway.ts'
+import { disabledDriftOf } from '../intent-drift.ts'
 import { planSelect, verifySelect } from '../select-plan.ts'
 import { readAccountIntent, updateAccountIntent } from '../state.ts'
 import { messageOf, type OpsResult, requireReady, requireRunning } from './result.ts'
@@ -44,6 +46,8 @@ export interface EnableOps {
   setPriority(plugin: string, order: unknown): Promise<OpsResult>
   /** 按「用户上次的选择」恢复账号启用状态。 */
   restoreIntent(): Promise<OpsResult>
+  /** 把**被上游重新启用**的用户禁用号禁回去（只往禁用方向，见 `intent-drift.ts`）。 */
+  restoreDisabled(plugin: string): Promise<OpsResult>
 }
 
 /** `auth-files` 里一个凭据的形状。 */
@@ -423,5 +427,69 @@ export function createEnableOps(deps: EnableDeps): EnableOps {
     }
   }
 
-  return { setEnabled, select, getPriority, setPriority, restoreIntent }
+  /**
+   * 把**被上游重新启用**的、用户明确禁用过的号禁回去。
+   *
+   * ## 它补的是哪一段
+   *
+   * {@link restoreIntent} 只在**启动时**跑一次；而撤销用户选择的那个东西是
+   * **运行期**的：渠道插件自带的额度生命周期（`lifecycle_auto`，默认开）会在
+   * 09:00 / 21:00 的定时任务之后，把「CN 号 + disabled + 额度未耗尽」的号写回
+   * `disabled: false` —— 它分不清这个禁用是用户点的还是它自己因耗尽禁的。
+   * 于是用户的「只用这一个」会在某个时间点静默失效（面板整排亮起、
+   * 「设为唯一」按钮整排消失，零报错）。
+   *
+   * ## 只往一个方向动手
+   *
+   * 判定见 `intent-drift.ts`：**只有**「意图里写着禁用、实际却启用了」才算漂移。
+   * 反方向（意图写着启用、实际被禁用）很可能是上游因**额度耗尽**禁的，
+   * 重新启用会把请求送到耗尽的号上 —— 那不是用户的选择，是上游的判断，不许覆盖。
+   *
+   * ⚠️ 意图文件**只读不写**：这次动作执行的是用户早已做过的决定，
+   * 不是一次新的决定。回写 `updatedAt` 会让「意图 = 用户点过的动作」这条口径失真。
+   *
+   * @param plugin - 渠道 id。漂移按渠道判定：面板读到哪个渠道的漂移就修哪个渠道。
+   */
+  async function restoreDisabled(plugin: string): Promise<OpsResult> {
+    if (channelOf(plugin) === undefined) return { ok: false, error: 'unknown-plugin' }
+
+    const ready = await requireReady(deps.gateway)
+    if (ready !== undefined) return ready
+
+    /**
+     * 意图不可信（缺 `source: panel`、来源不明）时**什么都不做** ——
+     * 与 {@link restoreIntent} 同一条护栏：恢复账号状态是「改用户的东西」，
+     * 宁可什么都不做，也不能拿来源不明的文件去覆盖现状。
+     */
+    const intent = readAccountIntent()
+    if (intent.ignored !== undefined) return { ok: true, skipped: intent.ignored }
+
+    try {
+      const files = await readCredentials(plugin)
+      const drifted = disabledDriftOf(intent.enabled, files)
+      // 没有漂移是常态：一次多余的重读都不做（这条路径每次开面板都会走一遍）
+      if (drifted.length === 0) return { ok: true, fixed: [] }
+
+      const changes = drifted.map((name) => ({ name, enabled: false }))
+      const failed = await applyChanges(changes)
+      const confirmed = await confirmChanges(plugin, changes)
+
+      deps.gateway.invalidateChannel(plugin)
+      deps.logger?.info?.(
+        'cpa-panel: 上游把 %d 个用户禁用的账号重新启用了，已按用户的选择恢复 %o',
+        drifted.length,
+        confirmed,
+      )
+      /** 只有**回读确认过**的才算恢复成功（F33）—— 没证实的留在 `failed` 里由界面如实报。 */
+      return {
+        ok: true,
+        fixed: confirmed.filter((entry) => entry.confirmed),
+        failed,
+      }
+    } catch (error) {
+      return { ok: false, error: messageOf(error) }
+    }
+  }
+
+  return { setEnabled, select, getPriority, setPriority, restoreIntent, restoreDisabled }
 }

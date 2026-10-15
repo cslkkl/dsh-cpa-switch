@@ -10,7 +10,7 @@
 | ------------------------------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | [accounts.ts](accounts.ts)           | 读账号 + 余额、模型目录、开学季券码                              | **只读**：不写、不作废缓存。只依赖通道，连日志都不需要                              |
 | [actions.ts](actions.ts)             | 签到 / 任务 / 开机补签                                           | 作用范围是渠道里**全部**账号，**含已禁用的** —— 攒额度（F35）                       |
-| [enable.ts](enable.ts)               | 启用开关、设为唯一、优先级、恢复用户意图                         | 只动**调度面**：哪个号吃流量。一个号被禁用不影响它继续攒额度                        |
+| [enable.ts](enable.ts)               | 启用开关、设为唯一、优先级、意图恢复、撤销恢复                   | 只动**调度面**：哪个号吃流量。一个号被禁用不影响它继续攒额度                        |
 | [oauth.ts](oauth.ts)                 | 起登录 / 查进度 / 取消                                           | 完成那一刻要**同时**失效缓存 + 通知宿主重推模型路由                                 |
 | [scheduling.ts](scheduling.ts)       | 路由策略、`scheduler_mode`、自动签到开关                         | 都是**跨渠道或半渠道**的设置：失效多半用空串                                        |
 | [plugin-update.ts](plugin-update.ts) | 渠道插件查版本（打 GitHub）/ 用户点了才更新到上游最新版          | **唯一不碰 CPA API 的域**：查版本打 GitHub，换文件要求 CPA 正好**停着**（先停后换） |
@@ -42,7 +42,7 @@
 | 改了                     | 必须同步                                                                                                                                            |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 任何一个**写**路径       | 成功后调 `deps.gateway.invalidateChannel(plugin)`；跨渠道的写用空串；判据 `tests/ops-write-paths.test.ts`                                           |
-| `enable.ts` 的启用态逻辑 | 回读确认 + 逐个容错 + 意图记**回读值**（F33、F43）；纯判据在 [select-plan.ts](../select-plan.ts)                                                    |
+| `enable.ts` 的启用态逻辑 | 回读确认 + 逐个容错 + 意图记**回读值**（F33、F43）；纯判据 [select-plan.ts](../select-plan.ts)、[intent-drift.ts](../intent-drift.ts)               |
 | `actions.ts` 的签到      | 记账本只在 `checkin` 记、`tasks` 不记；渠道级记保留键（[checkin-ledger.ts](../checkin-ledger.ts)）                                                  |
 | `oauth.ts` 的状态判定    | 「完成」的那一刻既要失效缓存又要通知宿主 —— 两件事合并成一次判定                                                                                    |
 | `plugin-update.ts`       | 「有没有新版」的判据是 **tag 是否相同**（不解析版本号）；没记过安装 tag 时 `hasUpdate` **缺席**而不是 `false` —— 判据 `tests/plugin-update.test.ts` |
@@ -51,9 +51,10 @@
 
 ## 判据在哪
 
-- `tests/ops-write-paths.test.ts` —— 写必失效、读不失效、签到记账本、回读说了算。
+- `tests/ops-write-paths.test.ts` —— 写必失效、读不失效、签到记账本、回读说了算、漂移恢复的**方向**（写的是禁用）与漂移清单的**键**（凭据文件名）。
 - `tests/cache.test.ts` —— 业务层的读路径与缓存失效覆盖的是同一批键。
 - `tests/select-plan.test.ts` —— 「设为唯一」的纯判据（计划与回读验证）。
+- `tests/intent-drift.test.ts` —— 「用户禁用被上游撤销」的纯判据（**单向**：反方向不算漂移）。
 - `tests/checkin-ledger.test.ts` —— 账本的三段表（只补不覆盖）。
 - `tests/action-outcome.test.ts` —— 写操作返回的归一。
 - `tests/plugin-update.test.ts` —— 查版本的三态（未知 / 有新版 / 已最新）、更新前停 CPA 的四条分支、
