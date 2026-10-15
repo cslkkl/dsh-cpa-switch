@@ -374,6 +374,136 @@ describe('这个发布流保证的四件事，钉在本仓 publish.yml 上', () 
 })
 
 /**
+ * 「判了会怎样」——判定步骤必须**真的能拦住发布**。
+ *
+ * ⚠️ 这一段是**补出来的**，因为原版漏了它，而且漏得很典型（2026-10-14 实测）：
+ * 把守卫步骤里那行 `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }` 删掉之后，
+ * 本文件其余 **30 条判据一条都没响**。删掉之后的行为是：守卫照旧跑、照旧打印
+ * 「只有非产物改动 —— 这一版不该发」，而这一步以 **0** 退出，发布继续往下走 ——
+ * 于是**本该被拦下的那一版被照发出去**。
+ *
+ * 原版把守卫**存在**钉住了、把它的基线参数也钉住了（`--exclude`、`--match`、
+ * 管道给 release-guard），唯独没钉「它的结论能不能拦住发布」。判据钉的是
+ * 「什么时候判」，缺的是「判了会怎样」—— 后者才决定这个门禁有没有用。
+ *
+ * 所以：每个**能中止发布**的步骤，run 块里都必须有一次非零退出。
+ * 选择类步骤（如 `Pick release body`）不在其列：它读不到草稿时的正确行为是
+ * **回落**而不是失败，把它算成判定步骤会要求它「读不到就红」，那是错的。
+ */
+
+/**
+ * 这一行会不会让步骤失败。
+ *
+ * 三种写法都算：`exit 1`、`exit $LASTEXITCODE`、`exit $code`；
+ * 也算 `if (...) { exit $LASTEXITCODE }` 这种**同一行**里的写法（本仓就是这么写的，
+ * 只认「行首是 exit」会把真的失败漏掉）。`exit 0` 不算。
+ */
+function lineFails(line: string): boolean {
+  const text = line.trim()
+  if (text === '' || isComment(text)) return false
+  return /\bexit\s+(?:[1-9]\d*|\$[A-Za-z_]\w*)\b/u.test(text)
+}
+
+/** 这个步骤的原文里有没有非零退出。 */
+function canFail(step: Step): boolean {
+  return step.raw.split(/\r?\n/u).some(lineFails)
+}
+
+/** `marker` 那一行**之后**有没有非零退出（前面的不算：那是另一条分支）。 */
+function failsAfter(step: Step, marker: string): boolean {
+  const lines = step.raw.split(/\r?\n/u)
+  const at = lines.findIndex((line) => line.includes(marker))
+  if (at < 0) return false
+  return lines.slice(at + 1).some(lineFails)
+}
+
+describe('判了会怎样：门禁的结论必须真的拦得住', () => {
+  /** 自证：解析器得真的读得到那一行，否则下面的判据是空的。 */
+  it('自证：守卫步骤里读得到 release-guard 的调用行与基线参数', () => {
+    const guard = stepNamed(/Guard against release noise/u)
+    expect(guard, '找不到守卫步骤').toBeDefined()
+    expect(guard?.raw ?? '').toContain('node scripts/release-guard.mjs')
+    expect(guard?.raw ?? '').toContain('--exclude=${{ github.ref_name }}')
+  })
+
+  /**
+   * 本条是这一段存在的理由：守卫判定「这一版不该发」之后，必须真的失败。
+   *
+   * 少了它，删掉那一行就是一次**静默放行** —— 日志里写着「不该发」，发布照常进行。
+   */
+  it('守卫的结论拦得住发布：release-guard 之后有非零退出', () => {
+    const guard = stepNamed(/Guard against release noise/u)
+    expect(guard).toBeDefined()
+    expect(
+      failsAfter(guard as Step, 'node scripts/release-guard.mjs'),
+      '守卫打印了「这一版不该发」却以 0 退出 —— 那一版会被照发出去。' +
+        '守卫调用之后必须紧跟一次非零退出（本仓写法：if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }）。',
+    ).toBe(true)
+  })
+
+  /** 反向控制一：把失败传播整个删掉，必须被判出来。 */
+  it('反向控制：删掉失败传播会被判出来', () => {
+    const guard = stepNamed(/Guard against release noise/u) as Step
+    const broken: Step = {
+      ...guard,
+      raw: guard.raw
+        .split(/\r?\n/u)
+        .filter((line) => !lineFails(line))
+        .join('\n'),
+    }
+    expect(failsAfter(broken, 'node scripts/release-guard.mjs')).toBe(false)
+  })
+
+  /** 反向控制二：把 `exit $LASTEXITCODE` 改成 `exit 0`，必须被判出来。 */
+  it('反向控制：非零退出改成 exit 0 会被判出来', () => {
+    const guard = stepNamed(/Guard against release noise/u) as Step
+    const broken: Step = { ...guard, raw: guard.raw.replace(/exit\s+\$LASTEXITCODE/u, 'exit 0') }
+    expect(failsAfter(broken, 'node scripts/release-guard.mjs')).toBe(false)
+  })
+
+  /** `exit 0` 本身不许被当成「会失败」—— 否则上面几条都成了永远绿。 */
+  it('反向控制：exit 0 不算失败、注释里的 exit 也不算', () => {
+    expect(lineFails('          exit 0')).toBe(false)
+    expect(lineFails('          exit 1')).toBe(true)
+    expect(lineFails('          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }')).toBe(true)
+    expect(lineFails('          # 这里本来该 exit 1，但注释不算')).toBe(false)
+  })
+
+  /**
+   * 逐个判定步骤：不能中止发布的判定步骤，等于没有判定。
+   *
+   * 这份名单是**能中止发布**的那些：标签门禁、噪音守卫、发布本身、建 Release、退役草稿。
+   * `Pick release body` 不在名单里 —— 它读不到草稿时该做的是回落，不是失败。
+   */
+  it('每个能中止发布的步骤都真的能失败', () => {
+    const judging: [RegExp, string][] = [
+      [/Verify tag matches package version/u, '标签名与清单版本对不上'],
+      [/Guard against release noise/u, '这次改动不改变产物'],
+      [/^Publish$/u, 'npm 发布失败'],
+      [/Create GitHub Release/u, '建 Release 失败'],
+      [/Retire the drafter draft/u, '退役草稿失败'],
+    ]
+
+    const powerless: string[] = []
+    for (const [pattern, why] of judging) {
+      const step = stepNamed(pattern)
+      if (step === undefined) {
+        powerless.push(`${String(pattern)}（找不到这一步）`)
+        continue
+      }
+      if (!canFail(step)) powerless.push(`${step.name}（${why}）`)
+    }
+
+    expect(
+      powerless,
+      `这些步骤判断了却永远不会失败：\n  ${powerless.join('\n  ')}\n` +
+        '判定步骤的 run 块里必须有一次非零退出，否则它的结论拦不住任何东西 —— ' +
+        '日志里写着「不该发」，而发布照常进行。',
+    ).toEqual([])
+  })
+})
+
+/**
  * 陷阱四：草稿正文里若有说明行，清它就得按草稿 action 自己的行去匹配。
  *
  * 本仓不靠「清」解决这条：`publish.yml` 把草稿 body **原样**复制进正式 Release，
