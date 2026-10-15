@@ -293,6 +293,72 @@ describe('写成功必须作废读缓存', () => {
 })
 
 /**
+ * ⚠️ 「把被上游重新启用的号禁回去」这条写路径的**方向**必须是禁用。
+ *
+ * 判定的单向性（反方向不算漂移）在 `intent-drift.test.ts` 里钉过；这里钉的是
+ * 它之后那一步 —— 判定交出来的名字，落到 PATCH 上是 `disabled: true` 还是 `false`。
+ * 翻过来，后果恰好是这整套改动要防的那件事（把上游因额度耗尽禁掉的号送回调度），
+ * 而**除了这一条判据没有任何别的信号**：回读照常「确认」成功、缓存照常作废、
+ * 界面照常弹一句提示（2026-10-15 变异验证：翻过来全量用例照绿）。
+ */
+describe('漂移恢复写的是「禁用」', () => {
+  it('⚠️ PATCH 的 body 是 `disabled: true`，且只有回读确认过的才算恢复', async () => {
+    writeIntent({ 'a.json': false })
+    /** 写完之后的回读值 —— 只有真的写进去，回读才会变。 */
+    let disabled = false
+    const cpa = makeCpa()
+    cpa.reply(AUTH_FILES, () => oneAccount(disabled))
+    cpa.reply(AUTH_STATUS, () => {
+      disabled = true
+      return {}
+    })
+
+    const result = await opsFor(cpa.gateway).enable.restoreDisabled('workbuddy')
+    expect(result.ok).toBe(true)
+
+    const bodies = cpa.calls
+      .filter((call) => call.path === AUTH_STATUS)
+      .map((call) => JSON.parse(String(call.init?.body)) as { name: string; disabled: boolean })
+    expect(bodies).toEqual([{ name: 'a.json', disabled: true }])
+
+    const fixed = (result as { fixed?: readonly unknown[] }).fixed ?? []
+    expect(fixed).toHaveLength(1)
+  })
+})
+
+/**
+ * ⚠️ 漂移清单的**键**必须与意图文件同一套（凭据文件名 = 上游 `/accounts` 的 `auth_id`）。
+ *
+ * 这条读（`/accounts` 的 `intentDrift`）是整条恢复链路**唯一的触发信号**。
+ * 键取错（比如取成 `auth_index`）有两种静默表现：清单永远为空 ⇒ 功能消失；
+ * 或清单永远不为空 ⇒ 面板反复发写、弹一句「恢复 0 个」。
+ * 两种都不报错（2026-10-15 变异验证：把 `authId` 换成 `authIndex` 全量用例照绿）。
+ */
+describe('漂移清单的键与意图文件同一套', () => {
+  it('只交「意图写着禁用、实际却启用」的那些，键是凭据文件名', async () => {
+    writeIntent({ 'a.json': false, 'b.json': false })
+    const cpa = makeCpa()
+    cpa.reply('/v0/management/plugins/workbuddy/accounts', {
+      accounts: [
+        // 用户禁用了它，上游却把它启用了 → 漂移
+        { auth_id: 'a.json', auth_index: '0', disabled: false },
+        // 用户禁用了它，实际也禁用着 → 没漂移
+        { auth_id: 'b.json', auth_index: '1', disabled: true },
+        // 用户没表过态 → 不归我们管
+        { auth_id: 'c.json', auth_index: '2', disabled: false },
+      ],
+    })
+    cpa.reply('/v0/management/plugins/workbuddy/credits', {})
+
+    const result = await opsFor(cpa.gateway).accounts.list('workbuddy')
+    expect(result.ok).toBe(true)
+
+    const drift = (result as { data?: { intentDrift?: unknown } }).data?.intentDrift
+    expect(drift).toEqual(['a.json'])
+  })
+})
+
+/**
  * 反向的一半：**读路径不许写失效**。
  *
  * 读路径顺手失效一次不会报错，只会把缓存的意义抹掉（每次刷新都真打 CPA）——

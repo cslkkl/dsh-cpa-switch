@@ -51,7 +51,7 @@
 
 ## 判据在哪
 
-- `tests/ops-write-paths.test.ts` —— 写必失效、读不失效、签到记账本、回读说了算。
+- `tests/ops-write-paths.test.ts` —— 写必失效、读不失效、签到记账本、回读说了算、漂移恢复的**方向**（写的是禁用）与漂移清单的**键**（凭据文件名）。
 - `tests/cache.test.ts` —— 业务层的读路径与缓存失效覆盖的是同一批键。
 - `tests/select-plan.test.ts` —— 「设为唯一」的纯判据（计划与回读验证）。
 - `tests/intent-drift.test.ts` —— 「用户禁用被上游撤销」的纯判据（**单向**：反方向不算漂移）。
