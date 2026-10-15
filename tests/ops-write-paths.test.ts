@@ -104,6 +104,14 @@ function makeCpa(adminKey = 'k'): FakeCpa {
 /** 一条「写操作 → 该作废哪个渠道」的用例。 */
 interface WriteCase {
   readonly name: string
+  /**
+   * 先写一份「面板记录的意图」，让按意图动作的写路径有东西可依据。
+   *
+   * ⚠️ 它是**这条用例的前置状态**，不是被测对象 —— 从前靠
+   * `name.startsWith('恢复用户意图')` 来触发，名字一改前置就静默消失
+   * （用例照绿，但它测的已经不是原来那件事了）。
+   */
+  readonly intent?: Record<string, boolean>
   /** 先铺好这个写操作需要的响应与前置状态。 */
   readonly setup?: (cpa: FakeCpa) => void
   readonly run: (ops: Operations) => Promise<OpsResult>
@@ -187,12 +195,27 @@ const WRITES: readonly WriteCase[] = [
   },
   {
     name: '恢复用户意图（真的有改动）',
+    intent: { 'a.json': true },
     setup: (cpa) => {
       cpa.reply(AUTH_FILES, oneAccount(true))
       cpa.reply(AUTH_STATUS, {})
     },
     run: async (ops) => await ops.enable.restoreIntent(),
     invalidates: '',
+  },
+  {
+    /**
+     * 上游把它们重新启用了（`disabled` 是 `false`），而用户的选择是禁用 ——
+     * 这条路径要把它禁回去，并作废该渠道的读。
+     */
+    name: '把被上游重新启用的号禁回去',
+    intent: { 'a.json': false },
+    setup: (cpa) => {
+      cpa.reply(AUTH_FILES, oneAccount(false))
+      cpa.reply(AUTH_STATUS, {})
+    },
+    run: async (ops) => await ops.enable.restoreDisabled('workbuddy'),
+    invalidates: 'workbuddy',
   },
   {
     name: '登录完成（轮询到终态）',
@@ -257,7 +280,7 @@ afterEach(() => {
 describe('写成功必须作废读缓存', () => {
   for (const item of WRITES) {
     it(`${item.name} → 作废 ${item.invalidates === '' ? '全部渠道' : item.invalidates}`, async () => {
-      if (item.name.startsWith('恢复用户意图')) writeIntent({ 'a.json': true })
+      if (item.intent !== undefined) writeIntent(item.intent)
       const cpa = makeCpa()
       item.setup?.(cpa)
 

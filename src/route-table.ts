@@ -340,6 +340,28 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
     },
     {
       /**
+       * 把**被上游重新启用**的用户禁用号禁回去（`POST {plugin}`）。
+       *
+       * 为什么需要它：渠道插件自带的额度生命周期（`lifecycle_auto`，默认开）会在
+       * 09:00 / 21:00 的定时任务之后，把「CN 号 + 被禁用 + 额度未耗尽」的号写回
+       * `disabled: false` —— 它分不清这个禁用是用户点的还是它自己因耗尽禁的。
+       * 用户看到的是「我没动它，号全亮起来了」，「设为唯一」按钮整排消失。
+       *
+       * ⚠️ **只往禁用方向、只对意图里记过禁用的号**（判定见 `intent-drift.ts`）：
+       * 反向会把上游因额度耗尽禁掉的号重新启用，那是**上游的判断**，不是用户的选择。
+       *
+       * ⚠️ 发现漂移的那条读（`/accounts` 的 `intentDrift`）**只报告不动手** ——
+       * 写只发生在这一条上，面板读到非空清单才会来调。
+       */
+      path: '/api/v1/cpa/account-drift',
+      methods: ['POST'],
+      handle: async (request) => {
+        const body = await readBody(request)
+        return json(await ops.enable.restoreDisabled(String(body.plugin ?? '')))
+      },
+    },
+    {
+      /**
        * 某渠道的**候选行**：不隐藏的话会被推送的那些行（面板勾选清单读它）。
        *
        * ⚠️ **与 `/models` 是两件事**，别看名字像就合并：

@@ -78,6 +78,17 @@
     且不报错，写盘前就挡掉
   - 改后必测：账号意图的 `source !== 'panel'` 拒绝、`ignored` 剥离（读与写**两头**都要）、
     并发写的丢更新（`tests/state-lost-update.test.ts`）、缓存的四条约束（`tests/state.test.ts`）
+- **`intent-drift.ts`** —— 「用户禁用被撤销」的**判定**（纯函数，不碰 IO）。
+  - 导出：`disabledDriftOf` / 类型 `DriftAccount`
+  - 为什么需要：渠道插件自带的额度生命周期（`lifecycle_auto`，默认开）会把
+    「CN 号 + 被禁用 + 额度未耗尽」的号写回 `disabled: false` —— 它**分不清**这个
+    禁用是用户点的还是它自己因耗尽禁的（上游 `lifecycle.go` 的 `reconcileOneAccount`）
+  - ⚠️ **单向**：只认「意图写着禁用、实际却启用」。反方向很可能是上游因额度耗尽
+    禁的，重新启用会把请求送到耗尽的号上 —— 那是上游的判断，不许覆盖
+  - ⚠️ 两侧判据都是**严格比较**：意图侧 `=== false`（坏文件不算用户的选择）、
+    实际侧 `=== false`（上游没给字段 = 不知道，不动手）
+  - 判据在 `tests/intent-drift.test.ts`，决策见
+    [决策记录](../.agents/notes/2026-10-15-user-disabled-intent-is-authoritative.md)
 - **`select-plan.ts`** —— 「设为唯一」的**目标状态计算 + 回读验证**（纯函数，不碰 IO）。
   - 导出：`planSelect` / `verifySelect` / 类型 `SelectableFile` / `SelectChange` / `SelectPlan`
   - 为什么需要：`accountSelect` 要改同渠道**多个**账号，而上游
@@ -397,6 +408,7 @@
 | `/api/v1/cpa/account-select`   | POST     | `{plugin, authIndex}` → **选择账号**（启用它，同渠道其余自动禁用）  |
 | `/api/v1/cpa/account-enabled`  | POST     | `{plugin, authIndex, enabled}` → 单个启用 / 禁用                    |
 | `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                     |
+| `/api/v1/cpa/account-drift`    | POST     | `{plugin}` → 把**被上游重新启用**的用户禁用号禁回去（只此一个方向） |
 | `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`） |
 | `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                        |
 | `/api/v1/cpa/model-rows`       | GET      | 某渠道**会被推送的候选行**（面板勾选清单的来源，键与推送侧同一份）  |
@@ -436,6 +448,7 @@
 | [ops/**](ops/README.md) 业务层                              | **一域一文件，域按语义分**：`actions` 作用于全部号含已禁用的（F35）、`enable` 只动调度面；域之间不许互相 import，共享的下沉到 `ops/result.ts`；越界由 `check:layering` 的 `ops-no-outer` 拦。（[决策记录](../.agents/notes/2026-10-05-ops-domains.md)）                                                                                                                                                                                            |
 | 写操作（`ops/**` 里改 CPA 状态的那些）                      | 成功后必须 `gateway.invalidateChannel(plugin)`（跨渠道用空串）；**界面值取回读**（F33）；改启用态要回读确认 + 逐个容错（F43）；判据 `tests/ops-write-paths.test.ts`                                                                                                                                                                                                                                                                                |
 | [select-plan.ts](select-plan.ts)                            | 「设为唯一」的目标状态计算与回读验证（纯函数）；同步[决策记录](../.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                                                                                                                                                                                                                                                               |
+| [intent-drift.ts](intent-drift.ts)                          | 「用户禁用被上游撤销」的判定（纯函数，**只往禁用方向**）；改它要同步 [ops/README.md](ops/README.md) 与 [client/README.md](client/README.md)（两侧共用这一份判据）+ `tests/intent-drift.test.ts`                                                                                                                                                                                                                                                    |
 | [channels/**](channels/README.md)                           | 渠道知识**唯一来源**：新增渠道 = 加一个 spec + 在注册表挂上，面板 / 路由 / 别名 / 生成配置全部派生（[手册](channels/README.md)）                                                                                                                                                                                                                                                                                                                   |
 | [contracts/**](contracts/README.md)                         | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红                                                                                                                                                                                                                                                                                                                              |
 | [ids.ts](ids.ts) / [paths.ts](paths.ts)                     | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                                                                                                                                                                                                                                                            |
