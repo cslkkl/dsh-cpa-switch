@@ -69,22 +69,27 @@ describe('aliasFor', () => {
 })
 
 /**
- * `id` 与 `name` 的分工是本轮改动最容易含糊的地方：
- * 别名（`wb/glm-5.3`）进请求体，展示名（`WorkBuddy · glm-5.3`）只给人看。
- * 混了就会出现「用户在选择器里选 WorkBuddy，请求却打到别的渠道」。
+ * `id` 与 `name` 的分工是这两处最容易含糊的地方：
+ * 别名（`wb/glm-5.3`）进请求体，展示名（`glm-5.3`，**裸名**）只给人看。
+ * 混了就会出现「用户以为选定了某个渠道，请求却打到别的渠道」——
+ * 渠道身份**全在 `id` 的前缀里**（2026-10-17 根修后展示名不再带渠道，
+ * 所以**更不能**拿 `name` 去发请求）。
  */
 describe('别名 id 与展示名', () => {
-  it('id 是带前缀的别名，name 才是「渠道 · 模型」', () => {
+  it('id 是带前缀的别名，name 只是裸名（渠道不在展示名里）', () => {
     const table = buildAliasTable({ 'glm-5.3': ['workbuddy', 'trae'] })
     const id = table.aliasOf('glm-5.3', 'workbuddy')
-    const name = 'WorkBuddy · glm-5.3'
+    /** 推送行的 `name`：裸名，渠道由 provider 分组标题承载（`cpa-workbuddy`）。 */
+    const name = 'glm-5.3'
     expect(id).toBe('wb/glm-5.3')
     expect(id).not.toBe(name)
+    // 渠道钉在 id 的前缀里 —— 展示名里一个字都没有
     expect(id).toContain('wb/')
-    expect(name).toContain('WorkBuddy')
+    expect(name).not.toContain('wb/')
+    expect(name).not.toContain('WorkBuddy')
   })
 
-  it('resolve 把别名还原回「模型 + 渠道」，供展示名与能力表共用', () => {
+  it('resolve 把别名还原回「模型 + 渠道」，供路由行与能力表共用', () => {
     const table = buildAliasTable({ 'glm-5.3': ['workbuddy', 'trae'] })
     const r = table.resolve('wb/glm-5.3')
     expect(r?.model).toBe('glm-5.3')
@@ -94,7 +99,7 @@ describe('别名 id 与展示名', () => {
   it('⚠️ 别名已存在但**不再重名**时，仍要认得出来（识别与生成分开）', () => {
     // 实机 bug（2026-10-06）：别名是写进 CPA 配置的持久状态，上游供给面一变
     // 就不再重名 —— 只看 overlaps 会认不出自己写过的别名，
-    // 兜底分支把 `wb/xxx` 整个当裸名 → 展示名变成「WorkBuddy · wb/xxx」。
+    // 兜底分支把 `wb/xxx` 整个当裸名 → 展示名变成「wb/xxx」。
     const table = buildAliasTable(
       { 'glm-5.2': ['workbuddy'] }, // 只此一家 → 不重名
       ['wb/glm-5.2'], // 但目录里确实存在这条别名

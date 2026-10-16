@@ -75,9 +75,9 @@ export function providerIdOf(channel: string): string | undefined {
 /**
  * 某渠道的 provider **展示名**（选择器里的组标题）。
  *
- * 组名取「插件名 · 渠道展示名」而不是只写渠道名：模型行的展示名已经是
- * `WorkBuddy · glm-5.3`（渠道已出现在行里），组标题只写渠道名会与行重复，
- * 而只写插件名则四个组全同名。两段合起来才既区分得开、又不丢归属。
+ * 组名取「插件名 · 渠道展示名」而不是只写插件名：四个组若只写插件名则全同名，
+ * 渠道区分不开。**渠道现在只由这里承载** —— 推送的模型名是裸名（见
+ * `route-registry.ts` 的 `displayNameOf`），组标题是下拉里唯一出现渠道的位置。
  */
 export function providerLabelOf(channel: string): string | undefined {
   const spec = channelOf(channel)

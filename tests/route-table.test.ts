@@ -15,6 +15,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import type { PluginConfig } from '../src/config.ts'
+import { CHANNEL_IDS, PROVIDER_PREFIX, providerIdOf } from '../src/channels/registry.ts'
 import { AdminKeyStore } from '../src/credentials.ts'
 import { CpaGateway } from '../src/gateway.ts'
 import { createOperations } from '../src/ops/index.ts'
@@ -133,6 +134,7 @@ describe('平铺 GET 路由的响应体都带 ok: true', () => {
   const FLAT_GET_PATHS = new Set([
     '/api/v1/cpa/setup',
     '/api/v1/cpa/status',
+    '/api/v1/cpa/plugins',
     '/api/v1/cpa/account-intent',
   ])
 
@@ -202,6 +204,75 @@ describe('平铺 GET 路由的响应体都带 ok: true', () => {
     expect(FLAT_GET_PATHS.has('/api/v1/cpa/auto-checkin')).toBe(false)
   })
 })
+/**
+ * **`/plugins` 每项都带派生的 `providerId`**（2026-10-17 新增字段）。
+ *
+ * 为什么值得一条判据：它是这个渠道在模型选择器里的**分组身份**
+ * （`cpa-<渠道>`），而分组身份进了**已保存的模型选择**（行键
+ * `providerId/modelId`）。浏览器半边要靠它把「模型行」对上「渠道分组」——
+ * 一旦这里给的值与推送侧不一致，现象是**静默的**「找不到这个渠道的模型」：
+ * HTTP 200、没有 4xx、没有控制台报错。
+ *
+ * ⚠️ 判据写**关系**，不抄字面量：`cpa-workbuddy` 这类字符串是契约
+ * （改名 = 所有会话要重选一次），但把四个字面量抄进判据就与
+ * `channels/registry.ts` 成了两份会各自漂的事实。
+ */
+describe('GET /plugins 的响应体形状', () => {
+  const PATH = '/api/v1/cpa/plugins'
+
+  interface PluginEntry {
+    readonly id?: unknown
+    readonly label?: unknown
+    readonly unit?: unknown
+    readonly capabilities?: unknown
+    readonly providerId?: unknown
+  }
+
+  async function pluginsBody(): Promise<{
+    ok?: unknown
+    order?: unknown
+    plugins?: readonly PluginEntry[]
+  }> {
+    const route = routes.find((r) => r.path === PATH)
+    if (route === undefined) throw new Error(`没有这条路由：${PATH}`)
+    const response = await route.handle(new Request(`http://localhost${PATH}`))
+    return JSON.parse(await response.text()) as never
+  }
+
+  it('每项都带 providerId，值就是 providerIdOf(渠道)（不在这里另算一份）', async () => {
+    const body = await pluginsBody()
+    const plugins = body.plugins ?? []
+    /**
+     * 前提断言：一条都没抓到说明响应体形状变了，不能让下面的循环空转
+     * （「空集合上全称命题恒真」正是判据静默失效的形态）。
+     */
+    expect(plugins.length).toBe(CHANNEL_IDS.length)
+    for (const plugin of plugins) {
+      const id = String(plugin.id)
+      // ① 不是「恰好两边都 undefined」：显式要求有值
+      expect(plugin.providerId, `${id} 没有 providerId`).toBeDefined()
+      // ② 与推送侧同一份映射（唯一 home 是 providerIdOf）
+      expect(plugin.providerId).toBe(providerIdOf(id))
+      // ③ 形状契约：前缀 + 渠道 id（选择器的行键按 `providerId/modelId` 拼）
+      expect(plugin.providerId).toBe(`${PROVIDER_PREFIX}-${id}`)
+    }
+  })
+
+  it('原有字段（id / label / unit / capabilities）与 order 一字不动 —— 纯新增', async () => {
+    const body = await pluginsBody()
+    expect(body.order).toEqual([...CHANNEL_IDS])
+    const plugins = body.plugins ?? []
+    expect(plugins.map((plugin) => plugin.id)).toEqual([...CHANNEL_IDS])
+    for (const plugin of plugins) {
+      expect(typeof plugin.label).toBe('string')
+      expect(typeof plugin.unit).toBe('string')
+      expect(typeof plugin.capabilities).toBe('object')
+      // ⚠️ 别把 `id`（渠道 id）与 `providerId`（分组身份）混成一个字段
+      expect(plugin.id).not.toBe(plugin.providerId)
+    }
+  })
+})
+
 describe('README 的路由索引与代码一致', () => {
   /** 从 `src/README.md` 的「内部 HTTP 路由」一节里读那张表。 */
   function readmeRoutes(): Map<string, string[]> {

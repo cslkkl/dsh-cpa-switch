@@ -156,8 +156,9 @@ stays the upstream's job. See the appendix of the
 Once the plugin is installed and an account is added, the four channels' models appear in DSH's
 model picker on their own:
 
-- Models are shown as `channel · model` (e.g. `WorkBuddy · deepseek-v4.1-flash`), so you can see
-  at a glance which channel a request will use.
+- Models are **grouped by channel**: the group title is the channel (e.g. `CPA Switch · WorkBuddy`)
+  and each row inside is the **bare model name** (e.g. `deepseek-v4.1-flash`), so you can see at a
+  glance which channel a request will use.
 - This provider appears in DSH as **CPA Switch** — that is what you see in the model picker.
 - When one model is served by several channels, each channel gets its own entry — **picking a
   channel means only that channel's accounts are used**, never round-robined across your other

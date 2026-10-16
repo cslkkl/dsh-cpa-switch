@@ -584,7 +584,7 @@ describe('重载空窗', () => {
     expect(afterFirst?.ids).toContain('dfmodel')
     expect(afterFirst?.ids).toContain('qoder/glm-5.3')
     expect(afterFirst?.ids).toContain('wb/glm-5.3')
-    expect(afterFirst?.names).toContain('Qoder · dfmodel')
+    expect(afterFirst?.names).toContain('dfmodel')
 
     // 模拟宿主重建：条目回到 patch 基线（骨架在、models 没了）。
     entry.options = { name: '@deepseek-ai/dsh-llm-pi-ai', config: BASELINE }
@@ -684,7 +684,13 @@ describe('重载空窗', () => {
     // 条目上仍是「新一轮」的清单，且行数与条目一致
     const rows = modelsOf(entry.options.config)
     expect(rows.length).toBeGreaterThan(0)
-    expect(String(rows[0]?.name)).toContain('·')
+    /**
+     * 展示名是**裸名**（渠道由分组标题承载）—— 不许再出现「渠道 · 裸名」那个分隔符。
+     * 这正是 2026-10-17 那次根修钉住的新事实。
+     */
+    for (const row of rows) {
+      expect(String(row.name)).not.toContain('·')
+    }
     // 推出去的最后一份与条目一致（没被慢路倒灌改小）
     expect(pushed.at(-1)?.ids.length).toBeGreaterThanOrEqual(rows.length)
   })
@@ -806,13 +812,13 @@ describe('重载空窗', () => {
       // loader 挂上 → 真读一轮，推上去的是**新**清单（条目上此刻是新名字）
       late.deliver()
       await refresh('boot')
-      expect(pushed.at(-1)?.names).toContain('Qoder · dfmodel')
+      expect(pushed.at(-1)?.names).toContain('dfmodel')
 
       // 装配即推这时才醒来 —— 手里是旧缓存，不许盖回去
       await tick(300)
       const finalNames = pushed.at(-1)?.names ?? []
-      expect(finalNames).toContain('Qoder · dfmodel')
-      expect(finalNames).toContain('WorkBuddy · glm-5.3')
+      expect(finalNames).toContain('dfmodel')
+      expect(finalNames).toContain('glm-5.3')
       expect(finalNames).not.toContain('Qoder · 旧名字')
       expect(modelsOf(entry.options.config).map((row) => String(row.name))).not.toContain(
         'Qoder · 旧名字',
@@ -841,7 +847,7 @@ describe('重载空窗', () => {
 //
 // 两件事都在 `buildProfile` 的行构造里，且都只能在**推送后**的 config 上观察：
 // - `input` 只在确认支持图像时写；不写 → 宿主落 `["text"]`（保守）
-// - 展示名必须是「渠道 · 裸名」，**裸名里不许再带渠道前缀**
+// - 展示名就是**裸名**（渠道由 provider 分组标题承载），**裸名里不许再带渠道前缀**
 
 describe('推送行的模态与展示名', () => {
   let home: string
@@ -889,8 +895,8 @@ describe('推送行的模态与展示名', () => {
   it('⚠️ 别名在目录里、但该模型已不重名时，展示名仍要剥掉前缀', async () => {
     // 实机 bug（2026-10-06）：别名是**持久**写进 CPA 配置的，而别名表按**当前重名**
     // 现算 —— 上游供给面一变（某模型不再重名），resolve 就失配，兜底分支把整个
-    // `wb/xxx` 当裸名，展示名变成「WorkBuddy · wb/xxx」。
-    // 展示名的契约就一条：**渠道 · 裸名**，与「现在还重不重名」无关。
+    // `wb/xxx` 当裸名，展示名变成「wb/xxx」（根修前是「WorkBuddy · wb/xxx」）。
+    // 展示名的契约就一条：**只是裸名**（渠道由分组标题承载），与「现在还重不重名」无关。
     const cpa = fakeCpa({
       files: FILES,
       // 只此一家供给 → 别名表不会收录它 → 旧写法在此失配
@@ -901,8 +907,45 @@ describe('推送行的模态与展示名', () => {
     const { host } = fakeHost(entry)
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
-    expect(pushed[0]?.names).toContain('WorkBuddy · glm-5.2')
+    expect(pushed[0]?.names).toContain('glm-5.2')
     expect(pushed[0]?.names.some((n) => n.includes('wb/'))).toBe(false)
+  })
+
+  /**
+   * ⚠️⚠️ **推给宿主的 `name` 是裸名**（2026-10-17 根修）—— 这条钉的是本次改动的**根**。
+   *
+   * 根修前它被烤成「渠道 · 裸名」（`WorkBuddy · glm-5.3`）。而渠道**已经由 provider
+   * 分组标题承载**（`providerLabelOf` → `CPA Switch · WorkBuddy`），所以那是冗余。
+   * `name` 是**纯展示载荷**：路由身份 / 别名 / 目录护栏 / 隐藏键 / 去重键都不用它
+   * （宿主原话「Directory names are presentation-only」）。
+   *
+   * 四条一起钉，缺一条就留得下「换个写法照样绿」的缝：
+   * ① `name` 逐字等于裸名（不是含裸名 —— `toContain` 那种写法对 `WorkBuddy · glm-5.3`
+   *    也成立，钉不住根修）；② 里面没有渠道展示名；③ 没有那个分隔符；
+   * ④ **`id` 一字不动**（它是路由身份，根修只许动展示名）。
+   */
+  it('⚠️ 推给宿主的 name 就是裸名，而 id 与原分组身份都没动', async () => {
+    const cpa = fakeCpa({
+      files: [{ name: 'w1', provider: 'workbuddy' }],
+      models: { w1: ['glm-5.3', 'wb/glm-5.3'] },
+      catalog: ['wb/glm-5.3'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const { host } = fakeHost(entry)
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+
+    const rows = pushed[0]?.rows ?? []
+    expect(rows).toHaveLength(1)
+    // ① 逐字等于裸名（不是「包含」）
+    expect(rows[0]?.name).toBe('glm-5.3')
+    // ② / ③ 渠道与分隔符都不在展示名里
+    expect(String(rows[0]?.name)).not.toContain('WorkBuddy')
+    expect(String(rows[0]?.name)).not.toContain('·')
+    // ④ 路由身份一字不动
+    expect(rows[0]?.id).toBe('wb/glm-5.3')
+    // 渠道没丢，它落在分组身份（组标题）上 —— 那才是它该待的地方
+    expect(pushed[0]?.groups[providerIdOf('workbuddy') ?? '']).toBeDefined()
+    expect(pushed[0]?.ourProviderIds).toEqual([providerIdOf('workbuddy')])
   })
 })
 
@@ -1049,8 +1092,8 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
       expect(name).not.toMatch(/^CPA · /)
     }
     // 正确归属必须在
-    expect(allNames).toContain('Qoder · dfmodel')
-    expect(allNames).toContain('WorkBuddy · deepseek-v3-2-volc')
+    expect(allNames).toContain('dfmodel')
+    expect(allNames).toContain('deepseek-v3-2-volc')
   })
 
   /**
@@ -1096,8 +1139,14 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
     const names = pushed.flatMap((p) => p.names)
-    expect(names).toContain('WorkBuddy · hy3')
+    expect(names).toContain('hy3')
     expect(names).not.toContain('CPA · vendor/gpt-x')
+    /**
+     * ⚠️ 根修（2026-10-17）后展示名是**裸名**，所以漏出去的话长得是这一条 ——
+     * 上面那句 `CPA · vendor/gpt-x` 自兜底名被删（2026-10-07）起就不可能再命中，
+     * 留着它是历史判据，真正**会开火**的是下面这句。
+     */
+    expect(names).not.toContain('vendor/gpt-x')
     for (const name of names) {
       expect(name).not.toMatch(/^CPA · /)
     }
@@ -1156,7 +1205,7 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
 
     const names = pushed.flatMap((p) => p.names).map(String)
     // 好的那个渠道必须在 —— 这才是「跳过坏渠道、推其余」
-    expect(names).toContain('Qoder · dfmodel')
+    expect(names).toContain('dfmodel')
   })
 
   /**
@@ -1185,7 +1234,7 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
     // 清单推了（好渠道的模型在）
-    expect(pushed.flatMap((p) => p.names).map(String)).toContain('WorkBuddy · hy3')
+    expect(pushed.flatMap((p) => p.names).map(String)).toContain('hy3')
     // 但别名段没写 —— 少一个渠道就不能整段替换
     expect(readFileSync(configPath(), 'utf8')).not.toContain('model-alias')
   })
@@ -1221,7 +1270,7 @@ describe('目录与渠道供给面不同步时不许推（CPA · 兜底名）', 
     const config = readFileSync(configPath(), 'utf8')
     expect(config).toContain('wb/glm-4.6')
     expect(config).toContain('zcode/glm-4.6')
-    expect(pushed.flatMap((p) => p.names).map(String)).toContain('WorkBuddy · glm-4.6')
+    expect(pushed.flatMap((p) => p.names).map(String)).toContain('glm-4.6')
   })
 })
 
@@ -1485,8 +1534,8 @@ describe('启动用持久缓存', () => {
 
     // 缓存没用上，但正常读路径照旧推出正确清单
     const names = pushed.flatMap((p) => p.names).map(String)
-    expect(names).toContain('Qoder · dfmodel')
-    expect(names).toContain('WorkBuddy · hy3')
+    expect(names).toContain('dfmodel')
+    expect(names).toContain('hy3')
   })
 
   /** 没有缓存时不该凭空推一份 —— 保持原有的「无历史保持空」语义。 */
@@ -2058,8 +2107,9 @@ describe('思考档位声明', () => {
      * 三四十行**全是同一个词**（真机截图就是一片 `WorkBuddy`）—— 用户没法分辨
      * 自己在勾哪个模型，而**零报错**。
      *
-     * 守两件事：① 两侧显示名同源（都走 `displayNameOf`）；
-     * ② 同渠道内各行**展示名互不相同**（全是同一个词正是这次的形态）。
+     * 守三件事：① 两侧显示名同源（都走 `displayNameOf`）；
+     * ② 同渠道内各行**展示名互不相同**（全是同一个词正是这次的形态）；
+     * ③ 展示名**不带渠道**（2026-10-17 根修后它就是裸名，渠道由分组标题承载）。
      */
     it('⚠️ 候选行的展示名 = 推送行的 name，且同渠道内互不相同', async () => {
       const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
@@ -2076,6 +2126,12 @@ describe('思考档位声明', () => {
       const rows = refresh.candidatesOf('qoder')
       for (const row of rows) {
         expect(row.label).toBe(nameByBare.get(row.bare))
+        /**
+         * ⚠️ **展示名就是裸名**（2026-10-17 根修）—— 渠道只由 provider 分组标题承载，
+         * 不再烤进行里。这条与上面那句一起钉两件事：**两侧同源**、**名字里没有渠道**。
+         */
+        expect(row.label).toBe(row.bare)
+        expect(row.label).not.toContain('·')
       }
       // 全是同一个词 = 这次的事故形态
       expect(new Set(rows.map((row) => row.label)).size).toBe(rows.length)
@@ -2101,7 +2157,7 @@ describe('思考档位声明', () => {
 
       expect(pushed.at(-1)?.ids).toEqual(['trae/glm-5.2'])
       expect(refresh.candidatesOf('trae')).toEqual([
-        { id: 'trae/glm-5.2', bare: 'glm-5.2', label: 'Trae · glm-5.2' },
+        { id: 'trae/glm-5.2', bare: 'glm-5.2', label: 'glm-5.2' },
       ])
     })
   })
@@ -2352,13 +2408,13 @@ describe('供给面只收托管渠道的可用凭据', () => {
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
     const names = pushed.flatMap((p) => p.names)
-    expect(names).toContain('WorkBuddy · hy3')
+    expect(names).toContain('hy3')
     for (const leaked of [
-      'Kimi · kimi-k2.8',
-      'Kimi · kimi-k3-256k',
-      'MiMo · mimo-auto',
-      'MiMo · mimo-pro',
-      'some-future-channel · brand-new-model',
+      'kimi-k2.8',
+      'kimi-k3-256k',
+      'mimo-auto',
+      'mimo-pro',
+      'brand-new-model',
     ]) {
       expect(names).not.toContain(leaked)
     }
@@ -2388,8 +2444,8 @@ describe('供给面只收托管渠道的可用凭据', () => {
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
     const names = pushed.flatMap((p) => p.names)
-    expect(names).toContain('WorkBuddy · hy3')
-    expect(names).not.toContain('Kimi · kimi-k2.8')
+    expect(names).toContain('hy3')
+    expect(names).not.toContain('kimi-k2.8')
   })
 
   /** **判据 3：`disabled` 的号不供给模型**（面板禁用 ≠ 还能在选择器里选）。 */
@@ -2408,8 +2464,8 @@ describe('供给面只收托管渠道的可用凭据', () => {
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
     const names = pushed.flatMap((p) => p.names)
-    expect(names).toContain('WorkBuddy · hy3')
-    expect(names).not.toContain('WorkBuddy · deepseek-v4-pro')
+    expect(names).toContain('hy3')
+    expect(names).not.toContain('deepseek-v4-pro')
   })
 
   /**
@@ -2451,17 +2507,22 @@ describe('供给面只收托管渠道的可用凭据', () => {
 
     const names = pushed.flatMap((p) => p.names)
     for (const expected of [
-      'WorkBuddy · hy3',
-      'WorkBuddy · kimi-k2.7',
-      'Trae · custom_model_gemini',
-      'Trae · Doubao-Seed-2.1-Pro',
-      'Qoder · dfmodel',
-      'Qoder · kmodel',
-      'ZCode · glm-4.5-air',
-      'ZCode · glm-5-turbo',
+      'hy3',
+      'kimi-k2.7',
+      'custom_model_gemini',
+      'Doubao-Seed-2.1-Pro',
+      'dfmodel',
+      'kmodel',
+      'glm-4.5-air',
+      'glm-5-turbo',
     ]) {
       expect(names).toContain(expected)
     }
+    // ⚠️ 光看名字不够：**四个组各在**（上面那批是并集，渠道串了也能全中）。
+    // 根修后渠道不再烤进 `name`，所以「谁在哪个组」只能看分组身份。
+    expect([...(pushed.at(-1)?.ourProviderIds ?? [])].sort()).toEqual(
+      ['workbuddy', 'trae', 'qoder', 'zcode'].map((id) => providerIdOf(id)).sort(),
+    )
   })
 
   /**
@@ -2491,9 +2552,9 @@ describe('供给面只收托管渠道的可用凭据', () => {
 
     const names = pushed.flatMap((p) => p.names)
     // 认得出对象形态 + 字符串形态
-    expect(names).toContain('WorkBuddy · hy3')
-    expect(names).toContain('WorkBuddy · kimi-k2.7')
-    // 认不出的一律不进清单，也不许变成 `WorkBuddy · undefined` 这种名字
+    expect(names).toContain('hy3')
+    expect(names).toContain('kimi-k2.7')
+    // 认不出的一律不进清单，也不许变成 `undefined` 这种名字
     for (const name of names) {
       expect(String(name)).not.toContain('undefined')
     }

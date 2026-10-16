@@ -113,7 +113,8 @@ const LEGACY_PROVIDER_ID = 'cpa'
  * **`id` 与 `name` 不是同一个东西的两种写法**：
  * - `id` —— 真正发出去的（进请求 body 的 `model` 字段）。同名模型用**渠道别名**
  *   （`wb/glm-5.3`），这是「选了哪个渠道就只用那个渠道的号」的保证；
- * - `name` —— 纯展示标签（`WorkBuddy · glm-5.3`），**不参与路由**。
+ * - `name` —— 纯展示标签（`glm-5.3`），**不参与路由**。渠道**不在**这里 ——
+ *   它由 provider 分组标题承载（见 {@link displayNameOf}）。
  *
  * 所以模型选择器里每个条目只出现一次，用户看到的是 `name`，
  * 发出去的是 `id`。
@@ -579,18 +580,27 @@ function catalogIds(catalog: { data?: unknown[] }): string[] {
 }
 
 /**
- * 一行的**展示名**（`WorkBuddy · glm-5.3`）—— 唯一一份，两处共用。
+ * 一行的**展示名**（`glm-5.3`，就是裸名）—— 唯一一份，两处共用。
  *
- * ⚠️ **面板勾选清单与选择器条目必须是同一个字符串**（2026-10-14 实踩）：
+ * ⚠️ **渠道只由分组标题承载，行里不再烤一遍渠道名**（2026-10-17 根修）：
+ * 行本来就挂在 `cpa-<渠道>` 这个 provider 分组下，组标题
+ * （`providerLabelOf`，形如 `CPA Switch · WorkBuddy`）已经把渠道说清楚了 ——
+ * 原先返回 `${row.label} · ${row.bare}`（`WorkBuddy · glm-5.3`）是**冗余**。
+ * 依据：`name` 是**纯展示载荷**，路由身份、别名、目录护栏、隐藏键、去重键
+ * **都不用它**（宿主原话「Directory names are presentation-only」），
+ * 所以去掉前缀不牵动任何路由行为。
+ *
+ * ⚠️ **但它仍然必须是模型名，不能退回渠道名**（2026-10-14 实踩）：
  * 候选行原先交出去的是**渠道名**（`WorkBuddy`），于是弹窗里每一行都显示同一个词
  * —— 三四十行长得一模一样，用户根本分不清勾的是哪个模型（真机截图即如此）。
  * 根因是「推给选择器的显示名」与「候选行的 label」各算了一份，其中一份漏了模型名。
+ * **去渠道 ≠ 去模型名**：裸名照样能区分同一分组下的不同行，渠道名不能。
  *
  * 所以这里就是那条判据的唯一 home：`toModel` 的 `name` 与候选行的 `label`
  * 都从它取（判据 `tests/route-registry.test.ts` 的「候选行展示名 = 推送行的 name」）。
  */
-function displayNameOf(row: { label: string; bare: string }): string {
-  return `${row.label} · ${row.bare}`
+function displayNameOf(row: { bare: string }): string {
+  return row.bare
 }
 
 /**
@@ -630,7 +640,8 @@ interface BuiltProfile {
  * 从 CPA 实时目录构造 `providers.cpa` 的 profile。
  *
  * **同名模型按渠道拆行**：一个模型名被多个渠道供给时，每个渠道各注册一行，
- * id 用该渠道专属的别名（`wb/glm-5.3`）、展示名照旧「WorkBuddy · glm-5.3」。
+ * id 用该渠道专属的别名（`wb/glm-5.3`）、展示名是该模型的裸名（`glm-5.3`，
+ * 渠道由分组标题承载 —— 见 {@link displayNameOf}）。
  * 不拆的话 CPA 会在所有渠道之间轮询，面板选了哪个渠道都不名副实。
  *
  * 渠道目录与别名表**由调用方传入**（同一次读、同一份表）：这里不再自己读，
@@ -748,8 +759,8 @@ function buildCpaRouteProfile(
    * ⚠️ **必须在过滤之前抓**：隐藏掉的行也要在清单里，否则用户没法把它勾回来
    * （面板只列「当前会推送的」＝勾掉的那些就消失了，等于单向操作）。
    *
-   * ⚠️ **`label` 取展示名（`WorkBuddy · glm-5.3`），不是渠道名**（2026-10-14 实踩）：
-   * 原先这里交出去的是 `row.label`（= 渠道名），弹窗里每一行都是「WorkBuddy」，
+   * ⚠️ **`label` 取展示名（`glm-5.3`），不是渠道名**（2026-10-14 实踩）：
+   * 原先这里交出去的是渠道名，弹窗里每一行都是「WorkBuddy」，
    * 全是同一个词 —— 用户没法分辨自己在勾哪个模型。它必须与推送行的 `name` 同源
    * （{@link displayNameOf}），否则两份显示名必然漂开。
    */
@@ -1286,7 +1297,7 @@ export interface CandidateRow {
   /** 裸名 —— **隐藏表的键**，也是面板提交回来的东西。 */
   readonly bare: string
   /**
-   * 展示名 —— **与推给选择器的 `name` 逐字相同**（`WorkBuddy · glm-5.3`）。
+   * 展示名 —— **与推给选择器的 `name` 逐字相同**（`glm-5.3`，即裸名）。
    *
    * ⚠️ **不是渠道名**（2026-10-14 实踩）：曾经这里给的是渠道名，于是勾选弹窗里
    * 每一行都显示「WorkBuddy」，几十行长得一模一样，用户分不清在勾哪个模型 ——

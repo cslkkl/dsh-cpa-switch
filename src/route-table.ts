@@ -15,7 +15,7 @@
  */
 
 import { json } from './cpa.ts'
-import { CHANNEL_IDS, CHANNELS } from './channels/registry.ts'
+import { CHANNEL_IDS, CHANNELS, providerIdOf } from './channels/registry.ts'
 import { CONFIG_VERSION } from './setup/index.ts'
 import type { PluginConfig } from './config.ts'
 import type { AdminKeyStore } from './credentials.ts'
@@ -170,6 +170,18 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       },
     },
     {
+      /**
+       * 已装渠道列表与能力（面板的渠道页签读它）。
+       *
+       * ⚠️ **每项多一个派生字段 `providerId`**（2026-10-17）：渠道在模型选择器里的
+       * **分组身份**是 `cpa-<渠道>`（见 `providerIdOf`），而分组身份是**已保存的
+       * 模型选择**的一部分（行键 `providerId/modelId`）—— 少了它，浏览器半边只能
+       * 自己抄一份映射（或拼 `cpa-` 前缀），抄错就是**静默**的「找不到这个渠道的模型」。
+       * 所以从宿主这一份派生出去，别处不许再算一遍。
+       *
+       * ⚠️ 其余字段（`id` / `label` / `unit` / `capabilities`）与 `order` **一字不动**：
+       * 这是**纯新增**字段，老客户端不看它也不受影响。
+       */
       path: '/api/v1/cpa/plugins',
       methods: ['GET'],
       handle: async () =>
@@ -181,6 +193,8 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
             label: channel.label,
             unit: channel.unit,
             capabilities: channel.capabilities,
+            /** `providerIdOf` 是那份映射的唯一 home，**不在 route-table 里另写一份**。 */
+            providerId: providerIdOf(channel.id),
           })),
         }),
     },
@@ -370,9 +384,9 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
        * - 本路由 = **推送侧的行** —— 勾选**必须**用这份，否则勾了完全没用，
        *   且零报错（2026-10-13 实踩：目录 20 个名字 vs 推送 9 行，一个都对不上）。
        *
-       * ⚠️ 每行的 `label` 是**展示名**（`WorkBuddy · glm-5.3`，与推给选择器的
-       * `name` 同源），**不是渠道名** —— 给渠道名的话弹窗里几十行全长一样
-       * （2026-10-14 实踩）。
+       * ⚠️ 每行的 `label` 是**展示名**（`glm-5.3`，与推给选择器的
+       * `name` 同源，渠道由分组标题承载），**不是渠道名** ——
+       * 给渠道名的话弹窗里几十行全长一样（2026-10-14 实踩）。
        */
       path: '/api/v1/cpa/model-rows',
       methods: ['GET'],
