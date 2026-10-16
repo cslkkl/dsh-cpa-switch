@@ -147,6 +147,40 @@
     收在网格下面的折叠节里他会找不到
   - 判定 `tests/model-visibility-client.test.ts`；宿主侧
     `tests/ops-model-visibility.test.ts` + `tests/hidden-models-state.test.ts`
+- **`channel-registry.ts` / `channel-balance.ts` / `ModelLabel.tsx` / `CreditReadout.tsx` /
+  `glyph-credits.tsx` / `glyph-tokens.tsx`** —— 对话界面那两个座位（2026-10-17）。
+  - **两个座位**：`conversation.input.model.label`（模型名，`single`）与
+    `conversation.input.right`（渠道余额读数，`list` / `order: -10`，即模型选择器**左侧**）。
+    都在 [index.tsx](index.tsx) 注册；读数那个包在 `ctx.inject(['modelDirectories'], …)` 里
+    （服务晚到不该挡住整条入口，所以**不进导出的 `inject` 数组**）
+  - **`channel-registry.ts`** —— 渠道身份表的**唯一**一份：由宿主 `GET /plugins`
+    的 `providerId` 建索引，外加 `labelFor`（落点分层）与 `modelLabelText`（判定入口）。
+    ⚠️ **不许写第二张渠道表**，也**不许靠 `cpa-` 前缀猜**（那是第二份渠道知识）。
+    ⚠️ 标签路径**不许订阅 / 取数 / 建对象**：`option` 每行每次渲染各调一次（20–100 行，
+    每次高亮 / 输入再来一轮，两侧都没有 `React.memo`），所以渠道名只从
+    `peekChannelIndex()` 读**已经躺在共享缓存里**的那一份（`WeakMap` 按响应身份备忘）
+  - ⚠️⚠️ **`ModelLabel` 绝不返回 `null`**：该槽是 `single`，**一旦注册，宿主的
+    `fallback: model.name` 就不再生效** —— 返回空会让模型名**从界面上消失**且零报错
+    （证据 [`.probe/slot-research/runtime.md`](../../.probe/slot-research/runtime.md) 的 Q4）。
+    判定的入口是 `.ts` 的 `modelLabelText`（`tests` 那一侧 import 不到 `.tsx`），
+    组件只剩一行转发；`tests/composer-slots.test.ts` 逐落点钉「非空字符串」
+  - **`CreditReadout.tsx`** —— 读数：字形（按 `unit` 选）+ 数字，**渠道内所有启用号**
+    的可用余额之和。⚠️ 数据只走本仓 [use-resource.ts](use-resource.ts) /
+    [read-cache.ts](read-cache.ts)（键 `accounts:<渠道>`，与面板同一份缓存）——
+    **绝不用宿主 standard props 里的 `useResource`**：它只认 `dsh-resource://`、
+    读的是帧流、根本不发 HTTP，拿它读我们的路由得到的是**恒定为空的快照且不报错**
+    （[`.probe/slot-research/props.md`](../../.probe/slot-research/props.md) 的 Q2）
+  - ⚠️ **读不到 / 未加载 / 不是自家模型 → 渲染空，绝不画 `0`**：口径
+    （只算 `disabled === false`、`known === false` 与缺字段不算）在
+    [channel-balance.ts](channel-balance.ts)（纯函数）；一个编造的 0 会被读成「余额用光了」
+  - ⚠️ **不限额不是一个数**：启用号里有 `unlimited === true` 的（trae 的
+    `credits_pool_unlimited`）时结论是 `unlimited`，读数改说 `balanceUnlimited`
+    那个词、旁边不写数字 —— 合计读起来像「你还有这么多」，而上游说的是「没有上限」。
+    该号**不参与求和**；禁用的不限额号不算（它不会被花到）。判据同上
+  - ⚠️ **`unit` 的判定只有一处**（[credit-text.ts](credit-text.ts) 的 `unitOf` /
+    `unitTextOf` / `isTokenUnit`）：线上取值收敛、文案、字形都从那里取 ——
+    组件里再写一遍 `=== 'tokens'` 会被 `tests/credit-text.test.ts` 当场判红
+  - 判据 `tests/composer-slots.test.ts` + `tests/client-apply.test.ts` 的「两个座位」一节
 - **`use-channel-actions.ts`** —— 渠道级动作（全部签到 / 任务、自动签到开关）+ 忙碌与提示。
   - 「批量在飞」与「某张卡在飞」**互相看得见**：并发点各发一次写请求会互相盖掉响应
   - ⚠️ **四个状态按渠道分槽，不是「切渠道清空」** —— 面板不随渠道重挂载，
@@ -488,6 +522,9 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [update-text.ts](update-text.ts)                   | 渠道插件版本那一行的判定（不含 JSX）：**「未知 / 有新版 / 已是最新」三态不许互相冒充**；**查不到上游**说「查不到」；认不出就什么都不说。CPA 被停掉时那行话必须说出来。同步 `tests/update-text.test.ts`                                                                                                                                                                                                                                                |
 | [transport.ts](transport.ts)                       | 一次请求 + 异常**一律收敛成 `{ ok: false, error }`、不抛** —— 调用方只判 `ok`                                                                                                                                                                                                                                                                                                                                                                         |
 | [cache-keys.ts](cache-keys.ts)                     | 浏览器半边**读缓存键的唯一来源**：键身兼两职（读用它取键、写后当失效前缀）。⚠️ **新增读键必须加到这里**；它与宿主 `gateway.cacheKeys` 是**两套独立缓存**，同名只是巧，**不要互相 import**。判据 `tests/client-cache-keys.test.ts` 拦住别处手写的 `key: '…'`                                                                                                                                                                                           |
+| [channel-registry.ts](channel-registry.ts)         | 渠道身份表（`providerId → {id,label,unit}`）与**落点分层**判定的唯一来源：`labelFor` / `modelLabelText`。⚠️ 标签路径是每行每轮各调一次的热路径，**不许加订阅 / 取数 / 建对象**；`option` 只在分组内、`trigger`/`menu` 必须自带渠道名。同步 `tests/composer-slots.test.ts`                                                                                                                                                                             |
+| [channel-balance.ts](channel-balance.ts)           | 读数的**口径**（只算启用号、缺字段不算 0、凑不出来就是「没有」、**有不限额号就说不限而不写数字**）与 `/accounts` 线上形状的唯一读取处。同步 `tests/composer-slots.test.ts`                                                                                                                                                                                                                                                                            |
+| [credit-text.ts](credit-text.ts)                   | 单位（`credits`/`tokens`）的判定**只有这一处**：`unitOf`（线上收敛）/ `unitTextOf`（文案）/ `isTokenUnit`（字形）。⚠️ 别处再写一遍 `=== 'tokens'` 会被 `tests/credit-text.test.ts` 判红                                                                                                                                                                                                                                                               |
 | [read-cache.ts](read-cache.ts)                     | 读缓存（新鲜 / 陈旧两档 + **按前缀作废**）与可订阅 store；语义改动同步 [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) + `tests/read-cache.test.ts`                                                                                                                                                                                                                                                                                          |
 | [endpoints.ts](endpoints.ts)                       | `/api/v1/cpa/*` 的**路径唯一来源**（`paths`）；**写函数自己失效缓存**。⚠️ 前缀必须对上**本半边真的有读者**的那个读键（**不是**宿主 `cacheKeys` 的名字）；抄错不报错，只是那次作废**匹配不到任何条目**（空操作）。⚠️ 写成功后界面值**取回读**（F33）：作废缓存本身不会让界面更新。⚠️ **`modelRows`（候选行）≠ `models`（渠道目录）**：勾选清单只能用前者 —— 后者的名字与推送行的键对不上，勾了会静默失效。判据 `tests/client-cache-keys.test.ts`       |
 | [report.tsx](report.tsx)                           | 提示文案与图标的唯一组装处；**不加** `✓`/`✗`、**不用** Emoji（[架构说明](../../docs/ARCHITECTURE.md)）                                                                                                                                                                                                                                                                                                                                                |

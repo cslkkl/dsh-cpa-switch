@@ -59,6 +59,33 @@ export function unitTextOf(t: Translate, unit: CreditUnit): string {
   return unit === 'tokens' ? t('unitTokens') : t('unitCredits')
 }
 
+/**
+ * 线上来的单位值 → `CreditUnit`（`'tokens'` 之外一律当积分）。
+ *
+ * ⚠️ **收敛也在这里**，理由与 {@link isTokenUnit} 同源：`CreditUnit` 这个联合类型
+ * 的每一种判定都只许有一处 —— 渠道索引那边每读到一条渠道都要收敛一次，
+ * 但它不该自己写一遍 `=== 'tokens'`（那是第二份映射，`tests/credit-text.test.ts`
+ * 会当场判红）。
+ *
+ * 契约里只有两个值，所以「不是 tokens 就是积分」不是猜：认不出的值当作积分，
+ * 与界面默认那枚硬币同一口径。
+ */
+export function unitOf(value: unknown): CreditUnit {
+  return value === 'tokens' ? 'tokens' : 'credits'
+}
+
+/**
+ * 单位是不是 token —— 读数的**字形**按它挑（硬币 / 圆加 T，见 `glyph-tokens.tsx`）。
+ *
+ * ⚠️ **判定留在这里**（`unitTextOf` 的旁边），不散进组件：`CreditUnit` 这个联合
+ * 类型的每一种映射都只许有一处，而 `tests/credit-text.test.ts` 有一条判据点名钉住
+ * 「全仓只有 `credit-text.ts` 判 `'tokens'`」—— 组件里再写一遍 `=== 'tokens'`
+ * 会被它当场判红（那是**故意的**：单位的第二份映射正是这条判据要防的东西）。
+ */
+export function isTokenUnit(unit: CreditUnit): boolean {
+  return unit === 'tokens'
+}
+
 /** 一张卡的额度区该显示什么。 */
 export interface CreditView {
   /** 单位文案（`积分` / `token`），两格数字都用它。 */

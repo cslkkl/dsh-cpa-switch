@@ -216,6 +216,24 @@ export const zh = {
   cycleHint: '这是上游提供的周期结束时间，不代表未用额度一定失效',
   unitCredits: '积分',
   unitTokens: 'token',
+  /**
+   * 对话界面那个**余额读数**的悬停说明（`CreditReadout.tsx`）。
+   *
+   * ⚠️ 读数本身只有一个字形 + 一个数字（28px 那行放不下一句话），
+   * 所以「这是哪个渠道的、哪些号、什么单位」全靠这一句 ——
+   * 少了它那个数字就是无主的（`{channel}` 与 `{unit}` 都从宿主的渠道清单来）。
+   */
+  balanceReadoutTitle: '{channel} · 已启用账号可用{unit}合计',
+  /**
+   * 启用号里**有不限额的**时，读数改说这个词（旁边不写数字）。
+   *
+   * ⚠️ 不限额**不是一个数**：旁边写一个合计读起来像「你还有这么多」，而上游说的是
+   * 「这份没有上限」。本仓面板上另有一个 `unlimited` 键（「可用」那格的标签），
+   * 两处语境不同、措辞也就不同，别合并。
+   */
+  balanceUnlimited: '不限',
+  /** 不限额时的悬停说明 —— 上面那句说的是「合计」，这里不是合计。 */
+  balanceUnlimitedTitle: '{channel} · 有启用中的不限额账号',
   routing: '调度',
   strategyLabel: '当前策略',
   strategyValue: '{label}: {value}',
@@ -410,6 +428,11 @@ export const en: Record<LocaleKey, string> = {
   cycleHint: 'Cycle end dates come from the provider; unused quota may not expire then',
   unitCredits: 'credits',
   unitTokens: 'tokens',
+  /** ⚠️ 读数只有字形 + 数字，这句话是它唯一的解释，见中文表。 */
+  balanceReadoutTitle: '{channel} · {unit} available across enabled accounts',
+  /** ⚠️ 不限额不是一个数，读数旁边不写数字，见中文表。 */
+  balanceUnlimited: 'Unlimited',
+  balanceUnlimitedTitle: '{channel} · an enabled account is unlimited',
   routing: 'Routing',
   strategyLabel: 'Strategy',
   strategyValue: '{label}: {value}',
