@@ -4,12 +4,24 @@ import tseslint from 'typescript-eslint'
 import eslintConfigPrettier from 'eslint-config-prettier'
 
 export default [
-  // `lib/` 是构建产物、`调研报告归档/` 与 `reference/` 是本地只读参考
-  // （都已 gitignore，CI 拿不到）—— 忽略它们，本地 `pnpm lint` 才与 CI 一致，
-  // 而不是在一个管道根本看不到的文件上失败。
+  // `lib/` 是构建产物、`调研报告归档/` 与 `reference/` 是本地只读参考，
+  // `.probe/` 是实测探测的临时区 —— 全部已 gitignore（CI 拿不到），
+  // 忽略它们，本地 `pnpm lint` 才与 CI 一致，而不是在一个管道根本看不到的
+  // 文件上失败。
   // ⚠️ `reference/` 尤其要排除：里面是**别的仓**，自带 tsconfig，
   // 不排除会让 typescript-eslint 报「多个候选 tsconfigRootDir」。
-  { ignores: ['lib/**', 'node_modules/**', '调研报告归档/**', 'reference/**', 'coverage/**'] },
+  // ⚠️ `.probe/` 里是一次性调研脚本（`.cjs` 带 `require`），与 `scripts/*.cjs`
+  // 同形态但不入版本库 —— 不忽略会让 `pnpm lint` 在 gitignore 的文件上红。
+  {
+    ignores: [
+      'lib/**',
+      'node_modules/**',
+      '调研报告归档/**',
+      'reference/**',
+      'coverage/**',
+      '.probe/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

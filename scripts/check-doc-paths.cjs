@@ -21,8 +21,14 @@ const path = require('node:path')
 
 const ROOT = path.join(__dirname, '..')
 
-/** 不扫的目录：版本库内部、依赖、产物，以及被 gitignore 的本机只读参考。 */
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'lib', 'dist', 'reference'])
+/**
+ * 不扫的目录：版本库内部、依赖、产物，以及被 gitignore 的本机只读参考与实测临时区。
+ *
+ * ⚠️ `.probe` 必须在这里：它已被 .gitignore 排除（本仓纪律「实测的临时脚本与原始
+ * 响应不进版本库」），性质与 `reference/` 相同 —— 里面的调研笔记引用「规划中的
+ * 路径」（还没写的文件）是常态，扫它们只会制造与文档网络无关的假红。
+ */
+const SKIP_DIRS = new Set(['.git', 'node_modules', 'lib', 'dist', 'reference', '.probe'])
 
 /**
  * 认的路径形状：`(../)*` + 三类前缀 + 至少一段目录 + 已知扩展名。
@@ -49,10 +55,6 @@ const ALLOWED = [
   { target: 'src/adapters.ts', reason: '渠道知识单一来源之前的模块，决策记录里的历史叙述' },
   { target: 'src/operations.ts', reason: '域拆分前的类，决策记录里的历史叙述' },
   { target: 'tests/adapters.test.ts', reason: '改名前的测试文件（现 tests/channels.test.ts）' },
-  {
-    target: 'src/client/credit-balance.tsx',
-    reason: '本机只读参考 reference/ 里的路径，不入库',
-  },
 ]
 
 /**
