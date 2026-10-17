@@ -221,6 +221,17 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
       都按「渠道侧证据不足」留空、走兜底。等有渠道侧来源再补，
       **别把 WorkBuddy/ZCode 的已知值搬过去**（同名模型在不同渠道上限可能不同）。
       归属与事实源见 [src/channels/README.md](src/channels/README.md)。
+- [ ] **待真机复验：对话界面两个座位 + 裸名（2026-10-17 那批，合并 `29a6a54`）** ——
+      代码里只有判据（`tests/composer-slots.test.ts` / `tests/route-registry.test.ts`），
+      没有真机证据。要验的：① 模型下拉**组内每行只有模型名**（`glm-5.3`），
+      收起状态的按钮与菜单根行仍带渠道（`WorkBuddy · glm-5.3`）；
+      ② 选择器**左侧**出现当前渠道的余额读数，切渠道换字形 / 换数；
+      ③ 余额读不到时**空着**（绝不画 `0`）、trae 的不限额号显示「不限」不显示数。
+      ⚠️ 复验必须先 `pnpm build` **并重启 DSH**（浏览器半端也在 `lib/client.js` 里）。
+      判据与取舍见[双座位决策](.agents/notes/2026-10-17-composer-slots.md)与
+      [名字根修](.agents/notes/2026-10-17-model-name-root-fix.md)（后者记了两处补不回来的代价：
+      触发位 `title` / `aria-label` 只剩裸名、`/model` 弹窗按渠道词搜不到 ——
+      「看得到、搜不到」是已知取舍，不是缺陷）。
 - [ ] **研究方向见 [docs/PLAN.md](docs/PLAN.md)** —— 额度显示位置、每代理独立用号、
       调度维护界面等**尚未立项**的想法记在那里；本清单只放「确定要做、照做即可」的动作。
       **结构类改动**（会改行为或签名的）立项在那份的 §2.9：**先补判据再动结构**。
