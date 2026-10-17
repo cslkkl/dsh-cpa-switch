@@ -115,11 +115,13 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 - 本机门禁：`pnpm check` 全绿 —— typecheck / lint / check:layering / check:doc-paths /
   check:release / format:check / build / verify:artifacts / test。
 - 构建产物：`lib/index.js`（宿主 ESM）+ `lib/client.js`（浏览器 CJS）+ `lib/index.d.ts`。
-- ⚠️ **发布流那几条还没有一次真发布覆盖**：发布噪音守卫、`pnpm check:release`、草稿退役、
-  `--generate-notes` 回落目前只有判据（[tests/release-workflow.test.ts](tests/release-workflow.test.ts)）
-  与本地实测 —— PR CI 只跑 `ci.yml`，`publish.yml` **不在其中**，所以一次绿灯的 PR 说明不了
-  发布路径能跑。**下一次推标签是它们的首次验证**：第一轮留意守卫的基线（`--exclude` 生效时
-  base 是上一个标签而不是正在发的那个）与正文来源那条 `::notice::` / `::warning::`。
+- **发布流经首次真发布验收（2026-10-17，`v0.16.0`）**：发布噪音守卫在 runner 上跑通，
+  **基线正确排除掉正在发布的那个标签**（日志 `changes in v0.15.1..HEAD`，26 条产物改动 →
+  放行）；正文走手写覆盖（注解 `release notes come from docs/releases/v0.16.0.md`），
+  所以草稿退役按判据**跳过**（那次源码没被消费，删了就是白丢）。
+  ⚠️ **仍只有判据的两支**：`--generate-notes` 回落、草稿退役的**实际删除**路径 ——
+  本版由手写正文取胜，两条都没走到；下次走草稿正文的版本是它们的首次验证。
+  每条发布步骤的判据见 [tests/release-workflow.test.ts](tests/release-workflow.test.ts)。
 - 已发布版本经真实用户路径验收：装完插件自动下载 CPA、生成密钥、拉起服务，四渠道页签齐全。
   具体版本号看 [npm](https://www.npmjs.com/package/dsh-cpa-switch)。
 - **模型路由的重载空窗修复经真机验收（2026-10-05）**：`pnpm build` 后重启 DSH、写一次设置
