@@ -1041,6 +1041,48 @@
   color: var(--dsw-alias-state-warn-primary);
 }
 
+/* ---- Composer credit readout ------------------------------------------- */
+
+/* The balance beside the model picker. It is the plugin's one element outside
+   the panel, and it lives in this stylesheet on purpose: a second stylesheet
+   would be a second place for the same tokens (and this file already owns the
+   plugin's ink — the two glyphs' `flex: none` rule is here too).
+
+   `height: 28px` matches the picker's own trigger, so the composer row reads as
+   one line of chrome instead of a taller element deciding its height.
+   It is a **readout, not a control**: no hover background, no pointer cursor.
+   The only affordance is the `title` — a sentence beside the figure would
+   compete with the number it labels at this size. */
+.creditReadout {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  /* 4px is measured, not chosen: at 3px the glyph and the digits collided
+     optically, and at 6px the pair stopped reading as one object. */
+  gap: 4px;
+  /* The figure never wraps; a two-line readout would grow the row. */
+  white-space: nowrap;
+  /* Tertiary, like the panel's other passive readings: a fact the user reads,
+     not a control they press, so it must not compete with the model name. */
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Fixed size in a flex row: without it a long figure squeezes the glyph, and a
+   squashed coin stack stops reading as a coin stack. */
+.readoutGlyph {
+  flex: none;
+}
+
+.creditAmount {
+  font-size: 12px;
+  /* Keep the readout's own box out of the row's height calculation. */
+  line-height: 1;
+  /* The figure is compared across channels ("what does that one leave me?"),
+     so it gets tabular digits: proportional ones make the readout change width
+     as the number moves, which reads as a jumpy row. */
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Error boundary ---------------------------------------------------- */
 
 .crashed {

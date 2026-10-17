@@ -89,3 +89,43 @@ describe('浏览器半边挂载契约（源码级）', () => {
     expect(coded).not.toContain('settings.plugins.tab')
   })
 })
+
+/**
+ * 对话界面那两个座位的**注册面**（2026-10-17 新增）。
+ *
+ * 判据只钉三件**换个写法就会静默坏**的事：
+ * 1. **导出的 `inject` 数组不许长**：`modelDirectories` 是**座位级**门禁
+ *    （`ctx.inject`），不是插件级门禁。加进导出数组会让「这个服务还没到位」
+ *    把**整条入口**（连插件面板）一起挡在门外 —— 而界面上的表现只是「插件不见了」。
+ * 2. **两个座位都真的注册了**：少一个不会有任何报错，只是那个位置什么都没有
+ *    （余额读数）或模型名回落到宿主兜底（模型名那个槽位压根没被占）。
+ * 3. **读数座位必须等 `modelDirectories`**：它的 owner props 里没有「当前选中的
+ *    模型」，不等服务就只能拿一个读不到数的空壳。
+ */
+describe('浏览器半边 · 对话界面的两个座位', () => {
+  const coded = code(SOURCE)
+
+  it('⚠️ 导出的 `inject` 仍是 `slots` + `locale`（座位级的等待不进这里）', () => {
+    expect(coded).toContain("export const inject = ['slots', 'locale']")
+    expect(coded).not.toMatch(/export const inject = \[[^\]]*modelDirectories/u)
+  })
+
+  it('注册了模型名那个落点（`conversation.input.model.label`）', () => {
+    expect(coded).toContain("'conversation.input.model.label'")
+    expect(coded).toMatch(/slots\.inject\(LABEL_SEAT/u)
+  })
+
+  it('注册了余额读数那个落点（`conversation.input.right`），且带 `list` 座必需的 `id`', () => {
+    expect(coded).toContain("'conversation.input.right'")
+    expect(coded).toContain('READOUT_SEAT_ID')
+    expect(coded).toMatch(/id:\s*READOUT_SEAT_ID/u)
+    // 落在模型选择器**左侧**靠 `order`：丢了它读数就排到选择器后面去了。
+    expect(coded).toMatch(/order:\s*READOUT_ORDER/u)
+    expect(coded).toMatch(/READOUT_ORDER = -10/u)
+  })
+
+  it("⚠️ 读数座位包在 `ctx.inject(['modelDirectories'], …)` 里（等到服务再注册）", () => {
+    expect(coded).toMatch(/ctx\.inject\(\['modelDirectories'\]/u)
+    expect(coded).toMatch(/directoryFor\(sessionId\)\.store/u)
+  })
+})
