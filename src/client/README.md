@@ -131,11 +131,12 @@
     一个没少，而所有请求都是 200、零报错。候选行来自**推送侧同一份数据**
     （`RouteRefresher.candidatesOf` → `/api/v1/cpa/model-rows`），键逐字相同，
     所以勾了必定命中。`models:` 那个读键保留但**只用于展示**
-  - ⚠️ **行的展示名用的是候选行自带的 `label`**（`WorkBuddy · glm-5.3`），
+  - ⚠️ **行的展示名用的是候选行自带的 `label`**（`glm-5.3`，即裸名），
     **不是**渠道名 —— 曾经宿主交来的 `label` 就是渠道名，于是弹窗里几十行
     全是同一个「WorkBuddy」，用户分不清在勾哪个模型（2026-10-14 实踩，
     零报错）。这个名字由宿主按**推送侧同一份口径**给（`displayNameOf`），
-    两侧逐字相同
+    两侧逐字相同；2026-10-17 根修后它是裸名，渠道只在分组标题上（见根
+    [AGENTS.md](../../AGENTS.md) 的活跃坑与[决策记录](../../.agents/notes/2026-10-17-model-name-root-fix.md)）
   - ⚠️ **入口按钮永远在**（哪怕读不到 / 读到 0 个）：状态在弹窗里说
     （加载中 / 读失败 + 原因 / 还没有模型）。第一版写成「读不到就 `return null`」，
     于是**任何接线错误都长成「这个功能不存在」**（2026-10-13 真机实踩，
@@ -161,7 +162,7 @@
     `peekChannelIndex()` 读**已经躺在共享缓存里**的那一份（`WeakMap` 按响应身份备忘）
   - ⚠️⚠️ **`ModelLabel` 绝不返回 `null`**：该槽是 `single`，**一旦注册，宿主的
     `fallback: model.name` 就不再生效** —— 返回空会让模型名**从界面上消失**且零报错
-    （证据 [`.probe/slot-research/runtime.md`](../../.probe/slot-research/runtime.md) 的 Q4）。
+    （证据是 `.probe/slot-research/runtime.md` 的 Q4 —— 本机调研件、不入库，故不做链接）。
     判定的入口是 `.ts` 的 `modelLabelText`（`tests` 那一侧 import 不到 `.tsx`），
     组件只剩一行转发；`tests/composer-slots.test.ts` 逐落点钉「非空字符串」
   - **`CreditReadout.tsx`** —— 读数：字形（按 `unit` 选）+ 数字，**渠道内所有启用号**
@@ -169,7 +170,7 @@
     [read-cache.ts](read-cache.ts)（键 `accounts:<渠道>`，与面板同一份缓存）——
     **绝不用宿主 standard props 里的 `useResource`**：它只认 `dsh-resource://`、
     读的是帧流、根本不发 HTTP，拿它读我们的路由得到的是**恒定为空的快照且不报错**
-    （[`.probe/slot-research/props.md`](../../.probe/slot-research/props.md) 的 Q2）
+    （证据是 `.probe/slot-research/props.md` 的 Q2 —— 同上，本机调研件、不入库）
   - ⚠️ **读不到 / 未加载 / 不是自家模型 → 渲染空，绝不画 `0`**：口径
     （只算 `disabled === false`、`known === false` 与缺字段不算）在
     [channel-balance.ts](channel-balance.ts)（纯函数）；一个编造的 0 会被读成「余额用光了」

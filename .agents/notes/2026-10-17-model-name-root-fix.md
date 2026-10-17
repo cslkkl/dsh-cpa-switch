@@ -37,8 +37,9 @@
   适配器模型表按 id 建索引。宿主自己的 README 写明
   **「Directory names are presentation-only」**。
 
-> 证据文件：[`probe` 的 name-blast-radius.md](../../.probe/slot-research/name-blast-radius.md)
-> —— ⚠️ 它是 `.gitignore` 排除的**本机调研件、不入库**（clone 后没有这个文件）。
+> 证据文件：`.probe/slot-research/name-blast-radius.md`
+> —— ⚠️ 它是 `.gitignore` 排除的**本机调研件、不入库**（clone 后没有这个文件），所以
+> 这里只写路径、不做链接：链接到不入库的文件等于全仓一处永久断链。
 > 上面是它的自含结论；入库的判据见文末。
 
 ### 两处补不回来的代价（如实写）

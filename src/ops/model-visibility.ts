@@ -60,7 +60,8 @@ export interface CandidateRow {
   readonly id: string
   readonly bare: string
   /**
-   * 展示名 —— **与推给选择器的 `name` 逐字相同**（`WorkBuddy · glm-5.3`）。
+   * 展示名 —— **与推给选择器的 `name` 逐字相同**（`glm-5.3`，即裸名；渠道只由
+   * provider 分组标题承载，见 `route-registry.ts` 的 `displayNameOf`）。
    *
    * ⚠️ 不是渠道名：面板要拿它区分几十行（2026-10-14 实踩，见 `route-registry.ts`
    * 的 `CandidateRow`）。本域只做搬运，不自己拼这个名字。
