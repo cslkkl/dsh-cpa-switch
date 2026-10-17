@@ -31,14 +31,14 @@
 > ⚠️ **本表与那些表都要活跃**：新增模块时，行写进**最近的那个**子树 README；
 > 只有当它真的跨子树时才回填到这里。
 
-| 改了                         | 必须同步                                                                                                                                                                                                                                                                                            |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts` 装配          | 只挂线：造对象、挂 effect、注册路由；**流程与表都不在这里**（[决策记录](.agents/notes/2026-10-05-assembly-layer.md)）                                                                                                                                                                               |
-| 搬文件 / 改名 / 删模块       | **同批改掉文档里的旧路径** —— 代码里的旧路径当场编译报错，文档里的**零信号**；`pnpm check:doc-paths` 只扫 `src` / `tests` / `scripts` 三类裸路径（**扫不到 `docs/` 内的断链**），白名单只收历史提法且上限 10 条（[决策记录](.agents/notes/2026-10-05-doc-path-gate.md)、[手册](scripts/README.md)） |
-| `scripts/check-layering.cjs` | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                                                                                                                 |
-| `.github/workflows/**`       | 发布链路的唯一事实源：`publish.yml` 推 `v*` 标签触发；`release-drafter.yml` 维护草稿正文；`ci.yml` 只读。改任一都要同步[发布手册](docs/PUBLISHING.md)（现含三个 workflow 的索引）；⚠️ 逐 workflow **显式声明 `permissions`**（默认值读不到，漏了声明的症状是 403）                                  |
-| **契约 / 对外行为**          | `package.json` 版本号 + 根 [README.md](README.md)（双语同改）+ [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 的设计节                                                                                                                                                                                |
-| **新增可维护目录**           | 双件（`AGENTS.md` 规则层 + `README.md` 文档层）**缺一不可**，并回填本文档地图；否则那棵树不进文档网络                                                                                                                                                                                               |
+| 改了                         | 必须同步                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts` 装配          | 只挂线：造对象、挂 effect、注册路由；**流程与表都不在这里**（[决策记录](.agents/notes/2026-10-05-assembly-layer.md)）                                                                                                                                                                                                                                                                                                                            |
+| 搬文件 / 改名 / 删模块       | **同批改掉文档里的旧路径** —— 代码里的旧路径当场编译报错，文档里的**零信号**；`pnpm check:doc-paths` 只扫 `src` / `tests` / `scripts` 三类裸路径（**扫不到 `docs/` 内的断链**），白名单只收历史提法且上限 10 条（[决策记录](.agents/notes/2026-10-05-doc-path-gate.md)、[手册](scripts/README.md)）                                                                                                                                              |
+| `scripts/check-layering.cjs` | 分层矩阵的唯一事实源：[src/AGENTS.md](src/AGENTS.md) 的依赖方向；新增层级要同步规则表，越界在构建期与测试期都不报错                                                                                                                                                                                                                                                                                                                              |
+| `.github/workflows/**`       | 发布链路的唯一事实源：`publish.yml` 推 `v[0-9]*` 标签触发（**发布噪音守卫只跑 tag 触发**：基线 `git describe … --exclude=<正在发布的标签>`，管道给 `scripts/release-guard.mjs`；正文读草稿、读不到发 `::warning::`、发完退役草稿）；`release-drafter.yml` 维护草稿正文；`ci.yml` 只读。改任一都要同步[发布手册](docs/PUBLISHING.md)（现含三个 workflow 的索引）；⚠️ 逐 workflow **显式声明 `permissions`**（默认值读不到，漏了声明的症状是 403） |
+| **契约 / 对外行为**          | `package.json` 版本号 + 根 [README.md](README.md)（双语同改）+ [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 的设计节                                                                                                                                                                                                                                                                                                                             |
+| **新增可维护目录**           | 双件（`AGENTS.md` 规则层 + `README.md` 文档层）**缺一不可**，并回填本文档地图；否则那棵树不进文档网络                                                                                                                                                                                                                                                                                                                                            |
 
 ## 常用命令
 
@@ -113,8 +113,13 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
   **分层检查** → **文档路径检查** → format:check → build → **产物断言**
   （`scripts/verify-artifacts.cjs`）→ test。跑没跑、绿不绿看上面的 Actions 记录，数字不抄。
 - 本机门禁：`pnpm check` 全绿 —— typecheck / lint / check:layering / check:doc-paths /
-  format:check / build / verify:artifacts / test。
+  check:release / format:check / build / verify:artifacts / test。
 - 构建产物：`lib/index.js`（宿主 ESM）+ `lib/client.js`（浏览器 CJS）+ `lib/index.d.ts`。
+- ⚠️ **发布流那几条还没有一次真发布覆盖**：发布噪音守卫、`pnpm check:release`、草稿退役、
+  `--generate-notes` 回落目前只有判据（[tests/release-workflow.test.ts](tests/release-workflow.test.ts)）
+  与本地实测 —— PR CI 只跑 `ci.yml`，`publish.yml` **不在其中**，所以一次绿灯的 PR 说明不了
+  发布路径能跑。**下一次推标签是它们的首次验证**：第一轮留意守卫的基线（`--exclude` 生效时
+  base 是上一个标签而不是正在发的那个）与正文来源那条 `::notice::` / `::warning::`。
 - 已发布版本经真实用户路径验收：装完插件自动下载 CPA、生成密钥、拉起服务，四渠道页签齐全。
   具体版本号看 [npm](https://www.npmjs.com/package/dsh-cpa-switch)。
 - **模型路由的重载空窗修复经真机验收（2026-10-05）**：`pnpm build` 后重启 DSH、写一次设置

@@ -7,9 +7,21 @@
 
 ## 现状
 
-推 `v*` 标签即由 [publish.yml](../.github/workflows/publish.yml) 自动发布，四步：
-门禁（与 `ci.yml` 同一份 `pnpm check`）→ 核对 tag 与 `package.json` 版本号一致
-→ `npm publish --provenance` → 建 GitHub Release（正文来源见下）。
+推 `v<版本>` 标签即由 [publish.yml](../.github/workflows/publish.yml) 自动发布：
+发布噪音守卫（**只跑 tag 触发**）→ 门禁（与 `ci.yml` 同一份 `pnpm check`）
+→ 核对 tag 与 `package.json` 版本号一致 → `npm publish --provenance`
+→ 建 GitHub Release（正文来源见下）→ 退役 Release Drafter 草稿。
+
+「发布噪音守卫」判的是**这次改动会不会改变 npm 上的产物**：只有文档 / 测试 / CI / 工具类
+改动时直接判红（退出码 1 = 这一版不该发）。判据是
+[scripts/release-guard.mjs](../scripts/release-guard.mjs)，与发布流跑的是同一份脚本。
+手动补发通道（`workflow_dispatch` + 显式 `tag`）不带这道门 —— 它本来就是「补一个漏掉的
+Release / 补正文」，该放行。
+
+门禁里含**发布态不变量**（`pnpm check:release`，脚本
+[scripts/check-release.mjs](../scripts/check-release.mjs)）：`files` / `locale` / `icon` /
+`engines.dsh` 与各 peer 下限那些**错了也不报错**的声明。它还能自证 —— 读不到发布流文件时
+直接以退出码 2 失败，不会静默跳过。
 
 认证走 **Trusted Publishing（OIDC）**，仓库里不存 token（2026-10-06 以 `v0.3.0` 首次跑通）。
 本机 `npm whoami` 返回 401（不是包所有者）—— **分工是：本机准备代码与版本号，所有者推标签**。
@@ -19,13 +31,13 @@ OIDC 万一坏了，备用路径是所有者本机 `npm publish --access public`
 
 `.github/` 只有配置，**不放文档**（放 `README.md` 会顶掉仓库首页，见根 [AGENTS.md](../AGENTS.md) 活跃坑）。
 
-| 文件                                                                      | 职责                                                                                                                                                                                                                                                            | 触发                                                     |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| [workflows/ci.yml](../.github/workflows/ci.yml)                           | **只读**全量门禁：typecheck ×2 → lint → 分层 → 文档路径 → **format:check（与本地 `pnpm check` 跑同一条命令）** → build → 产物断言 → test，末了由 `ci-success` 收口。收口 job 的**名字**是 `CI Success`：分支保护只盯这一个名字，文件里增删 job 就不必动保护规则 | `push` main、`pull_request`、`workflow_dispatch`         |
-| [workflows/publish.yml](../.github/workflows/publish.yml)                 | 发布：门禁 → 校 tag 与 `package.json` 一致 → `npm publish --provenance` → 建 GitHub Release                                                                                                                                                                     | `push` 标签 `v*`、`workflow_dispatch`（显式 `tag` 输入） |
-| [workflows/release-drafter.yml](../.github/workflows/release-drafter.yml) | 每次有 PR 合并进 `main`，重算一份**草稿** Release 正文。不碰版本号、不打标签、不发布                                                                                                                                                                            | `push` main                                              |
-| [release-drafter.yml](../.github/release-drafter.yml)                     | 草稿的**分类与标签映射**（唯一事实源）+ 三个刻意的取舍（草稿 tag 为什么是 `next`、正文里不许写解释、版本号只是建议）                                                                                                                                            | ——                                                       |
-| [dependabot.yml](../.github/dependabot.yml)                               | 每周一检查 `github-actions` 的版本漂移并开**一个**分组 PR。npm 依赖不动 —— 它们大多坐在宿主的预发布线上，自动 PR 只是噪音                                                                                                                                       | 每周一（定时）                                           |
+| 文件                                                                      | 职责                                                                                                                                                                                                                                                            | 触发                                                          |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [workflows/ci.yml](../.github/workflows/ci.yml)                           | **只读**全量门禁：typecheck ×2 → lint → 分层 → 文档路径 → **format:check（与本地 `pnpm check` 跑同一条命令）** → build → 产物断言 → test，末了由 `ci-success` 收口。收口 job 的**名字**是 `CI Success`：分支保护只盯这一个名字，文件里增删 job 就不必动保护规则 | `push` main、`pull_request`、`workflow_dispatch`              |
+| [workflows/publish.yml](../.github/workflows/publish.yml)                 | 发布：发布噪音守卫（仅 tag 触发）→ 门禁 → 校 tag 与 `package.json` 一致 → `npm publish --provenance` → 建 GitHub Release → 退役草稿                                                                                                                             | `push` 标签 `v[0-9]*`、`workflow_dispatch`（显式 `tag` 输入） |
+| [workflows/release-drafter.yml](../.github/workflows/release-drafter.yml) | 每次有 PR 合并进 `main`，重算一份**草稿** Release 正文。不碰版本号、不打标签、不发布                                                                                                                                                                            | `push` main                                                   |
+| [release-drafter.yml](../.github/release-drafter.yml)                     | 草稿的**分类与标签映射**（唯一事实源）+ 三个刻意的取舍（草稿 tag 为什么是 `next`、正文里不许写解释、版本号只是建议）                                                                                                                                            | ——                                                            |
+| [dependabot.yml](../.github/dependabot.yml)                               | 每周一检查 `github-actions` 的版本漂移并开**一个**分组 PR。npm 依赖不动 —— 它们大多坐在宿主的预发布线上，自动 PR 只是噪音                                                                                                                                       | 每周一（定时）                                                |
 
 约束（改这些文件前先读）：
 
@@ -99,15 +111,21 @@ git push origin v<版本>        # 这一下触发发布
 ## Release 正文
 
 **默认自动，手写可选。** 优先级：
-**`docs/releases/<tag>.md`（可选覆盖）→ Release Drafter 草稿（默认来源）→ git log 摘要**。
+**`docs/releases/<tag>.md`（可选覆盖）→ Release Drafter 草稿（默认来源）→ `--generate-notes`**。
 每一步都在 Actions 注解里打印用了哪个来源 —— 回落是静默的，所以必须打印。
 
-| 来源                     | 什么时候           | 说明                                                             |
-| ------------------------ | ------------------ | ---------------------------------------------------------------- |
-| `docs/releases/<tag>.md` | 你**想手写**时     | **可选覆盖**，不是必须。存在就赢 —— 写它一定生效，不会被草稿顶掉 |
-| Release Drafter 草稿     | **不写上面那份时** | 默认来源。每次 PR 合并进 `main` 自动重算                         |
-| git log 摘要             | 前两者都没有       | 兜底，可读性差                                                   |
+| 来源                     | 什么时候           | 说明                                                                     |
+| ------------------------ | ------------------ | ------------------------------------------------------------------------ |
+| `docs/releases/<tag>.md` | 你**想手写**时     | **可选覆盖**，不是必须。存在就赢 —— 写它一定生效，不会被草稿顶掉         |
+| Release Drafter 草稿     | **不写上面那份时** | 默认来源。每次 PR 合并进 `main` 自动重算；**发布成功后自动退役**（见下） |
+| `--generate-notes` 生成  | 前两者都没有       | 兜底：GitHub 按提交自己算的正文，**不是**手搓的 `git log` 摘要           |
 
+- **草稿用掉就退役**：正文确实来自草稿时，`publish.yml` 删掉 tag **不以 `v` 开头**的那条草稿。
+  只删草稿，不碰任何正式 Release，且 `--cleanup-tag=false` 保证不连标签一起删。
+  否则下一次发布会把**上一批**的正文复制进新 Release —— 草稿看上去毫无异常，那是静默的。
+- **「没草稿」与「读不到草稿」是两回事**：前者（本轮没有打过标签的 PR）打 `::notice::`，
+  后者（action 没跑成 / 权限不对 / 草稿 tag 被改过）打 `::warning::`。
+  没有这条警告的话，「发布成功、但正文其实来自兜底」没有任何信号。
 - **旧文件保留，作为历史存档**（`v0.1.2` … `v0.8.0`）—— **不再要求补建**，
   也别去回填：草稿只看安装之后合并的 PR，回填只会得到近乎空白的正文；
   而且补建老 Release 会**抢走 Latest**（见下节）。
@@ -130,6 +148,9 @@ npm 与 registry 都有 CDN 传播延迟：发布成功后头几分钟可能仍�
 
 ⚠️ **顺手核一下正文来源**：`publish.yml` 会打一条 `::notice::`，带**首行指纹** ——
 草稿是 `## 修复` 这类分类标题，回落是 `## What's Changed`。一眼分得出走了哪条路。
+注解里出现 `::warning::cannot read the Release Drafter draft` 就说明**草稿没读到**
+（action 没跑成 / 权限不对 / 草稿 tag 被改过），那一版的正文来自兜底 —— 那是一条真问题，
+不是噪音。
 
 ```powershell
 (Invoke-RestMethod https://registry.npmjs.org/dsh-cpa-switch).'dist-tags'.latest
