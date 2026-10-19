@@ -17,8 +17,8 @@
 
 - **守卫基线**：日志 `--exclude=v0.16.1`、`changes in v0.16.0..HEAD`，
   18 条产物改动 → 放行（守卫只判路径，行为等价改动另算）。
-- **草稿正文路径**：注解 `no docs/releases/v0.16.1.md — release notes come from the
-  Release Drafter draft (51 chars, starts with: ## 修复)` —— 来源可辨，不是回落。
+- **草稿正文路径**：注解写着「没有手写文件，正文来自 Release Drafter 草稿」，
+  并带首行指纹 `(51 chars, starts with: ## 修复)` —— 来源可辨，不是回落。
 - **草稿退役的实际删除**：跑完之后 `next` 那条草稿**真的没了**（列表里 drafts 为空），
   且只删非 `v` 开头的草稿、`--cleanup-tag=false` 没连标签一起删。
 - 发布后：npm `latest = 0.16.1`（传播约 1 分钟内到位）、Release `v0.16.1` 建成并占 Latest。
