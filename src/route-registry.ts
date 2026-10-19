@@ -32,6 +32,7 @@
 import type { CpaGateway } from './gateway.ts'
 import type { CpaRuntime } from './runtime.ts'
 import {
+  CHANNEL_IDS,
   PROVIDER_PREFIX,
   ROUTE_PREFIXES,
   channelLabel,
@@ -1499,6 +1500,14 @@ export function attachRouteRegistry(
   ): Promise<SyncResult> => {
     const groups = snapshot.groups
     const total = modelCountOf(snapshot)
+    /**
+     * 骨架行用的路由默认档位 —— 与真行**同一来源**（同一个开关、同一个函数）。
+     *
+     * ⚠️ 必须现读：这个开关的值是用户随时能改的，而每一次推送都要用当时的值。
+     * 取不到就**省略**（省略合法），绝不写一个猜的值 —— 形状或值写错会让
+     * **整个 provider 注册失败**（见 src/AGENTS.md 的三条档位坑）。
+     */
+    const reasoningForSkeleton = reasoningDefaultOf(deps.reasoningEffortsEnabled?.() ?? false)
     const entry = await findEntry()
 
     /**
@@ -1543,6 +1552,39 @@ export function attachRouteRegistry(
       if (key === LEGACY_PROVIDER_ID || key.startsWith(`${PROVIDER_PREFIX}-`)) delete providers[key]
     }
     for (const group of groups) providers[group.id] = group.profile
+    /**
+     * ⚠️ **托管渠道哪怕本轮没有模型，也要留一行空骨架**（2026-10-19 实机事故）。
+     *
+     * 「删号之后那组必须消失」这条判据的本意是**别挂着旧模型**，而空 `models`
+     * 就已经达成它了 —— 删整行的代价远超收益：
+     *
+     * - provider 行就是宿主的**适配器注册**。行没了 ⇒ 该渠道下所有已保存的
+     *   `cpa-<渠道>/<模型>` 选中项全部失效，症状是 `no adapter registered for
+     *   provider "cpa-workbuddy"`，**整轮对话炸、用户自己修不了**；
+     * - 而「本轮没有模型」是**常态**：某渠道的模型被用户全勾掉、或那一轮它的
+     *   供给面读失败、或刚加完号目录还没稳，都会让 `groups` 少一组。于是
+     *   「重启后丢渠道、拨一下插件开关又回来」——拨开关只是重推了一次。
+     *
+     * 代价只有一处、且可接受：选择器里会多一个**空分组标题**（视觉噪音），
+     * 相比「首条消息直接报错」，这个方向是明确更差的选项。
+     *
+     * ⚠️ 只补**托管渠道**的骨架，不复活历史键 `cpa`（它挂着上一版的整份清单，
+     * 复活就是幽灵组），也不碰别人的 provider。
+     */
+    for (const channel of CHANNEL_IDS) {
+      const id = providerIdOf(channel)
+      const label = providerLabelOf(channel)
+      if (id === undefined || label === undefined) continue
+      if (providers[id] !== undefined) continue
+      providers[id] = {
+        displayName: label,
+        api: 'openai-completions',
+        baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
+        apiKeyEnv: CPA_API_KEY_REF,
+        ...(reasoningForSkeleton === undefined ? {} : { reasoning: reasoningForSkeleton }),
+        models: [],
+      }
+    }
     try {
       await entry.update({ config: { ...current, providers } })
     } catch (error) {
@@ -2041,6 +2083,51 @@ export function attachRouteRegistry(
         'profile 重载后模型路由不会被恢复。宿主版本不兼容？',
     )
   }
+  /**
+   * **自愈**：我们的 provider 行还在不在？不在就零读推回上一份。
+   *
+   * ## 为什么必须有这条（2026-10-19 实机事故）
+   *
+   * 实测发现 profile 层里有一行 `- id: llm-pi-ai`（用户的 `cordis.patch.yml`，
+   * 声明了别的 provider），而**后层整行替换、不做深合并** ⇒ 启动时组合出来的
+   * `providers` 里**根本没有**我们那四个 `cpa-*` 骨架行，
+   * `cordis.patch.yml` 里那份静态骨架被用户的同 id 行整体盖掉。
+   *
+   * 于是「推上去」成了唯一的注册来源，而推有三个空窗：
+   *
+   * 1. 装配那一刻 `llm-pi-ai` 条目可能还没在 loader 里（`findEntry` 等 10 秒后放弃）；
+   * 2. `boot` 那条链要等 CPA 起来、恢复意图、补签，可能几十秒；
+   * 3. 任何设置写入都会重建 fiber，把 volatile 值**再抹一次**。
+   *
+   * 用户症状就是「重启后第一条消息报 `no adapter registered for provider
+   * "cpa-workbuddy"`，拨一下插件开关又好了」—— 拨开关只是重推了一次。
+   *
+   * ## 为什么判据是「行在不在」而不是「推了没推」
+   *
+   * 只有宿主那份 config 是事实。**已经在 = 什么都不做**（零代价，可高频调用）；
+   * 不在 = 用 `lastGood`（磁盘缓存或上次成功）零读推回，**不读 CPA**。
+   * 没有 `lastGood` 时也**推一次空骨架**：`groups: []` 的那条路会让四个托管渠道
+   * 各留一行空 `models`（见 `pushProfile`），至少适配器在，报错会落在
+   * 「没有配模型」而不是「没有适配器」。
+   */
+  const ensureProviders = async (trigger: string): Promise<void> => {
+    try {
+      const entry = await findEntry()
+      if (entry === undefined || entry.fiber === undefined) return
+      const current = (entry.options.config ?? {}) as { providers?: Record<string, unknown> }
+      const providers = current.providers ?? {}
+      const missing = CHANNEL_IDS.map((channel) => providerIdOf(channel)).filter(
+        (id): id is string => id !== undefined && providers[id] === undefined,
+      )
+      if (missing.length === 0) return
+      deps.logger?.warn?.('cpa-panel: 我们的 provider 行不见了（%s）: %s → 重推', trigger, missing)
+      const snapshot: GoodSnapshot = lastGood ?? { groups: [], channelOf: new Map() }
+      await pushProfile(snapshot, lastGoodSeq, `${trigger}:ensure`)
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: provider 自愈失败（%s）: %o', trigger, error)
+    }
+  }
+
   emitter.on('app-boot/config-reload', () => {
     const startedAt = clock.now()
     deps.logger?.info?.('cpa-panel: host config-reload received, repushing models')
@@ -2065,6 +2152,25 @@ export function attachRouteRegistry(
       })
   })
   deps.logger?.info?.('cpa-panel: subscribed to app-boot/config-reload')
+
+  /**
+   * 另外两个「行可能不在」的时刻，各补一次自愈检查（都只读宿主 config，零 CPA 读）：
+   *
+   * - `llm/adapters-updated`：适配器拓扑刚变（`llm-pi-ai` 挂上 / 重建完成）——
+   *   这正好覆盖「装配那一刻条目还没出现，`findEntry` 放弃了」那个空窗；
+   * - `agent/created`：**一条会话被唤醒、准备发消息之前**。这是最后一道保险：
+   *   用户报的就是「重启后第一条消息就炸」，而会话创建一定早于那次请求。
+   *
+   * ⚠️ 两个都必须**幂等且便宜**（行在就直接返回），否则 `agent/created` 会在每次
+   * 开新会话时多发一次 update 往返。
+   */
+  emitter.on('llm/adapters-updated', () => {
+    void ensureProviders('adapters-updated')
+  })
+  emitter.on('agent/created', () => {
+    void ensureProviders('agent-created')
+  })
+  deps.logger?.info?.('cpa-panel: subscribed to llm/adapters-updated and agent/created (self-heal)')
 
   /**
    * 交出去的是**可调用对象**：`refresh` 本体 + `settled` + `candidatesOf`。

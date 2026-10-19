@@ -10,6 +10,28 @@
 
 ## 结论（按批次，新的在上）
 
+### 2026-10-19 晚：重启后「首条消息报 no adapter」
+
+**真机事故（维护者报告）**：重启 DSH 后第一条消息直接失败，
+`no adapter registered for provider "cpa-workbuddy"`；拨一下面板上的插件开关就好了。
+顺带观察到 `cpa-panel-routes.json` 里只有三组（缺 `cpa-zcode`）。
+
+两条根因，**一条是代码、一条是我的误判**：
+
+1. **代码**：profile 层（`profiles/web/cordis.patch.yml`）有一行 `- id: llm-pi-ai`
+   只声明了 `opencode-go`，而**后层整行替换、不做深合并** ⇒ 随包发布的静态骨架
+   （四行 `cpa-*`）**每次启动都被整行盖掉**，我们的 provider 行变成**只能靠运行时推**；
+   而推有三个空窗（装配时条目还没在 loader、`boot` 链要等 CPA、设置写入重建 fiber）。
+   修：推送时**托管渠道永远留一行**（没有模型就 `models: []`），并在
+   `llm/adapters-updated` 与 `agent/created` 上做一次**幂等自愈**（行在就返回、零 CPA 读）。
+2. **误判**：缺 `cpa-zcode` 被我当成「推送 bug」的证据，**其实是维护者自己把 zcode
+   的模型全勾掉了**（他现在用选择器挑模型，不需要那组）。派生文件缺一项，
+   第一嫌疑是**用户意图**，不是代码。为此补了
+   [运行时状态文件归属表](../../src/README.md)。
+
+真机待验：重启后第一条消息不再报 `no adapter`；把某渠道模型全勾掉后该渠道的
+provider 行仍在（选择器里只是没有模型）。
+
 ### 2026-10-17：发布流首次真发布（`v0.16.0`）
 
 守卫在 runner 上跑通、**基线正确排除正在发布的标签**（日志 `changes in v0.15.1..HEAD`，
