@@ -415,22 +415,55 @@ console.log('=== 真实调用 apply(ctx)，断言槽位注册 ===')
 const injected = []
 const registered = []
 const locales = []
+/**
+ * 假 ctx 里的「服务等待」：宿主的 `ctx.inject(deps, cb)` 在依赖到位后才跑回调
+ * （本插件用它等 `modelDirectories` 与 `layout`）。
+ *
+ * ⚠️ 假 ctx 若把它写成空函数，包在里面的注册**一条都不会发生**，而下面那些
+ * 「注册了 XXX」的断言会跟着变成永远失败或永远通过 —— 两者都比没有断言更糟。
+ * 所以这里真的把回调跑一遍，并交出一个含全部依赖的 scope。
+ */
+const injectedDeps = []
+const selectedPanels = []
+const fakeSlots = {
+  inject: (name, cb) => {
+    injected.push(name)
+    cb()
+  },
+  register: (opts) => registered.push(opts),
+}
+const fakeLocale = {
+  register: (ns) => locales.push(ns),
+  bind: () => (k) => k,
+}
+const fakeScope = {
+  slots: fakeSlots,
+  locale: fakeLocale,
+  effect: (cb) => {
+    cb()
+  },
+  modelDirectories: {
+    directoryFor: () => ({ store: { subscribe: () => () => {}, getSnapshot: () => null } }),
+  },
+  layout: {
+    selectPanel: (id) => selectedPanels.push(id),
+  },
+}
+
 mod.apply({
   effect: (cb) => {
     cb()
   },
-  locale: {
-    register: (ns) => locales.push(ns),
-    bind: () => (k) => k,
+  locale: fakeLocale,
+  slots: fakeSlots,
+  /**
+   * 依赖逐个交出来：`modelDirectories` 与 `layout` 都在 fakeScope 上，
+   * 于是两个座位级注册都会真的执行。
+   */
+  inject: (deps, cb) => {
+    injectedDeps.push(...deps)
+    cb(fakeScope)
   },
-  slots: {
-    inject: (name, cb) => {
-      injected.push(name)
-      cb()
-    },
-    register: (opts) => registered.push(opts),
-  },
-  inject: () => {},
 })
 
 check(
@@ -448,6 +481,61 @@ check('未再注册 settings.plugins.tab', !registered.some((r) => r.name === 's
 check(
   '未再注册 plugins.detail.section',
   !registered.some((r) => r.name === 'plugins.detail.section'),
+)
+
+/**
+ * 侧栏那一行 + 中央面板页（2026-10-19）。
+ *
+ * ⚠️ 这一组守的是**宿主会抛**的那种失败：侧栏按钮按 `id` 去 `main` 里找落点，
+ * 找不到就抛在点击处理器里 —— 表现是「点了没反应」，只有控制台有声。
+ * 所以两处的 id/key 必须**逐字相同**，而且只能是同一个来源。
+ */
+const panellist = registered.find((r) => r.name === 'sidebar.panellist')
+check('注册了 sidebar.panellist（侧栏行）', panellist !== undefined)
+check('侧栏行有 list 座必需的 id', typeof panellist?.id === 'string' && panellist.id !== '')
+check('侧栏行的 order 是数字', typeof panellist?.order === 'number')
+check('侧栏行的 label 是函数（跟随语言）', typeof panellist?.label === 'function')
+const mainPanel = registered.find((r) => r.name === 'main')
+check('注册了 main（侧栏行点开的落点）', mainPanel !== undefined)
+check(
+  'main 的 key 与侧栏行的 id 逐字相同',
+  mainPanel !== undefined && panellist !== undefined && mainPanel.key === panellist.id,
+  `${mainPanel && mainPanel.key} vs ${panellist && panellist.id}`,
+)
+check(
+  '侧栏行没有占用官方那四个 id',
+  panellist !== undefined && !['plugins', 'schedules', 'usage-stats', 'ssh'].includes(panellist.id),
+  panellist && panellist.id,
+)
+check(
+  '等过 modelDirectories 与 layout（座位级门禁，不进 inject 数组）',
+  injectedDeps.includes('modelDirectories') && injectedDeps.includes('layout'),
+  JSON.stringify(injectedDeps),
+)
+check(
+  '导出的 inject 仍只有 slots + locale',
+  Array.isArray(mod.inject) &&
+    mod.inject.length === 2 &&
+    mod.inject.includes('slots') &&
+    mod.inject.includes('locale'),
+  JSON.stringify(mod.inject),
+)
+
+/**
+ * 中央面板页的「返回」必须在**真的点击后**选回 `null`（回对话）。
+ *
+ * 这一条只能在这里测：`PanelPage` 里的 `goBack` 由注册处的 `inject` 交出去，
+ * 而 Node 侧 import 不到组件（primitives 依赖浏览器宿主注入的 `clsx`）。
+ */
+const pageInject = mainPanel?.inject
+if (typeof pageInject === 'function') {
+  const face = pageInject()
+  if (typeof face?.goBack === 'function') face.goBack()
+}
+check(
+  '返回动作选回对话（selectPanel(null)）',
+  selectedPanels.length === 1 && selectedPanels[0] === null,
+  JSON.stringify(selectedPanels),
 )
 check(
   'require 只请求了宿主模块表里的东西',

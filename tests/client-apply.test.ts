@@ -91,6 +91,56 @@ describe('浏览器半边挂载契约（源码级）', () => {
 })
 
 /**
+ * 侧栏那一行 + 中央面板页（2026-10-19）。
+ *
+ * 守的是**一组静默失败**：
+ * 1. **两处 id 必须同名** —— 宿主按侧栏行的 `id` 去 `main` 里找落点，
+ *    找不到就**抛在点击处理器里**：界面不动、只有控制台有声。所以侧栏行的
+ *    `id`、`main` 的 `key` 只能来自 `ids.ts` 的同一常量。
+ * 2. **两处注册都真的发生** —— 少一处都不会有构建期信号：只有侧栏行时点了没反应；
+ *    只有 `main` 时永远看不见入口。
+ * 3. **`layout` 是座位级等待**，不许进导出的 `inject` 数组（与 `modelDirectories`
+ *    同一条口径）：服务晚到不该把整条入口（插件页那份面板）一起挡在门外。
+ * 4. **字形不许写死颜色** —— 侧栏的选中态与明暗主题都由宿主那套 class 决定，
+ *    烘死一个颜色在深色主题下就会看不清（那也正是 `icon.svg` 与这里的分工：
+ *    插件页图标是 `<img>`，只能烘死；这里是内联 SVG，必须 `currentColor`）。
+ */
+describe('浏览器半边 · 侧栏入口', () => {
+  const coded = code(SOURCE)
+  const glyph = code(readFileSync(new URL('../src/client/PanelGlyph.tsx', import.meta.url), 'utf8'))
+
+  it('侧栏行注册在 `sidebar.panellist`，且带 `list` 座必需的 id / order / label', () => {
+    expect(coded).toContain("'sidebar.panellist'")
+    expect(coded).toMatch(/name: PANELLIST_SEAT,/u)
+    expect(coded).toMatch(/id: PANEL_ID,/u)
+    expect(coded).toMatch(/order: PANEL_ORDER,/u)
+    expect(coded).toMatch(/label,/u)
+  })
+
+  it('中间列注册在 `main`，key 与侧栏行同一个常量', () => {
+    expect(coded).toMatch(/name: MAIN_SEAT,/u)
+    expect(coded).toMatch(/key: PANEL_ID,/u)
+    // 两处都从 ids.ts 取：代码里不许再出现裸字面量当 id。
+    expect(coded).not.toMatch(/id: 'cpa-panel'/u)
+    expect(coded).not.toMatch(/key: 'cpa-panel'/u)
+  })
+
+  it("⚠️ 两个座位都包在 `ctx.inject(['layout'], …)` 里（返回动作要它）", () => {
+    expect(coded).toMatch(/ctx\.inject\(\['layout'\]/u)
+    expect(coded).toMatch(/selectPanel\(null\)/u)
+  })
+
+  it('⚠️ 字形用 `currentColor`、16 格、1px 描边（与官方 Regular 同款）', () => {
+    expect(glyph).toContain('viewBox="0 0 16 16"')
+    expect(glyph).toContain('stroke="currentColor"')
+    expect(glyph).toMatch(/const STROKE = 1$/mu)
+    // 颜色字面量会烘死主题；这里一条都不许有。
+    expect(glyph).not.toMatch(/#[0-9a-fA-F]{3,8}\b/u)
+    expect(glyph).not.toMatch(/rgb\(/u)
+  })
+})
+
+/**
  * 对话界面那两个座位的**注册面**（2026-10-17 新增）。
  *
  * 判据只钉三件**换个写法就会静默坏**的事：
