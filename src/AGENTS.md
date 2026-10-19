@@ -36,6 +36,13 @@ src/ 特有约束：
 - 改动后跑 `pnpm check`（typecheck + lint + format + build + test），不要只看构建通过。
 - ⚠️ **`icon.svg` 与 `locale/*.json` 宿主直读，代码一个字节都不读** —— 坏了零信号，
   只静默回落成默认图形或包名。⚠️ XML 注释里出现连续两个连字符会让整份 SVG 解析失败。
+- ⚠️ **推给宿主的 `providers` 里，每个 provider 都必须至少有一个模型**（2026-10-19 实机，
+  是**我自己的回归**，上线即事故）：宿主 `resolveRouteModels` 对空 `models` 是**硬错误**
+  （`resolves no models…`），而 `assertServiceable` 走 **strict** 校验 ⇒ **任一** provider
+  非法就让**整次 update 被拒**、所有渠道一起消失（账号页却正常，极易误判成「插件没加载」）。
+  所以「provider 行」与「模型非空」在宿主那边是**绑死的**：想把适配器留住，
+  只能在「别让清单变空」那一侧下手，**不能补一行 `models: []`**。
+  判据 `tests/route-registry.test.ts` 的「每个 provider 都至少有一个模型」。
 - ⚠️ **`model-caps.ts` 的思考档位契约有三条不报错的坑**（2026-10-06 实踩，逐条都有判据）：
   ① **写错形状不是「这个模型没档位」，是整个 provider 注册失败、所有模型一起消失**
   （宿主校验：空对象、除 `off` 外没有别的档位、除 `off` 外的档位值为空串，任一命中即 `invalid`）
