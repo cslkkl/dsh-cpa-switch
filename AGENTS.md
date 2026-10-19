@@ -154,6 +154,14 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 
 **跨模块的静默失败**
 
+- **profile 层的同 id 行会整行吃掉 bundle 骨架** —— 用户的 `cordis.patch.yml` 里只要也写
+  `- id: llm-pi-ai`，随包发布的四行 `cpa-*` 就**每次启动都不生效**（后层整行替换、不深合并），
+  provider 只能靠运行时推 ⇒ 重启后首条消息报 `no adapter registered for provider "cpa-…"`。
+  修法在**用户那一侧**：覆盖该 id 的 patch 必须自己声明四行骨架（`models` 可省略），
+  用 `# >>> cpa-switch 骨架` 首尾标记圈住。骨架会被吃掉、但**不会报错**，只会晚到（F39）。
+- **推给宿主的每个 provider 都必须至少有一个模型** —— 空 `models` 是宿主硬错误，而校验是
+  **strict** 且作用于**整次 update**：一个非法 ⇒ 四个渠道一起消失（账号页却正常）。
+  「补一行 `models: []` 留住适配器」是错的，已回滚 → [验收记录](.agents/notes/2026-10-19-acceptance-history.md)。
 - **渠道插件会按额度把被禁用的号重新打开** —— 症状「我没动它，号全亮了」。
   口径**单向**：只把用户禁用的号禁回去；判定只有一处 `src/intent-drift.ts`（F51、F52）→
   [决策记录](.agents/notes/2026-10-19-panel-loading-and-drift-ux.md)。

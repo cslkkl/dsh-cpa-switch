@@ -27,6 +27,30 @@
 不能靠补一行空清单绕过；而且**这个坑没有构建期信号**，只有真机重启才暴露。
 所以「改推送形状」这类改动，判据必须钉**宿主契约**，不能钉我们的意图。
 
+### 2026-10-19 晚（续）：骨架补进个人 profile 层 —— 真机已验
+
+按维护者的决定，把四行 `cpa-*` 骨架**写进个人 `profiles/web/cordis.patch.yml` 的
+`llm-pi-ai` 行**，用 `# >>> cpa-switch 骨架` / `# <<< cpa-switch 骨架` 首尾标记圈住
+（与 `imagegen-mcp` 那段同一风格：可人工识别、可脚本定位、不碰别的条目）。
+
+**安全性先验证过，不是试出来的**：
+
+| 校验路径              | 位置                                  | 对空 `models`                           |
+| --------------------- | ------------------------------------- | --------------------------------------- |
+| 启动 / 重建 fiber     | `resolveProfiles(raw, "deferred")`    | **容忍**（路由保留、只记 catalogError） |
+| 运行时 `entry.update` | `assertServiceable` → 默认 `"strict"` | **硬拒绝**（就是当天那次全渠道消失）    |
+
+所以「启动时骨架在（适配器立刻就有）+ 运行时推真清单（非空，走 strict 通过）」两边都对。
+`--dump-config` 确认四个键都在组合结果里；`--dump-config-schema` 的 4 条 error
+仍全部落在 `preset-*`（已知假阳性，与改动前逐字相同）。
+
+真机结果（重启后）：`cpa-workbuddy` 7 / `cpa-trae` 6 / `cpa-qoder` 9 恢复正常，
+`cpa-zcode` 骨架在（该渠道模型被维护者自己全勾掉，所以没有模型 —— 这是意图，不是 bug）。
+
+⚠️ 这一步改的是**个人数据**（`~/.dsh/profiles/web/cordis.patch.yml`），不在本仓、
+不入库；仓库只同步了规则与理由（`cordis.patch.yml` 注释、`src/README.md`、
+`docs/ARCHITECTURE.md` F39、根 `AGENTS.md` 活跃坑）。
+
 ### 2026-10-19 晚：重启后「首条消息报 no adapter」
 
 **真机事故（维护者报告）**：重启 DSH 后第一条消息直接失败，

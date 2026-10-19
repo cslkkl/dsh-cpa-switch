@@ -233,6 +233,15 @@
   - 导出：`attachRouteRegistry` / `readStableCatalog` / `shrunkRows` / 类型 `RouteRegistryHost` / `RouteRegistryDeps` / `RouteRefresher` / `Clock` / `SyncResult` / `systemClock`
   - 一条链：**查 CPA 目录 → 算别名 → 补写配置 → 推 models**
   - 骨架在 `cordis.patch.yml`（随包发布），清单走 volatile —— **两层缺一不可**
+  - ⚠️ **但骨架会被「同 id 的用户行」整行吃掉**（2026-10-19 实机）：profile 的
+    `cordis.patch.yml` 若也写了 `- id: llm-pi-ai`，后层**整行替换、不深合并** ⇒
+    随包发布的那四行 `cpa-*` **每次启动都不生效**，provider 只能靠运行时推；
+    而推有三个空窗（装配时条目未出现、`boot` 链要等 CPA、设置写入重建 fiber），
+    窗口里发消息就报 `no adapter registered for provider`。
+    所以**覆盖了这个 id 的用户 patch 必须自己声明那四行骨架**（`models` 省略即可 ——
+    启动走 deferred 校验，空清单合法；只有运行时 update 是 strict）。
+    本仓为此加了**幂等自愈**（见下方 `ensureProviders`），但自愈只能补「推晚」，
+    补不了「一启动就没有适配器」——那一半只能靠 patch 层声明。
   - **一个渠道一个 provider 键**（`cpa-<渠道>`，2026-10-12）：模型选择器按 provider 分组，
     键名与组名从渠道注册表派生（`providerIdOf` / `providerLabelOf`，见
     [channels/README.md](channels/README.md)）；推送时**只动我们自己的键**
