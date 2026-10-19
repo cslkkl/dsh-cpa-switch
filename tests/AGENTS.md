@@ -13,11 +13,9 @@ tests/ 特有约束：
 - ⚠️ **用 `attachRouteRegistry` 的 `describe` 必须隔离 `DSH_HOME`** —— 它启动时**同步**读
   `storages/cpa-panel-routes.json` 当 `lastGood`；不隔离就会拿**开发机真实清单**
   （实测 70 多条）参与裁决，形态是「本机绿 / CI 红」，与代码对不对无关。
-- ⚠️ **两级读缓存都「坏了也不报错」**：合并失效只是慢、漏失效只是数字不对。
-  新增改变 CPA 状态的写操作时，宿主侧要 `gateway.invalidateChannel()`、
-  浏览器侧要 `invalidateReads()`；漏了不报错，只是用户点完看到的还是旧值。
-  判据在 `tests/cache.test.ts` 与 `tests/read-cache.test.ts`，
-  **哪条写路径漏了调用**由 `tests/ops-write-paths.test.ts` 逐条钉住。
+- ⚠️ **两级读缓存都「坏了也不报错」**：合并失效只是慢、漏失效只是数字不对 ——
+  写操作漏调失效就由 `tests/ops-write-paths.test.ts` 逐条钉住。
+  规则本身（哪一侧调哪个名字）在根 [AGENTS.md](../AGENTS.md) 的活跃坑，这里不重复。
 - **用例条数不在文档里写死** —— 数字每加一条用例就漂一格。要精确值时现跑 `pnpm test`，
   或看 [CI 运行记录](https://github.com/cslkkl/dsh-cpa-switch/actions/workflows/ci.yml)。
 
