@@ -14,11 +14,23 @@
  * **永远**压着后端值，界面停在一个从未存在过的状态上（还看不出错）。
  * 所以重读回来的值与覆盖一致时把覆盖删掉：后端已经确认了，覆盖的使命结束。
  *
+ * ## 两种输入，一个出口
+ *
+ * 渲染一行的启用态有两个来源，判定都在纯函数 [drift-view.ts](drift-view.ts)：
+ *
+ * 1. **用户刚点的那一下**（`overrides`）—— 最高优先，等价于「回读确认过的历史」；
+ * 2. **上游把用户的禁用撤销了**（`drift`）—— 那一刻后端读数是「全启用」，
+ *    照它画就是「我没动它，开关全被打开了」，一秒后又自己弹回去。
+ *
+ * 所以漂移态按**用户的选择**画（禁用），并伴随一句 toast 说明恢复动作。
+ * 详见 `pinnedDisabled` 的说明。漂移清单清了，界面立刻回到后端读数。
+ *
  * @module dsh-cpa-switch/client/use-disabled-overrides
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import type { NormalizedAccount } from '../contracts/domain.ts'
+import { pinnedDisabled } from './drift-view.ts'
 
 /** 覆盖层的对外形状。 */
 export interface DisabledOverrides {
@@ -40,13 +52,19 @@ export interface UseDisabledOverridesOptions {
   readonly plugin: string
   /** 后端给的那份账号列表；还没读到就是 `undefined`。 */
   readonly accounts: readonly NormalizedAccount[] | undefined
+  /**
+   * 上游撤销了用户的禁用、正在纠正的那批账号（**凭据文件名**）。
+   *
+   * 空数组 = 没有漂移 = 完全以后端读数画。
+   */
+  readonly drift: readonly string[]
   /** 父级要做的即时修正（目前没有别的订阅者，但契约先立住）。 */
   readonly onAccountDisabled: (authIndex: string, disabled: boolean) => void
 }
 
 /** 组装覆盖层。 */
 export function useDisabledOverrides(options: UseDisabledOverridesOptions): DisabledOverrides {
-  const { plugin, accounts: backend, onAccountDisabled } = options
+  const { plugin, accounts: backend, drift, onAccountDisabled } = options
 
   const [overrides, setOverrides] = useState<Readonly<Record<string, boolean>>>({})
 
@@ -67,6 +85,14 @@ export function useDisabledOverrides(options: UseDisabledOverridesOptions): Disa
   useEffect(() => {
     setOverrides({})
   }, [plugin])
+
+  /**
+   * 把漂移清单编译成**只读集合**。
+   *
+   * ⚠️ 按凭据文件名（`authId`）查：那是意图文件的键，也是 `/account-drift`
+   * 交过来的标识（与 `/auth-files` 的 `name` 逐字相同）。
+   */
+  const drifted = new Set(drift)
 
   /** 查表：两个键都查，`authIndex` 优先（两条写入路径的标识不同）。 */
   const overrideOf = useCallback(
@@ -121,9 +147,12 @@ export function useDisabledOverrides(options: UseDisabledOverridesOptions): Disa
   )
 
   const shown = (backend ?? []).map((account) => {
-    const override = overrideOf(account)
-    if (override === undefined || override === account.disabled) return account
-    return { ...account, disabled: override }
+    const disabled = pinnedDisabled({
+      backendDisabled: account.disabled,
+      override: overrideOf(account),
+      drifted: account.authId !== undefined && drifted.has(account.authId),
+    })
+    return disabled === account.disabled ? account : { ...account, disabled }
   })
 
   return { accounts: shown, applyDisabled, applySelectState }

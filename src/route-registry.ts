@@ -32,6 +32,7 @@
 import type { CpaGateway } from './gateway.ts'
 import type { CpaRuntime } from './runtime.ts'
 import {
+  CHANNEL_IDS,
   PROVIDER_PREFIX,
   ROUTE_PREFIXES,
   channelLabel,
@@ -1543,6 +1544,21 @@ export function attachRouteRegistry(
       if (key === LEGACY_PROVIDER_ID || key.startsWith(`${PROVIDER_PREFIX}-`)) delete providers[key]
     }
     for (const group of groups) providers[group.id] = group.profile
+    /**
+     * ⚠️⚠️ **不许为「本轮没有模型」的渠道补一行空骨架**（2026-10-19 血泪）。
+     *
+     * 曾经在这里写过一个「托管渠道永远留一行、没有模型就写 `models: []`」的补丁，
+     * 想解决「重启后 `no adapter registered`」。**它让情况变成「一个渠道都没有」**：
+     * 宿主 `dsh-llm-pi-ai` 的 `resolveRouteModels` 对空清单是硬错误
+     * （`resolves no models; the installed catalog does not describe this route`），
+     * 而 `assertServiceable` 走的是 **strict** 校验 ⇒ 只要有一个 provider 非法，
+     * **整次 update 被拒**、`providers` 一个都注册不上（连本来好的渠道一起消失）。
+     *
+     * 所以「provider 行」与「模型的非空性」在宿主那边是**绑死的**：
+     * 一个渠道一旦真的没有模型，它的行就**必须**消失。适配器丢失是那条约束的
+     * 必然结果，不是可以在这里绕过的东西 —— 要守住适配器，只能在
+     * 「别让清单变空」那一侧下手（用户把某渠道模型全藏掉时给出提示）。
+     */
     try {
       await entry.update({ config: { ...current, providers } })
     } catch (error) {
@@ -2041,6 +2057,51 @@ export function attachRouteRegistry(
         'profile 重载后模型路由不会被恢复。宿主版本不兼容？',
     )
   }
+  /**
+   * **自愈**：我们的 provider 行还在不在？不在就零读推回上一份。
+   *
+   * ## 为什么必须有这条（2026-10-19 实机事故）
+   *
+   * 实测发现 profile 层里有一行 `- id: llm-pi-ai`（用户的 `cordis.patch.yml`，
+   * 声明了别的 provider），而**后层整行替换、不做深合并** ⇒ 启动时组合出来的
+   * `providers` 里**根本没有**我们那四个 `cpa-*` 骨架行，
+   * `cordis.patch.yml` 里那份静态骨架被用户的同 id 行整体盖掉。
+   *
+   * 于是「推上去」成了唯一的注册来源，而推有三个空窗：
+   *
+   * 1. 装配那一刻 `llm-pi-ai` 条目可能还没在 loader 里（`findEntry` 等 10 秒后放弃）；
+   * 2. `boot` 那条链要等 CPA 起来、恢复意图、补签，可能几十秒；
+   * 3. 任何设置写入都会重建 fiber，把 volatile 值**再抹一次**。
+   *
+   * 用户症状就是「重启后第一条消息报 `no adapter registered for provider
+   * "cpa-workbuddy"`，拨一下插件开关又好了」—— 拨开关只是重推了一次。
+   *
+   * ## 为什么判据是「行在不在」而不是「推了没推」
+   *
+   * 只有宿主那份 config 是事实。**已经在 = 什么都不做**（零代价，可高频调用）；
+   * 不在 = 用 `lastGood`（磁盘缓存或上次成功）零读推回，**不读 CPA**。
+   * 没有 `lastGood` 时也**推一次空骨架**：`groups: []` 的那条路会让四个托管渠道
+   * 各留一行空 `models`（见 `pushProfile`），至少适配器在，报错会落在
+   * 「没有配模型」而不是「没有适配器」。
+   */
+  const ensureProviders = async (trigger: string): Promise<void> => {
+    try {
+      const entry = await findEntry()
+      if (entry === undefined || entry.fiber === undefined) return
+      const current = (entry.options.config ?? {}) as { providers?: Record<string, unknown> }
+      const providers = current.providers ?? {}
+      const missing = CHANNEL_IDS.map((channel) => providerIdOf(channel)).filter(
+        (id): id is string => id !== undefined && providers[id] === undefined,
+      )
+      if (missing.length === 0) return
+      deps.logger?.warn?.('cpa-panel: 我们的 provider 行不见了（%s）: %s → 重推', trigger, missing)
+      const snapshot: GoodSnapshot = lastGood ?? { groups: [], channelOf: new Map() }
+      await pushProfile(snapshot, lastGoodSeq, `${trigger}:ensure`)
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: provider 自愈失败（%s）: %o', trigger, error)
+    }
+  }
+
   emitter.on('app-boot/config-reload', () => {
     const startedAt = clock.now()
     deps.logger?.info?.('cpa-panel: host config-reload received, repushing models')
@@ -2065,6 +2126,25 @@ export function attachRouteRegistry(
       })
   })
   deps.logger?.info?.('cpa-panel: subscribed to app-boot/config-reload')
+
+  /**
+   * 另外两个「行可能不在」的时刻，各补一次自愈检查（都只读宿主 config，零 CPA 读）：
+   *
+   * - `llm/adapters-updated`：适配器拓扑刚变（`llm-pi-ai` 挂上 / 重建完成）——
+   *   这正好覆盖「装配那一刻条目还没出现，`findEntry` 放弃了」那个空窗；
+   * - `agent/created`：**一条会话被唤醒、准备发消息之前**。这是最后一道保险：
+   *   用户报的就是「重启后第一条消息就炸」，而会话创建一定早于那次请求。
+   *
+   * ⚠️ 两个都必须**幂等且便宜**（行在就直接返回），否则 `agent/created` 会在每次
+   * 开新会话时多发一次 update 往返。
+   */
+  emitter.on('llm/adapters-updated', () => {
+    void ensureProviders('adapters-updated')
+  })
+  emitter.on('agent/created', () => {
+    void ensureProviders('agent-created')
+  })
+  deps.logger?.info?.('cpa-panel: subscribed to llm/adapters-updated and agent/created (self-heal)')
 
   /**
    * 交出去的是**可调用对象**：`refresh` 本体 + `settled` + `candidatesOf`。

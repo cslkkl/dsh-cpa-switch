@@ -31,6 +31,14 @@
 # 四个渠道原先共用一行 `cpa` —— 模型一多就是一层平铺（实测 96 行）。
 # 拆成四行之后分组常驻，重载空窗里也不会整组消失。
 #
+# ⚠️ **这一层会被「同 id 的用户行」整行吃掉**（2026-10-19 实机）：
+# 用户 profile 的 `cordis.patch.yml` 若也写了 `- id: llm-pi-ai`（很常见 —— 有人在那里
+# 声明自己的 provider），**后层整行替换、不深合并** ⇒ 下面这四行**根本不生效**，
+# provider 只能靠插件运行时推；而推有三个空窗（装配时条目未出现、`boot` 链要等 CPA、
+# 设置写入重建 fiber），窗口里发消息就报 `no adapter registered for provider`。
+# 所以**覆盖了这个 id 的那份 patch 必须自己把四行骨架抄过去**（`models` 可省略），
+# 建议用 `# >>> cpa-switch 骨架` / `# <<< cpa-switch 骨架` 首尾标记圈住，便于人工与脚本识别。
+#
 # ⚠️ 键名与组名由 `src/channels/registry.ts` 的 `providerIdOf` / `providerLabelOf`
 # 派生，这里是手抄的副本（YAML 无法 import TS）—— 由
 # `tests/route-registry.test.ts` 的「骨架与推送的分组一致」钉住两者相等。

@@ -65,6 +65,15 @@ export const paths = {
    * （见 `src/intent-drift.ts`）。
    */
   accountDrift: '/api/v1/cpa/account-drift',
+  /**
+   * **便宜的漂移探针**（`GET ?plugin=`）：只读本地凭据表，返回 `drift` 清单。
+   *
+   * ⚠️ 它存在的唯一理由是**看门狗**：能发现漂移的另一条读（`/accounts`）
+   * 会连带打上游计费接口，拿它做分钟级轮询等于拿限流换体验。
+   * 与上面那条**同一个 path**、不同方法（宿主按 path 合并）。
+   */
+  accountDriftProbe: (plugin: string): string =>
+    '/api/v1/cpa/account-drift?plugin=' + encodeURIComponent(plugin),
   /** 自动签到开关（`GET` 读、`POST` 写）。 */
   autoCheckin: (plugin: string): string =>
     '/api/v1/cpa/auto-checkin?plugin=' + encodeURIComponent(plugin),
@@ -173,6 +182,20 @@ export function restoreDisabledAccounts(plugin: string): Promise<ApiResult> {
     if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
     return result
   })
+}
+
+/**
+ * 问一次「这个渠道有没有漂移」—— **只读、不写、不碰上游计费接口**。
+ *
+ * 谁调它：漂移看门狗（见 [use-drift-watch.ts](use-drift-watch.ts)）。
+ * 返回里的 `drift` 是**凭据文件名**清单；形状认不出时按「没有漂移」处理
+ * （与 `/accounts` 的 `intentDrift` 同一条口径：认不出来宁可不写）。
+ *
+ * ⚠️ 失败**不抛也不写缓存**：它只是看门狗，失败就等下一轮；
+ * 把它当事实去改账号，等于凭一次网络抖动改用户的调度面。
+ */
+export function fetchDrift(plugin: string): Promise<ApiResult> {
+  return api(paths.accountDriftProbe(plugin))
 }
 
 /**

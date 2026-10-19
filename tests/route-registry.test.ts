@@ -945,7 +945,13 @@ describe('推送行的模态与展示名', () => {
     expect(rows[0]?.id).toBe('wb/glm-5.3')
     // 渠道没丢，它落在分组身份（组标题）上 —— 那才是它该待的地方
     expect(pushed[0]?.groups[providerIdOf('workbuddy') ?? '']).toBeDefined()
-    expect(pushed[0]?.ourProviderIds).toEqual([providerIdOf('workbuddy')])
+    /**
+     * ⚠️ **只有本轮真有模型的那个渠道有行**（2026-10-19 定论）。
+     *
+     * 曾经试着给「没有模型」的渠道补一行空骨架来保住适配器，**那会让宿主拒掉
+     * 整次 update**（空 `models` 是硬错误，见下面那条判据）—— 比丢一个适配器更糟。
+     */
+    expect(pushed[0]?.ourProviderIds).toEqual([providerIdOf('workbuddy') ?? ''])
   })
 })
 
@@ -1960,9 +1966,15 @@ describe('思考档位声明', () => {
     /**
      * ⚠️ **全藏 ≠ 读失败**（2026-10-13）：用户把模型全藏了，重试一百次也还是全藏 ——
      * 当成读残会排重读链（面板一直刷新）而且**回推上一份**（用户勾了全藏却照旧有模型）。
-     * 正确处置：推一份**空清单**（撤下我们的 provider）、正常收场、不排重读链。
+     * 正确处置：推一份**没有模型的清单**、正常收场、不排重读链。
+     *
+     * ⚠️ **「没有模型」不等于「撤下 provider 行」**（2026-10-19 改口径）：
+     * 行就是宿主的适配器注册，删掉它会让该渠道已保存的选中项全部报
+     * `no adapter registered for provider "cpa-…"`，整轮对话炸、用户自己修不了。
+     * 所以现在推的是**四个托管渠道各一行、`models` 为空** —— 选择器里看不到我们的
+     * 模型（用户的选择兑现了），适配器仍在（不炸别人的会话）。
      */
-    it('⚠️ 全藏时推空清单（撤下 provider），不当成读失败去重试', async () => {
+    it('⚠️ 全藏时撤下我们的 provider 行（空清单会被宿主整次拒绝）', async () => {
       const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
       const { entry, pushed } = fakeEntry(BASELINE)
 
@@ -1971,7 +1983,17 @@ describe('思考档位声明', () => {
         withHidden(cpa, () => true),
       )('boot')
 
-      // 我们的 provider 键一个都不在（= 选择器里没有我们的模型）
+      // 一个模型行都不推（= 选择器里没有我们的模型）
+      expect(pushed.at(-1)?.ids).toEqual([])
+      /**
+       * ⚠️ 我们的 provider 键**一个都不在**。
+       *
+       * 曾经这里断言「行仍在（`models` 为空），适配器不消失」—— **那是错的**：
+       * 宿主的 `resolveRouteModels` 对空清单抛 `resolves no models…`，
+       * `assertServiceable` 又是 strict 校验 ⇒ 一个空清单会让**整次 update 被拒**，
+       * 结果是全渠道一起消失（2026-10-19 实机，比丢一个适配器糟得多）。
+       * 「用户把某渠道模型全藏掉」因此在宿主层面必然导致该渠道没有适配器。
+       */
       expect(pushed.at(-1)?.ourProviderIds).toEqual([])
       // 别人的 provider 还在（没被误删）
       expect(pushed.at(-1)?.allProviderIds).toContain('cliproxy')
@@ -3110,7 +3132,18 @@ describe('按渠道分组', () => {
     expect(providers['cliproxy']?.displayName).toBe('Cli Proxy')
   })
 
-  it('没有模型的渠道不产组（空组只会占位置）', async () => {
+  /**
+   * ⚠️⚠️ **空模型清单的 provider 行会被宿主整次拒绝**（2026-10-19 血泪回归）。
+   *
+   * 曾经为了「别丢适配器」写成「托管渠道永远留一行、没有模型就 `models: []`」，
+   * 结果**一个渠道都没有了**：宿主的 `resolveRouteModels` 对空清单抛
+   * `resolves no models…`，而 `assertServiceable` 是 **strict** 校验 ⇒
+   * 一个 provider 非法就让**整次 update 被拒**，连本来好的渠道一起消失。
+   *
+   * 所以这条判据钉的是**宿主契约**，不是我们的偏好：推上去的每个 provider
+   * 都必须至少有一个模型；没有模型的渠道就只能没有行。
+   */
+  it('⚠️ 推送的每个 provider 都至少有一个模型（空清单会被宿主整次拒绝）', async () => {
     const cpa = fakeCpa({
       files: [{ name: 'w1', provider: 'workbuddy' }],
       models: { w1: ['hy3'] },
@@ -3121,7 +3154,70 @@ describe('按渠道分组', () => {
 
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
-    expect(pushed.at(-1)?.ourProviderIds).toEqual(['cpa-workbuddy'])
+    const providers = (entry.options.config as { providers: Record<string, unknown> }).providers
+    for (const [id, profile] of Object.entries(providers)) {
+      if (!id.startsWith(PROVIDER_PREFIX)) continue
+      const models = (profile as { models?: unknown[] }).models
+      expect(Array.isArray(models), `${id} 必须带 models`).toBe(true)
+      expect(
+        (models ?? []).length,
+        `${id} 的 models 不许为空 —— 宿主会拒掉整次 update`,
+      ).toBeGreaterThan(0)
+    }
+    // 没有模型的渠道就是没有行（宿主约束的必然结果，不是我们漏了）
+    expect(pushed.at(-1)?.ourProviderIds).not.toContain(providerIdOf('trae') ?? '')
+    // 历史键不复活（它挂着上一版的整份清单，复活就是幽灵组）
+    expect(providers['cpa']).toBeUndefined()
+  })
+
+  /**
+   * **自愈判据**：行被抹掉之后，一次检查就补回来。
+   *
+   * 这是真机事故（重启后首条消息 `no adapter registered for provider`）的回归判据：
+   * profile 层里用户的 `- id: llm-pi-ai` 整行盖掉了我们的静态骨架，
+   * 于是「推」成了唯一注册来源，一旦推晚了一切都炸。
+   * 判据要钉住「只读宿主 config、发现缺行、零 CPA 读地重推」这三件。
+   */
+  it('⚠️ 行被抹掉后，`llm/adapters-updated` 一到就补回来（且不读 CPA）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(LEGACY_SKELETON)
+    const { host, emit } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+    const afterBoot = pushed.length
+
+    // 模拟「设置写入 → profile 重建 → volatile 值被抹掉」
+    entry.options = { name: '@deepseek-ai/dsh-llm-pi-ai', config: LEGACY_SKELETON }
+    const readsBefore = cpa.requestedPaths().length
+
+    emit('llm/adapters-updated')
+    await until(() => {
+      expect(pushed.length).toBeGreaterThan(afterBoot)
+    })
+
+    // 四个托管渠道都补回来了
+    for (const id of CHANNEL_IDS) {
+      expect(pushed.at(-1)?.ourProviderIds, `${providerIdOf(id) ?? ''} 必须补回`).toContain(
+        providerIdOf(id) ?? '',
+      )
+    }
+    // 零 CPA 读（自愈走的是 lastGood）
+    expect(cpa.requestedPaths().length).toBe(readsBefore)
+  })
+
+  it('行都还在时什么都不做（幂等：不多发一次 update）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+    const { entry, pushed } = fakeEntry(LEGACY_SKELETON)
+    const { host, emit } = fakeHost(entry)
+
+    await attachRouteRegistry(host, depsFor(cpa))('boot')
+    const afterBoot = pushed.length
+
+    emit('llm/adapters-updated')
+    emit('agent/created')
+    await tick(120)
+
+    expect(pushed.length).toBe(afterBoot)
   })
 })
 

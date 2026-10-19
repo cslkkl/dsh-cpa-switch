@@ -47,7 +47,8 @@ Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own t
   OAuth page — finish the login in your browser and you are done.
 - **Remembers your choice**: after a DSH restart, the account you picked is still the one in use. If
   something changes it back while DSH is running (channel plugins re-enable accounts on their own
-  credit schedule), the panel restores your choice and says so.
+  credit schedule), the panel restores your choice and says so — the switches do not flip back to
+  "all on" and then bounce back in the meantime.
 - **Automatic check-in**: toggled per channel; check-ins missed while DSH was not running are
   caught up when the plugin starts.
 - **Process hosting**: CPA starts with DSH (an already-running instance is reused) and stops

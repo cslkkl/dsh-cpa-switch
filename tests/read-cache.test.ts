@@ -12,7 +12,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ReadCache, prefetch, readCache } from '../src/client/read-cache.ts'
 import type { ApiResult } from '../src/client/transport.ts'
-import { shownValue } from '../src/client/use-resource.ts'
+import { adoptedValue, shownValue } from '../src/client/use-resource.ts'
 
 /**
  * 模块级单例（`readCache`）是**跨用例共享**的：一个用例 put 进去的 key 会漏到下一个。
@@ -234,6 +234,123 @@ describe('缓存是可订阅的 store', () => {
 
     cache.invalidate('k')
     expect(cache.getVersion()).toBeGreaterThan(afterPut)
+  })
+})
+
+/**
+ * **「摁签到又出现骨架图」那条真机反馈的判据**（2026-10-19）。
+ *
+ * 症状是「值明明已经显示出来了，点一下全部签到，账号网格又变回骨架卡」。
+ * 机制是一条竞态，两半缺一不可：
+ *
+ * 1. 面板挂上时缓存里**已经有值**（`Panel` 的预取），第一帧就是真内容，
+ *    而 `held` 还是空的 —— 那份值来自缓存；
+ * 2. 写操作成功后 `invalidateReads(accounts:…)` **删掉缓存条目**，
+ *    随后的重读才置 `pending`。这一帧 `held` 空、缓存也空 ⇒ 骨架。
+ *
+ * 所以「值可看」必须越过缓存条目的生命周期：被渲染过的值要**采纳**进 `held`。
+ * 这里测的就是那条采纳判据 —— 它必须**只采纳、不倒退**，否则「数字自己跳回去」
+ * 会从另一个入口回来。
+ */
+describe('缓存值被采纳成 held（否则作废缓存会闪回骨架）', () => {
+  const api = (v: string): ApiResult => ({ ok: true, v }) as unknown as ApiResult
+  const pick = (result: ApiResult): string | undefined =>
+    typeof (result as unknown as { v?: unknown }).v === 'string'
+      ? ((result as unknown as { v: string }).v as string)
+      : undefined
+
+  it('⚠️ 缓存里有值、held 还空着 → 采纳（这就是骨架不再出现的那一步）', () => {
+    readCache.put('accounts:workbuddy', api('wb'))
+    const adopted = adoptedValue<string>({
+      held: undefined,
+      cached: readCache.peek<ApiResult>('accounts:workbuddy'),
+      key: 'accounts:workbuddy',
+      select: pick,
+    })
+    expect(adopted).toEqual({ key: 'accounts:workbuddy', value: 'wb' })
+  })
+
+  it('⚠️ held 已认领当前 key 就不动（它是更近的一次读，采纳等于倒退）', () => {
+    readCache.put('accounts:workbuddy', api('from-cache'))
+    const adopted = adoptedValue<string>({
+      held: { key: 'accounts:workbuddy', value: 'from-read' },
+      cached: readCache.peek<ApiResult>('accounts:workbuddy'),
+      key: 'accounts:workbuddy',
+      select: pick,
+    })
+    expect(adopted).toBeUndefined()
+  })
+
+  it('held 属于**别的**渠道 → 采纳当前渠道那一份（切页签不串数据）', () => {
+    readCache.put('accounts:trae', api('trae'))
+    const adopted = adoptedValue<string>({
+      held: { key: 'accounts:workbuddy', value: 'wb' },
+      cached: readCache.peek<ApiResult>('accounts:trae'),
+      key: 'accounts:trae',
+      select: pick,
+    })
+    expect(adopted).toEqual({ key: 'accounts:trae', value: 'trae' })
+  })
+
+  it('缓存里没有 / 那份是失败的 → 不采纳（骨架该出现时还是出现）', () => {
+    expect(
+      adoptedValue<string>({
+        held: undefined,
+        cached: undefined,
+        key: 'accounts:qoder',
+        select: pick,
+      }),
+    ).toBeUndefined()
+
+    readCache.put('accounts:qoder', { ok: false, error: 'boom' } as unknown as ApiResult)
+    expect(
+      adoptedValue<string>({
+        held: undefined,
+        cached: readCache.peek<ApiResult>('accounts:qoder'),
+        key: 'accounts:qoder',
+        select: pick,
+      }),
+    ).toBeUndefined()
+  })
+
+  it('select 认不出这份响应 → 不采纳（不往 held 里塞坏值）', () => {
+    readCache.put('accounts:zcode', { ok: true } as unknown as ApiResult)
+    expect(
+      adoptedValue<string>({
+        held: undefined,
+        cached: readCache.peek<ApiResult>('accounts:zcode'),
+        key: 'accounts:zcode',
+        select: pick,
+      }),
+    ).toBeUndefined()
+  })
+
+  /**
+   * 组合判据：采纳之后，**作废缓存这一帧仍然有值可画** —— 这正是原来闪骨架的那一帧。
+   */
+  it('⚠️ 采纳之后作废缓存，界面仍拿得到值（骨架不出现）', () => {
+    readCache.put('accounts:workbuddy', api('wb'))
+    const adopted = adoptedValue<string>({
+      held: undefined,
+      cached: readCache.peek<ApiResult>('accounts:workbuddy'),
+      key: 'accounts:workbuddy',
+      select: pick,
+    })
+    expect(adopted).toBeDefined()
+
+    // 写操作成功 → 作废该渠道的读（缓存条目就此消失）
+    readCache.invalidate('accounts:workbuddy')
+    expect(readCache.peek('accounts:workbuddy')).toBeUndefined()
+
+    // 这一帧：held 在，缓存没了 → 仍然渲染得出内容
+    expect(
+      shownValue<string>({
+        held: adopted,
+        cached: readCache.peek<ApiResult>('accounts:workbuddy'),
+        key: 'accounts:workbuddy',
+        select: pick,
+      }),
+    ).toBe('wb')
   })
 })
 

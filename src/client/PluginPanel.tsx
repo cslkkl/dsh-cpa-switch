@@ -27,8 +27,11 @@ import { summaryViewOf } from './summary-hint.ts'
 import { useAccountLogin } from './use-account-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
+import { useDriftWatch } from './use-drift-watch.ts'
 import { useIntentDrift } from './use-intent-drift.ts'
+import { usePageVisible } from './use-page-visible.ts'
 import { useResource } from './use-resource.ts'
+import { driftNamesOf } from './drift-view.ts'
 import { CYCLE_WINDOW_DAYS, upcomingCycles } from './upcoming-cycles.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
@@ -98,9 +101,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         autoCheckin: raw.autoCheckin === true,
         // 形状坏掉时按「没有漂移」处理：它是**动作的触发信号**，
         // 认不出来宁可不写，也不能凭一个坏字段去改用户账号。
-        intentDrift: Array.isArray(raw.intentDrift)
-          ? raw.intentDrift.filter((name): name is string => typeof name === 'string')
-          : [],
+        intentDrift: driftNamesOf(raw.intentDrift),
         capabilities,
         unit: meta.unit,
       }
@@ -108,6 +109,35 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   })
 
   const reload = accountsResource.reload
+
+  /**
+   * 漂移看门狗：面板开着时每 90 秒问一次「上游有没有撤销用户的禁用」。
+   *
+   * ⚠️ 问的是**便宜的那条**（宿主 `/account-drift` 的 `GET`，只读本地凭据表）——
+   * 拿 `/accounts` 做分钟级轮询会连带打上游计费接口（渠道插件自己的注释写着
+   * 「同时取所有账号余额会打满限流返 500」）。见 `use-drift-watch.ts`。
+   *
+   * 页面不可见时**不问**：后台标签页里问了用户也看不见，定时器还会被节流。
+   */
+  const visible = usePageVisible()
+  const watch = useDriftWatch({ plugin, visible })
+
+  /**
+   * 漂移清单的两个来源**合并**（同一份宿主判定：`disabledDriftOf`）。
+   *
+   * - 主读 `/accounts` 那一条：与余额一起回来，页面刚打开就命中；
+   * - 看门狗那一条：面板一直开着时，捕捉上游在 09:00 / 21:00 之后干的事。
+   *
+   * 合并而不是「二选一」：两边都可能先到，而漏掉任何一个都表现为
+   * 「有时候会自己恢复、有时候不会」——正是维护者报的那条症状。
+   */
+  const drift = useMemo(() => {
+    const names = [...(accountsResource.data?.intentDrift ?? [])]
+    for (const name of watch.names) {
+      if (!names.includes(name)) names.push(name)
+    }
+    return names
+  }, [accountsResource.data?.intentDrift, watch.names])
 
   /** 渠道级动作（批量签到 / 任务、自动签到开关）+ 提示。 */
   const actions = useChannelActions({
@@ -122,6 +152,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const overrides = useDisabledOverrides({
     plugin,
     accounts: accountsResource.data?.accounts,
+    drift,
     onAccountDisabled,
   })
 
@@ -133,10 +164,17 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
    */
   useIntentDrift({
     plugin,
-    drift: accountsResource.data?.intentDrift ?? [],
+    drift,
     t,
     onReport: actions.report,
     onReload: () => void reload({ force: true }),
+    /**
+     * 写失败就把看门狗那份清单丢掉：后端仍然是「启用」，继续按意图画就是撒谎。
+     * 下一轮探测（≤90 秒）会重新发现并重试 —— 失败因此是**可自愈**的。
+     */
+    onSettled: (ok) => {
+      if (!ok) watch.dismiss()
+    },
   })
 
   /** 添加账号弹窗（自己一套 `idle`/`starting`/`wait`/`error` 状态机）。 */

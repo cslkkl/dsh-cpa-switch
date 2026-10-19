@@ -48,6 +48,16 @@ export interface EnableOps {
   restoreIntent(): Promise<OpsResult>
   /** 把**被上游重新启用**的用户禁用号禁回去（只往禁用方向，见 `intent-drift.ts`）。 */
   restoreDisabled(plugin: string): Promise<OpsResult>
+  /**
+   * **便宜的漂移探针**：只读本地 `auth-files`，返回「用户禁用过、现在却启用了」的
+   * 凭据文件名。不碰上游计费接口、不写任何东西。
+   *
+   * 为什么要单独一条：面板要靠它做**看门狗**（见 `use-drift-watch.ts`）。
+   * 而发现漂移的那条主读（`/accounts`）会连带取一遍余额 —— 那是**上游计费接口**，
+   * 渠道插件自己的注释写着「加载所有账号会打满限流、返 500」。
+   * 拿它当每分钟一次的探针是把一个显示问题换成一次真实的上游压力。
+   */
+  driftOf(plugin: string): Promise<OpsResult>
 }
 
 /** `auth-files` 里一个凭据的形状。 */
@@ -491,5 +501,42 @@ export function createEnableOps(deps: EnableDeps): EnableOps {
     }
   }
 
-  return { setEnabled, select, getPriority, setPriority, restoreIntent, restoreDisabled }
+  /**
+   * 便宜的漂移探针 —— **只读本地凭据表**，一次管理接口往返。
+   *
+   * ⚠️ **判定复用的是 `disabledDriftOf`**（与 `/accounts` 的 `intentDrift`
+   * 同一份纯函数）：探针与主读各判一次就会出现「探针说没有、主读说有」
+   * 这种自相矛盾，而它**不报错**，只会让看门狗永远不触发。
+   */
+  async function driftOf(plugin: string): Promise<OpsResult> {
+    if (channelOf(plugin) === undefined) return { ok: false, error: 'unknown-plugin' }
+
+    const intent = readAccountIntent()
+    if (intent.ignored !== undefined) return { ok: true, drift: [] as string[] }
+
+    try {
+      // `requireRunning` 而不是 `requireReady`：读不需要管理密钥之外的写权限，
+      // 但探针本身要能连上 CPA —— 这一步与 `list` 同一条前置。
+      const running = await requireRunning(deps.gateway)
+      if (running !== undefined) return { ok: true, drift: [] as string[] }
+      const drift = disabledDriftOf(intent.enabled, await readCredentials(plugin))
+      return { ok: true, drift }
+    } catch (error) {
+      /**
+       * 探针失败**不当成「没有漂移」之外的东西**：它只是看门狗，失败就等下一轮，
+       * 不能因为它把界面上的按钮或列表改掉。
+       */
+      return { ok: false, error: messageOf(error) }
+    }
+  }
+
+  return {
+    setEnabled,
+    select,
+    getPriority,
+    setPriority,
+    restoreIntent,
+    restoreDisabled,
+    driftOf,
+  }
 }
