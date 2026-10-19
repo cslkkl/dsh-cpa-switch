@@ -82,10 +82,17 @@ python check-line-endings.py <本仓根> --target lf --exclude reference
 排查现场（真机问题常用）：
 
 ```powershell
-Get-ChildItem "$env:USERPROFILE\.dsh\storages"    # 面板状态：意图 / 账本 / 缓存清单 / 假进度
+Get-ChildItem "$env:USERPROFILE\.dsh\storages"    # 面板状态（每个文件的归属见下面那条 ⚠️）
 Get-ChildItem "$env:USERPROFILE\.dsh\logs"        # 宿主启动日志（startup-*.log）
 Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # 必须是 SymbolicLink → 本仓
 ```
+
+⚠️ **`~/.dsh/**` 是个人运行时数据，不是代码**。看之前先分清归属：**意图**类
+（`cpa-panel-accounts.json` 开关 / `cpa-panel-hidden-models.json` 勾选）是你自己的操作；
+**派生**类（`cpa-panel-routes.json` 模型路由清单 / `-checkin.json` 账本）是插件的输出。
+**派生文件缺一项，第一嫌疑是「本来就关掉了」，不是 bug**（2026-10-19 已误判过一次）。
+逐文件表格（谁写的 / 能推出什么 / 不能推出什么）→ [src/README.md](src/README.md) 的
+「运行时状态文件：谁写的」一节。
 
 ⚠️ 探 CPA 本机管理接口时用**凭据引用**取钥匙，别把值打印出来或写进文档：
 `CPA_ADMIN_KEY` 在 `~\.dsh\.credentials.yaml` 的 `refs` 段（架构 §4.1）。
@@ -98,7 +105,9 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 - 路由表 → [src/route-table.ts](src/route-table.ts) 的 `buildRoutes()`
   （README 那张表是可读索引，两者由 `tests/route-table.test.ts` 钉成一致）
 - 渠道能力与单位 → [src/channels/registry.ts](src/channels/registry.ts)（改这里，别处派生）
-- 状态文件与运行时目录 → [src/paths.ts](src/paths.ts)（**认 `DSH_HOME`**）
+- 状态文件与运行时目录 → [src/paths.ts](src/paths.ts)（**认 `DSH_HOME`**）；
+  每个状态文件**是谁写的、看到它能推出什么** → [src/README.md](src/README.md) 的
+  「运行时状态文件：谁写的」一节
 - 产物该有什么 → `scripts/verify-artifacts.cjs` 的断言集合
 - 发布正文的分类与标签映射 → [.github/release-drafter.yml](.github/release-drafter.yml)
 - 宿主槽名与客户端服务名 → 实装宿主包 `@deepseek-ai/dsh-client-ui-*`
