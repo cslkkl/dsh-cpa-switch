@@ -946,17 +946,12 @@ describe('推送行的模态与展示名', () => {
     // 渠道没丢，它落在分组身份（组标题）上 —— 那才是它该待的地方
     expect(pushed[0]?.groups[providerIdOf('workbuddy') ?? '']).toBeDefined()
     /**
-     * ⚠️ **不再断言「只有 workbuddy 一行」**（2026-10-19 改口径）：
-     * 托管渠道即使本轮没有模型也要留一行空骨架（适配器必须存在，见
-     * `pushProfile` 里那段事故说明）。判据改成「workbuddy 有行且它有模型，
-     * 其余托管渠道也有行但模型为空」。
+     * ⚠️ **只有本轮真有模型的那个渠道有行**（2026-10-19 定论）。
+     *
+     * 曾经试着给「没有模型」的渠道补一行空骨架来保住适配器，**那会让宿主拒掉
+     * 整次 update**（空 `models` 是硬错误，见下面那条判据）—— 比丢一个适配器更糟。
      */
-    expect(pushed[0]?.ourProviderIds).toContain(providerIdOf('workbuddy') ?? '')
-    for (const id of CHANNEL_IDS) {
-      const provider = providerIdOf(id) ?? ''
-      expect(pushed[0]?.ourProviderIds, `${provider} 的适配器行必须在`).toContain(provider)
-    }
-    expect(pushed[0]?.groups[providerIdOf('trae') ?? '']?.ids).toEqual([])
+    expect(pushed[0]?.ourProviderIds).toEqual([providerIdOf('workbuddy') ?? ''])
   })
 })
 
@@ -1979,7 +1974,7 @@ describe('思考档位声明', () => {
      * 所以现在推的是**四个托管渠道各一行、`models` 为空** —— 选择器里看不到我们的
      * 模型（用户的选择兑现了），适配器仍在（不炸别人的会话）。
      */
-    it('⚠️ 全藏时推「没有模型的清单」，provider 行仍在、不当成读失败去重试', async () => {
+    it('⚠️ 全藏时撤下我们的 provider 行（空清单会被宿主整次拒绝）', async () => {
       const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
       const { entry, pushed } = fakeEntry(BASELINE)
 
@@ -1990,12 +1985,16 @@ describe('思考档位声明', () => {
 
       // 一个模型行都不推（= 选择器里没有我们的模型）
       expect(pushed.at(-1)?.ids).toEqual([])
-      // 但每个托管渠道的 provider 行都在 —— 适配器不消失
-      for (const id of CHANNEL_IDS) {
-        const provider = providerIdOf(id) ?? ''
-        expect(pushed.at(-1)?.ourProviderIds, `${provider} 的适配器行必须在`).toContain(provider)
-        expect(pushed.at(-1)?.groups[provider]?.ids).toEqual([])
-      }
+      /**
+       * ⚠️ 我们的 provider 键**一个都不在**。
+       *
+       * 曾经这里断言「行仍在（`models` 为空），适配器不消失」—— **那是错的**：
+       * 宿主的 `resolveRouteModels` 对空清单抛 `resolves no models…`，
+       * `assertServiceable` 又是 strict 校验 ⇒ 一个空清单会让**整次 update 被拒**，
+       * 结果是全渠道一起消失（2026-10-19 实机，比丢一个适配器糟得多）。
+       * 「用户把某渠道模型全藏掉」因此在宿主层面必然导致该渠道没有适配器。
+       */
+      expect(pushed.at(-1)?.ourProviderIds).toEqual([])
       // 别人的 provider 还在（没被误删）
       expect(pushed.at(-1)?.allProviderIds).toContain('cliproxy')
     })
@@ -3134,15 +3133,17 @@ describe('按渠道分组', () => {
   })
 
   /**
-   * ⚠️ 旧口径是「没有模型的渠道不产组」。**2026-10-19 反过来了**：
-   * 没有模型的渠道**照样留一行，只是 `models` 为空**。
+   * ⚠️⚠️ **空模型清单的 provider 行会被宿主整次拒绝**（2026-10-19 血泪回归）。
    *
-   * 为什么：`providers.<id>` 这一个键就是宿主的适配器注册。行没了，该渠道下所有
-   * 已保存的 `cpa-<渠道>/<模型>` 选中项都会报 `no adapter registered`，
-   * 而且是**重启后**才炸、拨一下插件开关又好了 —— 用户完全无法自救。
-   * 「空组占位置」只是个视觉噪音，两者不是一个量级。
+   * 曾经为了「别丢适配器」写成「托管渠道永远留一行、没有模型就 `models: []`」，
+   * 结果**一个渠道都没有了**：宿主的 `resolveRouteModels` 对空清单抛
+   * `resolves no models…`，而 `assertServiceable` 是 **strict** 校验 ⇒
+   * 一个 provider 非法就让**整次 update 被拒**，连本来好的渠道一起消失。
+   *
+   * 所以这条判据钉的是**宿主契约**，不是我们的偏好：推上去的每个 provider
+   * 都必须至少有一个模型；没有模型的渠道就只能没有行。
    */
-  it('没有模型的渠道留一行空骨架（适配器必须在），且不复活历史 `cpa` 键', async () => {
+  it('⚠️ 推送的每个 provider 都至少有一个模型（空清单会被宿主整次拒绝）', async () => {
     const cpa = fakeCpa({
       files: [{ name: 'w1', provider: 'workbuddy' }],
       models: { w1: ['hy3'] },
@@ -3153,15 +3154,18 @@ describe('按渠道分组', () => {
 
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
-    // 有模型的渠道带着模型
-    expect(pushed.at(-1)?.groups[providerIdOf('workbuddy') ?? '']?.ids).toEqual(['hy3'])
-    // 没有模型的渠道也有行，但模型为空
-    for (const id of CHANNEL_IDS) {
-      const provider = providerIdOf(id) ?? ''
-      expect(pushed.at(-1)?.ourProviderIds, `${provider} 的适配器行必须在`).toContain(provider)
-    }
     const providers = (entry.options.config as { providers: Record<string, unknown> }).providers
-    expect(providers[providerIdOf('trae') ?? '']).toMatchObject({ models: [] })
+    for (const [id, profile] of Object.entries(providers)) {
+      if (!id.startsWith(PROVIDER_PREFIX)) continue
+      const models = (profile as { models?: unknown[] }).models
+      expect(Array.isArray(models), `${id} 必须带 models`).toBe(true)
+      expect(
+        (models ?? []).length,
+        `${id} 的 models 不许为空 —— 宿主会拒掉整次 update`,
+      ).toBeGreaterThan(0)
+    }
+    // 没有模型的渠道就是没有行（宿主约束的必然结果，不是我们漏了）
+    expect(pushed.at(-1)?.ourProviderIds).not.toContain(providerIdOf('trae') ?? '')
     // 历史键不复活（它挂着上一版的整份清单，复活就是幽灵组）
     expect(providers['cpa']).toBeUndefined()
   })

@@ -1500,14 +1500,6 @@ export function attachRouteRegistry(
   ): Promise<SyncResult> => {
     const groups = snapshot.groups
     const total = modelCountOf(snapshot)
-    /**
-     * 骨架行用的路由默认档位 —— 与真行**同一来源**（同一个开关、同一个函数）。
-     *
-     * ⚠️ 必须现读：这个开关的值是用户随时能改的，而每一次推送都要用当时的值。
-     * 取不到就**省略**（省略合法），绝不写一个猜的值 —— 形状或值写错会让
-     * **整个 provider 注册失败**（见 src/AGENTS.md 的三条档位坑）。
-     */
-    const reasoningForSkeleton = reasoningDefaultOf(deps.reasoningEffortsEnabled?.() ?? false)
     const entry = await findEntry()
 
     /**
@@ -1553,38 +1545,20 @@ export function attachRouteRegistry(
     }
     for (const group of groups) providers[group.id] = group.profile
     /**
-     * ⚠️ **托管渠道哪怕本轮没有模型，也要留一行空骨架**（2026-10-19 实机事故）。
+     * ⚠️⚠️ **不许为「本轮没有模型」的渠道补一行空骨架**（2026-10-19 血泪）。
      *
-     * 「删号之后那组必须消失」这条判据的本意是**别挂着旧模型**，而空 `models`
-     * 就已经达成它了 —— 删整行的代价远超收益：
+     * 曾经在这里写过一个「托管渠道永远留一行、没有模型就写 `models: []`」的补丁，
+     * 想解决「重启后 `no adapter registered`」。**它让情况变成「一个渠道都没有」**：
+     * 宿主 `dsh-llm-pi-ai` 的 `resolveRouteModels` 对空清单是硬错误
+     * （`resolves no models; the installed catalog does not describe this route`），
+     * 而 `assertServiceable` 走的是 **strict** 校验 ⇒ 只要有一个 provider 非法，
+     * **整次 update 被拒**、`providers` 一个都注册不上（连本来好的渠道一起消失）。
      *
-     * - provider 行就是宿主的**适配器注册**。行没了 ⇒ 该渠道下所有已保存的
-     *   `cpa-<渠道>/<模型>` 选中项全部失效，症状是 `no adapter registered for
-     *   provider "cpa-workbuddy"`，**整轮对话炸、用户自己修不了**；
-     * - 而「本轮没有模型」是**常态**：某渠道的模型被用户全勾掉、或那一轮它的
-     *   供给面读失败、或刚加完号目录还没稳，都会让 `groups` 少一组。于是
-     *   「重启后丢渠道、拨一下插件开关又回来」——拨开关只是重推了一次。
-     *
-     * 代价只有一处、且可接受：选择器里会多一个**空分组标题**（视觉噪音），
-     * 相比「首条消息直接报错」，这个方向是明确更差的选项。
-     *
-     * ⚠️ 只补**托管渠道**的骨架，不复活历史键 `cpa`（它挂着上一版的整份清单，
-     * 复活就是幽灵组），也不碰别人的 provider。
+     * 所以「provider 行」与「模型的非空性」在宿主那边是**绑死的**：
+     * 一个渠道一旦真的没有模型，它的行就**必须**消失。适配器丢失是那条约束的
+     * 必然结果，不是可以在这里绕过的东西 —— 要守住适配器，只能在
+     * 「别让清单变空」那一侧下手（用户把某渠道模型全藏掉时给出提示）。
      */
-    for (const channel of CHANNEL_IDS) {
-      const id = providerIdOf(channel)
-      const label = providerLabelOf(channel)
-      if (id === undefined || label === undefined) continue
-      if (providers[id] !== undefined) continue
-      providers[id] = {
-        displayName: label,
-        api: 'openai-completions',
-        baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
-        apiKeyEnv: CPA_API_KEY_REF,
-        ...(reasoningForSkeleton === undefined ? {} : { reasoning: reasoningForSkeleton }),
-        models: [],
-      }
-    }
     try {
       await entry.update({ config: { ...current, providers } })
     } catch (error) {
