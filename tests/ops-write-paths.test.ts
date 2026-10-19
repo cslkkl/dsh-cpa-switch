@@ -359,6 +359,71 @@ describe('漂移清单的键与意图文件同一套', () => {
 })
 
 /**
+ * **便宜的漂移探针**（`enable.driftOf`）—— 看门狗的输入，判据与主读同源。
+ *
+ * 三条都「错了不报错」：
+ *
+ * 1. **不许读余额**：探针要能被每 90 秒问一次。捎带取余额就是打上游计费接口
+ *    （渠道插件注释：同时取所有账号会打满限流返 500），把一个显示问题换成真实压力；
+ * 2. **不许写**：它只是「问一句」—— 写仍然由 `restoreDisabled` 负责（有 toast、有认领）；
+ * 3. **判定必须与 `/accounts` 同一份**：各判一次就会出现「探针说没有、主读说有」，
+ *    而那会让看门狗永远不触发（或反复触发），且没有任何报错。
+ */
+describe('漂移探针：只读、不写、判定与主读同源', () => {
+  it('只打一次 `auth-files`，不碰余额接口、不发 PATCH、不作废缓存', async () => {
+    writeIntent({ 'a.json': false })
+    const cpa = makeCpa()
+    cpa.reply('/v0/management/auth-files', {
+      files: [{ name: 'a.json', provider: 'workbuddy', disabled: false }],
+    })
+
+    const result = await opsFor(cpa.gateway).enable.driftOf('workbuddy')
+    expect(result.ok).toBe(true)
+    expect((result as { drift?: unknown }).drift).toEqual(['a.json'])
+
+    expect(cpa.calls.map((call) => call.path)).toEqual(['/v0/management/auth-files'])
+    expect(cpa.calls.every((call) => call.init?.method === undefined)).toBe(true)
+    expect(cpa.invalidations).toEqual([])
+  })
+
+  it('与 `/accounts` 的 `intentDrift` 给出同一份清单（同一个纯函数）', async () => {
+    writeIntent({ 'a.json': false, 'b.json': false })
+    const files = [
+      { name: 'a.json', provider: 'workbuddy', disabled: false },
+      { name: 'b.json', provider: 'workbuddy', disabled: true },
+      { name: 'c.json', provider: 'workbuddy', disabled: false },
+    ]
+    const cpa = makeCpa()
+    cpa.reply('/v0/management/auth-files', { files })
+    cpa.reply('/v0/management/plugins/workbuddy/accounts', {
+      accounts: files.map((file, index) => ({
+        auth_id: file.name,
+        auth_index: String(index),
+        disabled: file.disabled,
+      })),
+    })
+    cpa.reply('/v0/management/plugins/workbuddy/credits', {})
+
+    const ops = opsFor(cpa.gateway)
+    const probe = await ops.enable.driftOf('workbuddy')
+    const list = await ops.accounts.list('workbuddy')
+
+    expect((probe as { drift?: unknown }).drift).toEqual(['a.json'])
+    expect((list as { data?: { intentDrift?: unknown } }).data?.intentDrift).toEqual(['a.json'])
+  })
+
+  it('读失败时不当成「没有漂移」的证据之外的东西：返回失败且不写', async () => {
+    writeIntent({ 'a.json': false })
+    const cpa = makeCpa()
+    cpa.fail('/v0/management/auth-files', new Error('boom'))
+
+    const result = await opsFor(cpa.gateway).enable.driftOf('workbuddy')
+    expect(result.ok).toBe(false)
+    expect(cpa.calls.filter((call) => call.path === AUTH_STATUS)).toEqual([])
+  })
+})
+
+/**
  * 反向的一半：**读路径不许写失效**。
  *
  * 读路径顺手失效一次不会报错，只会把缓存的意义抹掉（每次刷新都真打 CPA）——

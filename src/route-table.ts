@@ -354,22 +354,30 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
     },
     {
       /**
-       * 把**被上游重新启用**的用户禁用号禁回去（`POST {plugin}`）。
+       * 把**被上游重新启用**的用户禁用号禁回去（`GET ?plugin=` 只探不写，`POST` 执行恢复）。
        *
-       * 为什么需要它：渠道插件自带的额度生命周期（`lifecycle_auto`，默认开）会在
+       * 为什么需要 POST 那一条：渠道插件自带的额度生命周期（`lifecycle_auto`，默认开）会在
        * 09:00 / 21:00 的定时任务之后，把「CN 号 + 被禁用 + 额度未耗尽」的号写回
        * `disabled: false` —— 它分不清这个禁用是用户点的还是它自己因耗尽禁的。
        * 用户看到的是「我没动它，号全亮起来了」，「设为唯一」按钮整排消失。
+       *
+       * 为什么还要一条 GET：面板需要**便宜的看门狗**（每分钟问一次「有没有漂移」）。
+       * 这条只读本地 `auth-files`，**不碰上游计费接口**；而能发现漂移的另一条读
+       * （`/accounts`）会连带取一遍余额 —— 拿它做分钟级轮询等于拿限流换体验。
        *
        * ⚠️ **只往禁用方向、只对意图里记过禁用的号**（判定见 `intent-drift.ts`）：
        * 反向会把上游因额度耗尽禁掉的号重新启用，那是**上游的判断**，不是用户的选择。
        *
        * ⚠️ 发现漂移的那条读（`/accounts` 的 `intentDrift`）**只报告不动手** ——
-       * 写只发生在这一条上，面板读到非空清单才会来调。
+       * 写只发生在 POST 这一条上。
        */
       path: '/api/v1/cpa/account-drift',
-      methods: ['POST'],
+      methods: ['GET', 'POST'],
       handle: async (request) => {
+        if (request.method === 'GET') {
+          const url = new URL(request.url)
+          return json(await ops.enable.driftOf(url.searchParams.get('plugin') ?? 'workbuddy'))
+        }
         const body = await readBody(request)
         return json(await ops.enable.restoreDisabled(String(body.plugin ?? '')))
       },

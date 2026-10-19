@@ -39,6 +39,15 @@ export interface UseIntentDriftOptions {
   readonly onReport: (result: { ok: boolean; error?: string | undefined }, action: string) => void
   /** 恢复成功后重取账号列表（界面值以重读为准，F33）。 */
   readonly onReload: () => void
+  /**
+   * 这次恢复**收场**了：`ok` 为假表示没写成功。
+   *
+   * 为什么要这个口子：界面在漂移态按**意图**画开关（`pinnedDisabled`）。
+   * 写失败时后端仍是被撤销的状态，而清单还留着 ⇒ 界面会继续按意图画，
+   * 等于对用户撒谎（**F43 的教训：覆盖层不许粘住一次失败的写**）。
+   * 所以失败时由调用方把那份清单丢掉，界面立刻回到后端读数，下一轮探测再重试。
+   */
+  readonly onSettled?: ((ok: boolean) => void) | undefined
 }
 
 /**
@@ -57,6 +66,13 @@ export interface UseIntentDriftOptions {
  */
 export function useIntentDrift(options: UseIntentDriftOptions): void {
   const { plugin, drift, t, onReport, onReload } = options
+
+  /**
+   * 收场回调住 ref：它是调用方每次渲染都新造的箭头函数，
+   * 进依赖会让那个带写请求的 effect 每轮重跑（对着同一状态反复发写）。
+   */
+  const onSettledRef = useRef(options.onSettled)
+  onSettledRef.current = options.onSettled
 
   /** 已经处理过的「渠道 + 清单内容」。内容是键的一部分，所以清单变了就会再处理。 */
   const handled = useRef('')
@@ -104,6 +120,13 @@ export function useIntentDrift(options: UseIntentDriftOptions): void {
       // 失败不自动重来：认领留着，等清单真的变了或切走再回来（避免对着同一个
       // 失败反复发请求）。界面已经用 toast 说了原因。
       if (result.ok) onReload()
+      /**
+       * 收场回调：界面据此决定「还按意图画吗」。
+       *
+       * ⚠️ **失败时必须让调用方撤掉意图显示**：写没成功而后端确实是启用态，
+       * 继续按意图画就是撒谎。成功那一侧不用它 —— 重读落地后清单自然清空。
+       */
+      onSettledRef.current?.(result.ok)
     })
     // ⚠️ 依赖只有这两个：`onReport` / `onReload` 每次渲染都是新函数，
     // 放进来会让这个 effect 每轮都跑（而它里面有写请求）。回调里用到的 `t` 同理。

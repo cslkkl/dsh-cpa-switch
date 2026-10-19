@@ -32,6 +32,7 @@ const read = (name: string): string =>
 const hook = read('use-intent-drift.ts')
 const panel = read('PluginPanel.tsx')
 const endpoints = read('endpoints.ts')
+const overrides = read('use-disabled-overrides.ts')
 
 describe('上游撤销禁用 · 自动恢复的形状', () => {
   it('⚠️ 钩子不许用 `result.data`（扁平响应下它是 undefined，且编译期不报错）', () => {
@@ -69,7 +70,37 @@ describe('上游撤销禁用 · 自动恢复的形状', () => {
   })
 
   it('⚠️ 漂移清单形状坏掉时按「没有漂移」处理（认不出宁可不写）', () => {
-    expect(panel).toMatch(/Array\.isArray\(raw\.intentDrift\)/)
+    // 解析收在纯函数 `driftNamesOf` 里（判据 `tests/drift-view.test.ts`）：
+    // 这里只钉「面板确实走那条解析」，不在组件里再手判一次。
+    expect(panel).toContain('driftNamesOf(raw.intentDrift)')
+    expect(panel).not.toMatch(/Array\.isArray\(raw\.intentDrift\)/)
+  })
+
+  /**
+   * ⚠️ **两个来源都要接**：主读 `/accounts`（页面刚打开就命中）与看门狗
+   * `/account-drift`（面板一直开着时捕捉上游的定时任务）。
+   *
+   * 只接一个的症状正是维护者报的那条：「有时候会自己恢复、有时候不会」。
+   * 而两个来源接进来之后，漂移态还要**按用户的选择画开关**，
+   * 否则用户先看到整排亮起、一秒后又弹回去。
+   */
+  it('⚠️ 看门狗与主读的漂移清单合并使用（只接一个就会「有时恢复有时不恢复」）', () => {
+    expect(panel).toContain('useDriftWatch({ plugin, visible })')
+    expect(panel).toContain('watch.names')
+    expect(panel).toContain('drift,')
+  })
+
+  it('⚠️ 恢复**失败**时撤掉意图显示（写没成功还按意图画就是撒谎，F43）', () => {
+    // 钩子把收场结果交出去，面板据此丢掉看门狗那份清单
+    expect(hook).toContain('onSettledRef.current?.(result.ok)')
+    expect(panel).toMatch(/onSettled:[\s\S]{0,120}watch\.dismiss\(\)/)
+    // 失败时**不许**顺手重读：重读会把缓存那层也刷掉，而这次什么都没改成
+    expect(hook).toMatch(/if \(result\.ok\) onReload\(\)/)
+  })
+
+  it('⚠️ 漂移态按用户的选择画开关（不照后端读数画）', () => {
+    expect(panel).toMatch(/useDisabledOverrides\(\{[\s\S]{0,200}?drift,/)
+    expect(overrides).toContain('pinnedDisabled')
   })
 
   it('端点走 `paths` 里的那条、且写成功要作废该渠道的账号读', () => {

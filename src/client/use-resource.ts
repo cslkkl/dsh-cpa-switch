@@ -220,6 +220,39 @@ export function useResource<T>(options: UseResourceOptions<T>): Resource<T> {
     select: (result) => toValue<T>(result, selectRef.current),
   })
 
+  /**
+   * **把缓存里那份采纳成 `held`。**
+   *
+   * ## 不做这一步会闪一屏骨架（2026-10-19 真机反馈）
+   *
+   * 用户看到的原始现象：**摁「全部签到」时面板闪回骨架卡**。
+   *
+   * 机制是两条路径的竞态，缺任一条都不出这个症状：
+   *
+   * 1. 面板挂上时缓存里**已经有值**（`Panel` 的预取），于是第一帧就渲染出了
+   *    账号网格，而 `held` 还是 `undefined` —— 那份值是**缓存**给的；
+   * 2. 用户在这时点「全部签到」：写成功会 `invalidateReads(cacheKeys.accounts())`
+   *    **删掉缓存条目**，而随后的 `reload` 才置 `pending`。
+   *    这一帧 `shown = held(undefined) ?? cache(undefined)` ⇒ 骨架回来了。
+   *
+   * 所以「有值可看」这件事必须**越过缓存条目本身的生命周期**：谁被渲染过，
+   * 谁就进 `held`。之后任何作废都只是「下次读要打网络」，不再清屏。
+   *
+   * ## 只在 `held` 缺失时采纳
+   *
+   * `held` 里的值来自**最近一次成功的读**，比缓存新（缓存可能正是它写进去的）。
+   * 覆盖它会把刚读到的值退回旧值 —— 那正是「数字自己跳回去」，只是换了个入口。
+   */
+  useEffect(() => {
+    const adopted = adoptedValue({
+      held,
+      cached,
+      key,
+      select: (result) => toValue<T>(result, selectRef.current),
+    })
+    if (adopted !== undefined) setHeld(adopted)
+  }, [cached, held, key])
+
   return {
     data: shown,
     // 错误也要认领 key，否则上一个渠道的报错会挂在当前页签上
@@ -255,6 +288,32 @@ export function shownValue<T>(args: {
   const fromHeld =
     args.held !== undefined && args.held.key === args.key ? args.held.value : undefined
   return fromHeld ?? fromCache
+}
+
+/**
+ * 「这一帧该不该把缓存里的值采纳成 `held`」的判据 —— 纯函数，有判据。
+ *
+ * 三条都不满足就什么都不做（返回 `undefined`），于是调用方的 effect 不会白写：
+ *
+ * - **缓存里没有 / 那份是失败的** —— 没东西可采纳；
+ * - **`held` 已经认领当前 key** —— 它比缓存新，采纳等于把新值退回旧值；
+ * - **`select` 认不出这份响应** —— 不在渲染阶段抛，也不采纳一个坏值。
+ *
+ * 为什么必须存在这一条（而不是只在 `reload` 里写 `held`）：缓存能在**别处**
+ * 被填满（面板预取、另一个挂载点），那时 `held` 还是空的 —— 于是下一次
+ * 写操作作废缓存时，界面没有可退回的值，直接闪回骨架。见 `useResource` 里那段说明。
+ */
+export function adoptedValue<T>(args: {
+  readonly held: { readonly key: string; readonly value: T } | undefined
+  readonly cached: CachedValue<ApiResult> | undefined
+  readonly key: string
+  readonly select: (result: ApiResult) => T | undefined
+}): { readonly key: string; readonly value: T } | undefined {
+  if (args.held !== undefined && args.held.key === args.key) return undefined
+  const hit = args.cached
+  if (hit === undefined || !hit.value.ok) return undefined
+  const picked = args.select(hit.value)
+  return picked === undefined ? undefined : { key: args.key, value: picked }
 }
 
 /** 从宿主响应里取要渲染的部分；失败返回 `undefined`（不抛给渲染阶段）。 */
