@@ -137,10 +137,16 @@ git diff --name-only v0.14.0..HEAD | node scripts/release-guard.mjs
    `react` 与 primitives 是外部引用；
 3. **真实加载**：`eval` 产物、用模拟宿主 `require` 调 `factory`，再真实调用 `apply(ctx)`，
    断言槽位注册面（`plugins.bundle.config` 的 key 是包名；**未注册**
-   `settings.plugins.tab` 与 `plugins.detail.section` —— 面板只挂插件页）。
+   `settings.plugins.tab` 与 `plugins.detail.section`；侧栏入口那组：`sidebar.panellist`
+   与 `main` 都在、两处 id 逐字相同、没占官方那四个 id、返回动作选回 `null`）。
+
+⚠️ 假 ctx 的 `inject(deps, cb)` **必须真的把回调跑一遍**并交出带依赖的 scope：
+本插件有两处座位级等待（`modelDirectories` / `layout`），写成空函数会让包在里面的
+注册**一条都不发生**，那几条断言随之失去意义。
 
 **为什么需要它**：这些形状坏了大多是**静默失败** —— 少一个 `inject`，插件挂不上却不报错；
-React 被内联，浏览器加载时抛 `process is not defined`。构建「成功」给不出这些信号。
+React 被内联，浏览器加载时抛 `process is not defined`；侧栏行与 `main` 的 id 不一致，
+点击时宿主抛在处理器里、界面只是「点了没反应」。构建「成功」给不出这些信号。
 
 ```powershell
 pnpm build

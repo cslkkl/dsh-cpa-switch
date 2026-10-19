@@ -18,6 +18,8 @@ import {
   type ModelDirectoryStore,
 } from './CreditReadout.tsx'
 import { ModelLabel, type ModelLabelSeat } from './ModelLabel.tsx'
+import { PanelPage } from './PanelPage.tsx'
+import { PanelGlyph } from './PanelGlyph.tsx'
 import { PanelBoundary } from './PanelBoundary.tsx'
 import { Panel } from './Panel.tsx'
 import { en, makeTranslate, zh } from './locales.ts'
@@ -32,7 +34,7 @@ import type { LocaleKey } from './locales.ts'
  */
 import './panel.module.css'
 
-import { LOCALE_NS as NS, PKG_NAME } from './ids.ts'
+import { LOCALE_NS as NS, PKG_NAME, PANEL_ID, PANEL_ORDER } from './ids.ts'
 
 /**
  * 本插件三个座位的 props **并集**。
@@ -57,6 +59,15 @@ interface SlotSeat extends ModelLabelSeat {
    * 调用点据此不渲染，而不是拿一个坏值往下走。
    */
   readonly directory?: ModelDirectoryStore
+  /**
+   * 侧栏那一行（{@link PANELLIST_SEAT}）的 owner props：宿主要的方框边长。
+   *
+   * 展开态 18、折叠轨 16 —— 但**不要**按它反推"现在是哪个态"，折叠态另有一份
+   * 布局逻辑；这里只当尺寸用。
+   */
+  readonly size?: number
+  /** 中央面板页（{@link MAIN_SEAT}）由注册处 `inject` 塞进来的返回动作。 */
+  readonly goBack?: () => void
 }
 
 /** `ctx.slots` 的最小面。 */
@@ -105,20 +116,36 @@ interface ClientContext {
    * （缺一个插件就不挂），这里是**某个座位**的门禁 —— 服务晚到不该把整条入口
    * 一起挡住，该挡的只是需要它的那一个座位。
    */
-  readonly inject: (deps: readonly string[], callback: (scope: ModelDirectoryScope) => void) => void
+  readonly inject: (deps: readonly string[], callback: (scope: ServiceScope) => void) => void
 }
 
 /**
- * `ctx.inject(['modelDirectories'], …)` 拿到的 scope。
+ * `ctx.inject([...], …)` 拿到的 scope —— **按需解锁**，缺哪个就是 `undefined`。
  *
- * `modelDirectories` 由浏览器侧的宿主包 `dsh-client-ui-model-selection` 注册
- * （`ModelDirectoryResolver extends Service`，服务名就是 `'modelDirectories'`），
- * 是**会话模型选择的唯一持有者**。本仓不 import 那个包的类型（它在 node_modules
- * 里解析不到），而是像 `slots` / `locale` 一样只声明**用到的那一面** ——
- * 见 [CreditReadout.tsx](CreditReadout.tsx) 的 `ModelDirectoriesService`。
+ * 两处服务各自晚到，所以都不能假定必在：
+ * - `modelDirectories` 由 `dsh-client-ui-model-selection` 注册（会话模型选择的
+ *   唯一持有者，服务名 `'modelDirectories'`），余额读数要它；
+ * - `layout` 由 `dsh-client-ui-layout` 注册（`selectPanel` / `panelInfo`），
+ *   中央面板页的「返回」要它。
+ *
+ * 本仓不 import 那两个包的类型（在 node_modules 里解析不到），而是像
+ * `slots` / `locale` 一样只声明**用到的那一面** —— 见
+ * [CreditReadout.tsx](CreditReadout.tsx) 的 `ModelDirectoriesService`。
  */
-interface ModelDirectoryScope extends ClientContext {
-  readonly modelDirectories: ModelDirectoriesService
+interface ServiceScope extends ClientContext {
+  readonly modelDirectories?: ModelDirectoriesService
+  readonly layout?: LayoutService
+}
+
+/** `ctx.layout` 的最小面（只用到「选一个面板」这一个动作）。 */
+interface LayoutService {
+  /**
+   * 选一个中央面板；`null` = 回到对话。
+   *
+   * ⚠️ 传一个没注册的 key 会**抛**，所以「返回」只能传 `null` 或确实注册过的
+   * id（见 [PanelPage.tsx](PanelPage.tsx) 的 `goBack`）。
+   */
+  readonly selectPanel: (panelId: string | null) => void
 }
 
 /**
@@ -129,6 +156,22 @@ const LABEL_SEAT = 'conversation.input.model.label'
 
 /** 余额读数的落点（宿主 `dsh-client-ui-conversation` 声明：`list`，composer 工具行）。 */
 const READOUT_SEAT = 'conversation.input.right'
+
+/**
+ * 侧栏那一行的落点（宿主 `dsh-client-ui-sidebar` 声明：`list`，全局面板图标）。
+ *
+ * 它的 owner props 只有 `size`（展开 18 / 折叠轨 16）与 `active`；按钮本体、
+ * 标签、选中态都是宿主的，我们只交字形。
+ */
+const PANELLIST_SEAT = 'sidebar.panellist'
+
+/**
+ * 侧栏行点开后的中央面板落点（宿主 `dsh-client-ui-layout` 声明：`keyed`）。
+ *
+ * key 必须等于 {@link PANEL_ID}，且与侧栏行的 `id` 逐字相同 —— 见
+ * [ids.ts](ids.ts) 那条注释。
+ */
+const MAIN_SEAT = 'main'
 
 /** `list` 座的条目 id —— 宿主按它去重与更新，所以只在这里写一次。 */
 const READOUT_SEAT_ID = 'cpa-credit-readout'
@@ -235,7 +278,11 @@ export function apply(ctx: ClientContext): void {
    * `ctx.inject` 等它 —— **不**加进导出的 `inject` 数组：服务晚到不该把整条入口
    * （面板）一起挡在门外，该挡的只是这一个座位。
    */
-  ctx.inject(['modelDirectories'], (scope) =>
+  ctx.inject(['modelDirectories'], (scope) => {
+    const modelDirectories = scope.modelDirectories
+    // 服务在回调里出现即已到位；`undefined` 只可能来自类型面（服务是可选声明），
+    // 那就什么都别挂 —— 读数没有目录可读。
+    if (modelDirectories === undefined) return
     scope.slots.inject(READOUT_SEAT, () =>
       scope.slots.register(
         {
@@ -245,7 +292,7 @@ export function apply(ctx: ClientContext): void {
           /** 座位自带 `t`（宿主按命名空间 + 当前语言给）——读数那句说明走它。 */
           locale: NS,
           inject: (sessionId: string) => ({
-            directory: scope.modelDirectories.directoryFor(sessionId).store,
+            directory: modelDirectories.directoryFor(sessionId).store,
           }),
         },
         (seat) => {
@@ -256,6 +303,63 @@ export function apply(ctx: ClientContext): void {
           return <CreditReadout directory={directory} t={t2} />
         },
       ),
-    ),
-  )
+    )
+  })
+
+  /**
+   * 侧栏那一行 + 它的中央面板页（2026-10-19）。
+   *
+   * ## 为什么两个座位必须一起注册
+   *
+   * 宿主的侧栏按钮**按 id 派发中央面板**（`ctx.layout.selectPanel(id)`），
+   * 而 `selectPanel` 对没注册的 key 会抛 —— 只挂侧栏行、不挂 `main` 的结果是
+   * 「点了没反应，只有控制台报错」。所以这两处注册在这个仓里是**一件事**，
+   * 由 {@link PANEL_ID} 一个常量钉住它们同名。
+   *
+   * ## 为什么等 `layout`
+   *
+   * 「返回」要 `ctx.layout.selectPanel(null)`。与读数那个座位同一条口径：
+   * 服务晚到只该挡这一个座位，所以用座位级 `ctx.inject`，**不进导出的数组**。
+   *
+   * ## 与插件页那份面板的关系
+   *
+   * 同一个 `<Panel>`，两份外壳：
+   * - `plugins.bundle.config`（key = 包名）→ 插件页的配置区；
+   * - `sidebar.panellist` + `main`（id/key = {@link PANEL_ID}）→ 侧栏行 + 整页。
+   *
+   * ⚠️ 这**不是**把 2026-10-07 那个决定推翻：那次拆掉的是 `settings.plugins.tab`
+   * （设置页里的**配置项**页签，语义错位），而侧栏行是宿主给全局面板的标准入口，
+   * 与用量统计 / SSH 同款。理由与替代方案见
+   * [决策记录](../../.agents/notes/2026-10-19-sidebar-entry.md)。
+   */
+  ctx.inject(['layout'], (scope) => {
+    const layout = scope.layout
+    // `layout` 没到位就不挂：这条行没有「返回」就只做对了一半的事。
+    if (layout === undefined) return
+    const label = (): string => ctx.locale.bind(NS)('tab')
+    scope.slots.inject(PANELLIST_SEAT, () =>
+      scope.slots.register(
+        {
+          name: PANELLIST_SEAT,
+          id: PANEL_ID,
+          order: PANEL_ORDER,
+          label,
+          locale: NS,
+        },
+        PanelGlyph,
+      ),
+    )
+    scope.slots.inject(MAIN_SEAT, () =>
+      scope.slots.register(
+        {
+          name: MAIN_SEAT,
+          key: PANEL_ID,
+          locale: NS,
+          /** 座位私有的注入面：返回动作（`null` = 回对话，不会抛）。 */
+          inject: () => ({ goBack: () => layout.selectPanel(null) }),
+        },
+        PanelPage,
+      ),
+    )
+  })
 }

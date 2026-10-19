@@ -90,3 +90,31 @@ describe('文案表：每个键都必须有引用', () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort())
   })
 })
+
+/**
+ * 面板名与插件列表里那个名字**必须是同一个词**（2026-10-19）。
+ *
+ * 真源是 `locale/{zh,en}.json` 的 `meta.title` —— 宿主读它来显示插件列表里的名字，
+ * 而侧栏那一行、插件页卡片摘要、页签的无障碍名都取 `tab` 这个键。
+ *
+ * ⚠️ 这份是**副本**，不是第二个真源：浏览器半边不能 import `src/` 之外的文件
+ * （`client-no-host` 只放行 `../contracts/`），所以用这条判据钉住两者逐字相等。
+ * 实踩过一次：侧栏显示「CPA 面板」、插件列表里叫「CPA 切换器」，同一件东西两个名字。
+ */
+describe('面板名：副本与 locale/*.json 的 meta.title 逐字相等', () => {
+  const metaOf = (locale: string): string => {
+    const url = new URL(`../locale/${locale}.json`, import.meta.url)
+    const parsed = JSON.parse(readFileSync(url, 'utf8')) as { meta?: { title?: unknown } }
+    const title = parsed.meta?.title
+    expect(typeof title, `${locale}.json 的 meta.title 必须是字符串`).toBe('string')
+    return title as string
+  }
+
+  it('中文表 `tab` = locale/zh.json 的 meta.title', () => {
+    expect(zh.tab).toBe(metaOf('zh'))
+  })
+
+  it('英文表 `tab` = locale/en.json 的 meta.title（侧栏英文下要显示 “CPA Switch”）', () => {
+    expect(en.tab).toBe(metaOf('en'))
+  })
+})

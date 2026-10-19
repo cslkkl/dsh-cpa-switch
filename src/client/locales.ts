@@ -35,7 +35,26 @@ export const zh = {
    * 别因为「键少了不对称」把任何一个加回来 —— 判据 `tests/locales.test.ts`
    * 钉住「**每个键都必须有引用**」，加了无引用的键那条就红。
    */
-  tab: 'CPA 面板',
+  /**
+   * 面板名 —— **真源是 `locale/zh.json` 的 `meta.title`**，这里是它的副本。
+   *
+   * 侧栏那一行、插件页卡片摘要、页签的无障碍名都显示它，所以必须与插件列表里
+   * 那个名字同一个词 —— 否则同一件东西在界面上有两个名字（2026-10-19 维护者指出：
+   * 侧栏曾显示「CPA 面板」、插件列表里叫「CPA 切换器」）。
+   *
+   * ⚠️ 为什么不直接 `import` 那个 JSON：分层规则 `client-no-host` 只放行
+   * `../contracts/`，而浏览器包也不该跨目录取文件。所以这里是**手抄的副本**，
+   * 由 `tests/locales.test.ts` 钉住两者逐字相等 —— 与 `cordis.patch.yml` 那四行
+   * 骨架同一个口径（YAML 无法 import TS，就用判据钉）。
+   */
+  tab: 'CPA 切换器',
+  /**
+   * 中央面板页那一行返回按钮（侧栏行点开后的落点，2026-10-19）。
+   *
+   * 与 `plugins.bundle.config` 那份面板是同一个 `<Panel>`，只是外面多一层
+   * 页面外壳 —— 那个外壳在中央列里没有别的回对话入口，所以这行返回是必需的。
+   */
+  back: '返回',
   stopped: '未运行',
   /**
    * 状态条那一句：`<状态> · 127.0.0.1:<端口>`。
@@ -314,7 +333,13 @@ export type LocaleKey = keyof typeof zh
 
 /** 英文文案。`Record<LocaleKey, string>` 保证与中文表键键对齐。 */
 export const en: Record<LocaleKey, string> = {
-  tab: 'CPA',
+  /**
+   * See the Chinese table: a copy of `locale/en.json`'s `meta.title`, pinned equal by
+   * `tests/locales.test.ts` (the client bundle cannot import files outside `src/`).
+   */
+  tab: 'CPA Switch',
+  /** See the Chinese table: the standalone panel page's back control. */
+  back: 'Back',
   stopped: 'Stopped',
   statusRunning: 'Running · 127.0.0.1:{port}',
   statusStopped: 'Stopped · 127.0.0.1:{port}',

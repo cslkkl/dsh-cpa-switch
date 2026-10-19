@@ -32,7 +32,9 @@ admin key are all prepared by the plugin itself.
 
 ## What it does
 
-Open **Plugins → CPA Switch** in DSH. Each of the four channels gets its own tab:
+Open **Plugins → CPA Switch** in DSH, or click **CPA Switch** in the left sidebar (the row
+next to Plugins / Automation tasks / Usage statistics / SSH). Each of the four channels gets
+its own tab:
 
 - **See account balances**: available / used / quota pool / package count; tokens and credits
   are shown separately and never summed together.
