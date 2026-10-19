@@ -12,10 +12,9 @@
  *
  * 是**同一个** `<Panel>`（`plugins.bundle.config` 里那份），不是第二个实现。
  * 这里是它的**页面外壳**：一行返回 + 960px 内容列，形状照抄官方页面插件
- * （`ui-plugin-manager` 的 `.pageHead` / `ui-schedule` 的页头）与姊妹插件
- * `dsh-usage-statistics-panel` 的同名页 —— 顶层留白由返回行承担，不由滚动容器
- * 承担：中央列从窗口左上角开始画，滚动容器上的 padding 会变成一条**没有拖拽区
- * 的前景条**。
+ * （`ui-plugin-manager` 的 `.pageHead` / `ui-schedule` 的页头）—— 顶层留白由
+ * 返回行承担，不由滚动容器承担：中央列从窗口左上角开始画，滚动容器上的 padding
+ * 会变成一条**没有拖拽区的前景条**。
  *
  * @module dsh-cpa-switch/client/PanelPage
  */

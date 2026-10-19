@@ -37,10 +37,9 @@
     两条 1px 描边之间只剩 0.05 格，等于实心
   - 判据 `tests/client-apply.test.ts` 的「侧栏入口」一节（16 格 / currentColor / 无颜色字面量）
 - **`PanelPage.tsx`** —— 侧栏行点开后的**整页外壳**：一行返回 + 960px 内容列 + 同一个 `<Panel>`。
-  - 页面形状照抄官方页面插件（`ui-plugin-manager` 的 `.pageHead`、`ui-schedule` 的页头）与
-    姊妹插件 `dsh-usage-statistics-panel` 的同名页：**顶部 28px 内边距由返回行承担**，
-    不由滚动容器承担 —— 中央列从窗口左上角开始画，滚动容器上的 padding 会变成一条
-    没有窗口拖拽区的前景条
+  - 页面形状照抄官方页面插件（`ui-plugin-manager` 的 `.pageHead`、`ui-schedule` 的页头）：
+    **顶部 28px 内边距由返回行承担**，不由滚动容器承担 —— 中央列从窗口左上角开始画，
+    滚动容器上的 padding 会变成一条没有窗口拖拽区的前景条
   - ⚠️ **返回只能传 `null` 或确实注册过的 id**：`selectPanel` 对未注册的 key 会抛
   - ⚠️ 外面包 `PanelBoundary`（宿主槽位的 error boundary 是**锁存**的，见 F23）
 - **`Panel.tsx`** —— 根组件。

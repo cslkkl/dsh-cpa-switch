@@ -1090,7 +1090,7 @@
  * 形状照抄官方页面插件：960px 内容列 + 顶部 28px 由**返回行**承担，不由滚动
  * 容器承担 —— 中央列从窗口左上角开始画，滚动容器上的 padding 会变成一条
  * 没有窗口拖拽区的前景条（`ui-plugin-manager` 的 `.pageHead` 与 `ui-schedule`
- * 的页头都是这么摆的，姊妹插件 `dsh-usage-statistics-panel` 的 `.page` 同款）。
+ * 的页头都是这么摆的）。
  */
 .page {
   display: flex;
