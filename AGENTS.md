@@ -126,9 +126,12 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 > 这里只放**跨模块、照做即可**的短条目。成轮工作与未立项方向在
 > [docs/PLAN.md](docs/PLAN.md)；做完的立即删（历史去 `git log` 与 note）。
 
-- [ ] **侧栏入口的返回按钮待真机点一次（2026-10-19）** —— 行、页面、面板都已真机验过
-      （见[验收记录](.agents/notes/2026-10-19-acceptance-history.md)），只差 `Back` 的点击；
-      它只有一条路径（`selectPanel(null)`），产物断言里已真调过一次。
+- [ ] **待真机复验：侧栏入口默认关（2026-10-20）** —— 装好不点开关时侧栏**没有**本插件
+      那一行；在面板底部打开后出现、关掉后消失；两种状态各自跨重启保持。
+      顺带补一次 `Back` 的真机点击（高 DPI 缩放下鼠标没命中过；它只有一条路径
+      `selectPanel(null)`，产物断言里已真调一次）。
+      ⚠️ 先 `pnpm build` **并重启 DSH**。判据与取舍见
+      [决策记录](.agents/notes/2026-10-20-sidebar-entry-default-off.md)。
 - [ ] **待真机复验：加载态与漂移看门狗（2026-10-19）** —— 摁「全部签到」不再闪骨架；
       上游撤销禁用后 90 秒内自己禁回去且开关全程不跳；后台标签页不发探针。
       ⚠️ 先 `pnpm build` **并重启 DSH**。判据与取舍见
