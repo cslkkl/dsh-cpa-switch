@@ -423,6 +423,23 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       },
     },
     {
+      /**
+       * 显示偏好：目前只有一处 —— 侧栏那一行显示不显示。
+       *
+       * body: `{sidebarEntry: boolean}`；`GET` 读、`POST` 写。
+       *
+       * ⚠️ 它**不碰 CPA**（不唤醒进程、不改账号），所以不走 `requireRunning`
+       * 那套前置 —— 开关该在 CPA 没跑的时候也能改。
+       */
+      path: '/api/v1/cpa/panel-prefs',
+      methods: ['GET', 'POST'],
+      handle: async (request) => {
+        if (request.method === 'GET') return json(ops.prefs.get())
+        const body = await readBody(request)
+        return json(ops.prefs.setSidebarEntry(body.sidebarEntry))
+      },
+    },
+    {
       path: '/api/v1/cpa/auto-checkin',
       methods: ['GET', 'POST'],
       handle: async (request) => {

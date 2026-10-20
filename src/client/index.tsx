@@ -20,6 +20,12 @@ import {
 import { ModelLabel, type ModelLabelSeat } from './ModelLabel.tsx'
 import { PanelPage } from './PanelPage.tsx'
 import { PanelGlyph } from './PanelGlyph.tsx'
+import { fetchPanelPrefs, sidebarEntryOf } from './endpoints.ts'
+import {
+  setSidebarEntryVisible,
+  sidebarEntryVisible,
+  subscribeSidebarEntry,
+} from './sidebar-visibility.ts'
 import { PanelBoundary } from './PanelBoundary.tsx'
 import { Panel } from './Panel.tsx'
 import { en, makeTranslate, zh } from './locales.ts'
@@ -245,7 +251,8 @@ export function apply(ctx: ClientContext): void {
       if (seat?.view === 'summary') return t2('tab')
       return (
         <PanelBoundary label={t2('tab')} t={t2}>
-          <Panel t={t2} />
+          {/* 插件页这一份带底部的显示偏好开关（侧栏那页不带，见 Panel 的注释）。 */}
+          <Panel t={t2} showSidebarPref />
         </PanelBoundary>
       )
     })
@@ -337,18 +344,66 @@ export function apply(ctx: ClientContext): void {
     // `layout` 没到位就不挂：这条行没有「返回」就只做对了一半的事。
     if (layout === undefined) return
     const label = (): string => ctx.locale.bind(NS)('tab')
-    scope.slots.inject(PANELLIST_SEAT, () =>
-      scope.slots.register(
-        {
-          name: PANELLIST_SEAT,
-          id: PANEL_ID,
-          order: PANEL_ORDER,
-          label,
-          locale: NS,
-        },
-        PanelGlyph,
-      ),
+
+    /**
+     * 侧栏行：**受偏好开关控制**（2026-10-20）。
+     *
+     * 关掉时不是「画不画」的问题 —— 必须**不再注册**：留一个空按钮会让用户
+     * 点了跳进面板，而设置里明明写着「不显示」。
+     *
+     * ## 摘除只走一条路：dispose 整个 `inject`
+     *
+     * 宿主的 `slots.inject(key, cb)` 契约是「返回 `() => void`」（见
+     * `cordis_inspect_query` 的 Service 目录里那行签名）：dispose 它会连
+     * cb 里那次 `register` 一起收回。切「显示」时重新 `inject` 一次即可 ——
+     * 比在 `register` 的返回值上赌一把更稳：那条返回值本仓的类型面只保证
+     * `void | (() => void)`，**赌错的表现是「关掉后那一行还在」，且零报错**。
+     */
+    let stopSidebarEntry: (() => void) | undefined
+    const mountSidebarEntry = (): void => {
+      if (stopSidebarEntry !== undefined || !sidebarEntryVisible()) return
+      const stop = scope.slots.inject(PANELLIST_SEAT, () =>
+        scope.slots.register(
+          {
+            name: PANELLIST_SEAT,
+            id: PANEL_ID,
+            order: PANEL_ORDER,
+            label,
+            locale: NS,
+          },
+          PanelGlyph,
+        ),
+      )
+      stopSidebarEntry = typeof stop === 'function' ? stop : () => {}
+    }
+    const unmountSidebarEntry = (): void => {
+      stopSidebarEntry?.()
+      stopSidebarEntry = undefined
+    }
+
+    // 先按当前值挂一次（默认开 ⇒ 首屏就有这一行），再订阅后续变化。
+    mountSidebarEntry()
+    scope.effect(
+      () =>
+        subscribeSidebarEntry(() => {
+          if (sidebarEntryVisible()) mountSidebarEntry()
+          else unmountSidebarEntry()
+        }),
+      'cpa-panel: 侧栏行开关',
     )
+
+    /**
+     * 读一次偏好并落进那份状态。
+     *
+     * ⚠️ **失败静默**（保持默认开）：偏好读不到不该让入口消失 —— 那是
+     * 「配置读不到」与「用户关掉了」长得一样的最坏情形。
+     */
+    void fetchPanelPrefs().then((result) => {
+      if (!result.ok) return
+      const value = sidebarEntryOf(result)
+      if (value !== undefined) setSidebarEntryVisible(value)
+    })
+
     scope.slots.inject(MAIN_SEAT, () =>
       scope.slots.register(
         {

@@ -1121,6 +1121,47 @@
   gap: 6px;
 }
 
+/* ---- 面板底部的偏好行（侧栏入口开关，2026-10-20）------------------------ */
+
+/* 一行设置：左边「标题 + 说明」，右边开关；上面一道 0.5px 分隔线，
+ * 把它与上面的面板内容分开（与宿主的设置行同一个做法）。
+ *
+ * 几何抄自宿主的字段行：13px 正文 / 12px 说明 / 12px 上内边距。
+ * ⚠️ 不加 `border-bottom`：它是最末一行，下面留白由 `.wrap` 的 gap 决定，
+ * 多一道线会让它看起来像「还有内容没显示」。
+ */
+.prefRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  box-sizing: border-box;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+.prefLabel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prefTitle {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 说明的层级与宿主的字段 hint 一致：12px / tertiary。 */
+.prefHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 /* ---- Error boundary ---------------------------------------------------- */
 
 .crashed {

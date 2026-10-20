@@ -50,6 +50,13 @@ export const paths = {
   models: (plugin: string): string => '/api/v1/cpa/models?plugin=' + encodeURIComponent(plugin),
   /** 模型可见性：哪些模型进**选择器**（`GET` 读、`POST` 改某渠道的隐藏列表）。 */
   modelVisibility: '/api/v1/cpa/model-visibility',
+  /**
+   * 显示偏好（`GET` 读、`POST` 写）：侧栏那一行显示不显示。
+   *
+   * ⚠️ 唯一**不碰 CPA** 的写：它不改账号、不发请求，所以宿主侧那条路由
+   * 也不走 `requireRunning`（CPA 没跑时开关照样能改）。
+   */
+  panelPrefs: '/api/v1/cpa/panel-prefs',
   /** 路由策略（`GET` 读、`POST` 写）。 */
   routing: '/api/v1/cpa/routing',
   /** 批量动作（签到 / 任务）。 */
@@ -263,6 +270,44 @@ export function setModelVisibility(
     }
     return result
   })
+}
+
+/**
+ * 读显示偏好。
+ *
+ * 它不走读缓存：那个缓存是给「渲染用的资源」准备的（过期重验），而这个值在
+ * `apply()` 里就要同步知道（决定侧栏槽位注册不注册）—— 见 `sidebar-visibility.ts`。
+ */
+export function fetchPanelPrefs(): Promise<ApiResult> {
+  return api(paths.panelPrefs)
+}
+
+/**
+ * 写「侧栏那一行显示不显示」。
+ *
+ * ⚠️ **不作废任何读缓存**：这个值不进读缓存（见 `fetchPanelPrefs`），
+ * 界面上的开关由调用方拿回读值更新。写一个不存在的键是空操作 —— 但更糟的是
+ * 它会让「作废」这件事看起来做了、其实什么都没发生。
+ */
+export function setSidebarEntry(enabled: boolean): Promise<ApiResult> {
+  return post(paths.panelPrefs, { sidebarEntry: enabled })
+}
+
+/**
+ * 取宿主回读到的「侧栏显示」值。
+ *
+ * ⚠️ **字段在响应体最外层**（2026-10-20 实踩）：宿主路由是
+ * `json(ops.prefs.get())`，即 `{ok, sidebarEntry}` 摊平返回。按 `result.data.xxx`
+ * 取会永远拿到 `undefined` —— 表现是开关**一直显示「开」、点了回弹**（读与写
+ * 两处都取不到值，界面于是没有可依据的新值）。所以取这个值只走这一个函数，
+ * 判据在 `tests/sidebar-visibility.test.ts`。
+ *
+ * @param result - 读或写请求的返回。
+ * @returns 布尔值；宿主没带（或形状不对）时 `undefined`，调用方保持原值。
+ */
+export function sidebarEntryOf(result: ApiResult): boolean | undefined {
+  const value = result['sidebarEntry']
+  return typeof value === 'boolean' ? value : undefined
 }
 
 /**
