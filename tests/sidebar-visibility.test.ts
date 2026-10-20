@@ -3,8 +3,9 @@
  *
  * 守的是三件**换个写法就静默坏**的事：
  *
- * 1. **默认开**：`undefined`（还没读到偏好）必须按「开」—— 按关的话，一次读失败
- *    或慢响应就让入口凭空消失，而用户没有任何线索；
+ * 1. **默认关**：`undefined`（还没读到偏好）必须按「关」—— 侧栏是全宿主共用的
+ *    一列，插件默认不占位；读到「开」才挂那一行。按开的话，一次读失败或慢响应
+ *    就会凭空给侧栏多出一行，而用户没按过那个开关；
  * 2. **值没变不通知**：订阅方做的是「注册 / 摘除槽位」，白通知一次就是白闪一下；
  * 3. **取消订阅真的生效**：留着旧监听器会在 apply 重建后继续操作**上一个** fiber
  *    的槽位（表现是开关时灵时不灵）。
@@ -24,25 +25,25 @@ describe('侧栏行的显示状态', () => {
     resetSidebarEntryForTests()
   })
 
-  it('⚠️ 还没读到偏好时按「开」（入口不凭空消失）', () => {
-    expect(sidebarEntryVisible()).toBe(true)
+  it('⚠️ 还没读到偏好时按「关」（插件不默认占侧栏）', () => {
+    expect(sidebarEntryVisible()).toBe(false)
   })
 
-  it('关掉之后为 false，再打开回到 true', () => {
-    setSidebarEntryVisible(false)
-    expect(sidebarEntryVisible()).toBe(false)
+  it('打开之后为 true，再关掉回到 false', () => {
     setSidebarEntryVisible(true)
     expect(sidebarEntryVisible()).toBe(true)
+    setSidebarEntryVisible(false)
+    expect(sidebarEntryVisible()).toBe(false)
   })
 
   it('⚠️ 值没变时**不通知**（否则订阅方会白做一次注册/摘除）', () => {
     const listener = vi.fn()
     subscribeSidebarEntry(listener)
-    setSidebarEntryVisible(true) // 与默认值相同
+    setSidebarEntryVisible(false) // 与默认值相同
     expect(listener).not.toHaveBeenCalled()
-    setSidebarEntryVisible(false)
+    setSidebarEntryVisible(true)
     expect(listener).toHaveBeenCalledTimes(1)
-    setSidebarEntryVisible(false) // 重复同值
+    setSidebarEntryVisible(true) // 重复同值
     expect(listener).toHaveBeenCalledTimes(1)
   })
 
@@ -50,7 +51,7 @@ describe('侧栏行的显示状态', () => {
     const listener = vi.fn()
     const stop = subscribeSidebarEntry(listener)
     stop()
-    setSidebarEntryVisible(false)
+    setSidebarEntryVisible(true)
     expect(listener).not.toHaveBeenCalled()
   })
 
@@ -59,7 +60,7 @@ describe('侧栏行的显示状态', () => {
     const b = vi.fn()
     subscribeSidebarEntry(a)
     subscribeSidebarEntry(b)
-    setSidebarEntryVisible(false)
+    setSidebarEntryVisible(true)
     expect(a).toHaveBeenCalledTimes(1)
     expect(b).toHaveBeenCalledTimes(1)
   })

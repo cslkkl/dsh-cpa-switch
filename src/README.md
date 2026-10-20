@@ -462,7 +462,7 @@
 | `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                                                                       |
 | `/api/v1/cpa/model-rows`       | GET      | 某渠道**会被推送的候选行**（面板勾选清单的来源，键与推送侧同一份）                                                 |
 | `/api/v1/cpa/model-visibility` | GET/POST | 哪些模型进**选择器**（`{channel, names}` 是**要隐藏**的那批）                                                      |
-| `/api/v1/cpa/panel-prefs`      | GET/POST | 显示偏好：`{sidebarEntry}` 侧栏那一行显示不显示（**唯一不碰 CPA 的写**）                                           |
+| `/api/v1/cpa/panel-prefs`      | GET/POST | 显示偏好：`{sidebarEntry}` 侧栏那一行显示不显示，**默认关**（**唯一不碰 CPA 的写**）                               |
 | `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                                                                   |
 | `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                                                                             |
 | `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                                                                |
