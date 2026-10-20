@@ -537,6 +537,19 @@ check(
   selectedPanels.length === 1 && selectedPanels[0] === null,
   JSON.stringify(selectedPanels),
 )
+
+/**
+ * 侧栏那条**显示偏好**的接线（2026-10-20）。
+ *
+ * 这一组守的都是「写坏了不报错」的形状：
+ * - 侧栏行改成动态注册后，`inject` 的返回值（disposer）必须被接住 —— 否则关掉
+ *   开关只是不再新注册，旧那条还在（表现为开关「时灵时不灵」）；
+ * - 偏好只能走 `panel-prefs` 那条路由 —— 写错路径是一次静默 404，开关会永远
+ *   停在默认值，而用户点了也「没反应」。
+ */
+check('侧栏行的 disposer 被接住（关得掉）', /stopSidebarEntry/.test(clientSrc))
+check('偏好读的是 panel-prefs 路由', clientSrc.includes('/api/v1/cpa/panel-prefs'))
+check('偏好写回读值喂给侧栏状态', /setSidebarEntryVisible\(/.test(clientSrc))
 check(
   'require 只请求了宿主模块表里的东西',
   required.every((r) => r in HOST_MODULES),

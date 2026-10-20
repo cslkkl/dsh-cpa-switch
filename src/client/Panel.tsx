@@ -14,6 +14,7 @@ import { PluginPanel } from './PluginPanel.tsx'
 import { progressLine } from './progress-text.ts'
 import type { PluginMeta } from './PluginPanel.tsx'
 import { RoutingSection } from './RoutingSection.tsx'
+import { SidebarPref } from './SidebarPref.tsx'
 import { SkeletonPanel } from './Skeleton.tsx'
 import { statusView } from './status-text.ts'
 import type { StatusInput, StatusView } from './status-text.ts'
@@ -76,11 +77,18 @@ type PluginUpdateAction =
 /** `Panel` 的入参。 */
 export interface PanelProps {
   readonly t: Translate
+  /**
+   * 是否在底部画那条**显示偏好**（侧栏入口开关）。
+   *
+   * 只有插件页那一份是 `true`：侧栏那页自己就是被开关控制的东西，
+   * 在它里面放「关掉我」会让用户点了之后原地消失。
+   */
+  readonly showSidebarPref?: boolean
 }
 
 /** 面板根组件。 */
 export function Panel(props: PanelProps): ReactNode {
-  const { t } = props
+  const { t, showSidebarPref = false } = props
 
   const [active, setActive] = useState('workbuddy')
 
@@ -535,6 +543,15 @@ export function Panel(props: PanelProps): ReactNode {
 
       {/* 路由区：跟随当前渠道（每个渠道有各自的账号池） */}
       {activeMeta !== undefined && <RoutingSection t={t} />}
+
+      {/*
+       * 最底部：显示偏好（侧栏入口开关，2026-10-20）。
+       *
+       * ⚠️ **只在插件页那一份面板里出现**（`showSidebarPref`）。侧栏那一页
+       * 自己是同一个组件，但那一页把它关掉的后果是「你正站着的这一行消失了」——
+       * 开关要放在能看见结果的地方（插件页），而不是放在结果里。
+       */}
+      {showSidebarPref && <SidebarPref t={t} />}
     </div>
   )
 }

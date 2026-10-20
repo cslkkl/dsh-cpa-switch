@@ -743,3 +743,63 @@ export function updateHiddenModels(mutate: (current: HiddenModels) => HiddenMode
 export function isModelHidden(hidden: HiddenModels, channel: string, bare: string): boolean {
   return (hidden.hidden[channel] ?? []).includes(bare)
 }
+
+/* ── 面板自己的显示偏好 ───────────────────────────────────────────────── */
+
+/**
+ * 面板显示偏好的落地文件。
+ *
+ * 与上面两个状态文件同属**意图类**（用户自己按的开关）：它不参与任何上游调用，
+ * 只决定我们自己的界面长什么样。单独一个文件而不是塞进别的表：那两份的读法
+ * 各自带着「只认 source=panel」「坏格子只丢一格」这类规矩，混进来会让它们变复杂。
+ */
+function panelPrefsPath(): string {
+  return join(storagesDir(), 'cpa-panel-prefs.json')
+}
+
+/** 面板显示偏好。 */
+export interface PanelPrefs {
+  /**
+   * 侧栏那一行显示不显示。
+   *
+   * ⚠️ **默认 true**，且「读不到 / 坏掉」也按 true —— 保守方向：宁可多一个入口，
+   * 也不要让用户在升级后发现「我的侧栏入口不见了」而没有线索。
+   */
+  sidebarEntry: boolean
+  /** 写入时间，仅作展示。 */
+  updatedAt?: string
+}
+
+/** 默认偏好（= 首次安装 / 文件丢失时的样子）。 */
+function defaultPanelPrefs(): PanelPrefs {
+  return { sidebarEntry: true }
+}
+
+/**
+ * 读偏好。
+ *
+ * 只认 `source: 'panel'`（与账号意图、隐藏模型同规）：外部写坏不该改变我们的界面。
+ * 字段不是布尔就回退默认值 —— 一个脏值不该让开关显示成「关」。
+ */
+export function readPanelPrefs(): PanelPrefs {
+  const parsed = readJson<Record<string, unknown>>(panelPrefsPath())
+  if (parsed === undefined) return defaultPanelPrefs()
+  if (parsed['source'] !== 'panel') return defaultPanelPrefs()
+  const raw = parsed['sidebarEntry']
+  return { sidebarEntry: typeof raw === 'boolean' ? raw : true }
+}
+
+/**
+ * **改**偏好：读当下 → 交给 `mutate` → 写回（整段同步，无 `await`）。
+ *
+ * 与 {@link updateHiddenModels} 同规：传函数而不是算好的值。
+ */
+export function updatePanelPrefs(mutate: (current: PanelPrefs) => PanelPrefs): void {
+  const { updatedAt: _dropped, ...rest } = mutate(readPanelPrefs())
+  void _dropped
+  writeJson(panelPrefsPath(), {
+    sidebarEntry: rest.sidebarEntry,
+    updatedAt: new Date().toISOString(),
+    source: 'panel',
+  })
+}

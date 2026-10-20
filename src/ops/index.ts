@@ -21,6 +21,7 @@ import { createAccountsOps, type AccountsOps } from './accounts.ts'
 import { createActionsOps, type ActionsOps } from './actions.ts'
 import { createEnableOps, type EnableOps } from './enable.ts'
 import { createModelVisibilityOps, type ModelVisibilityOps } from './model-visibility.ts'
+import { createPrefsOps, type PrefsOps } from './prefs.ts'
 import type { CandidateRow as CandidateModelRow } from './model-visibility.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
 import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
@@ -99,6 +100,12 @@ export interface Operations {
    * 后果是用户以为「不显示 = 不用了」。
    */
   readonly modelVisibility: ModelVisibilityOps
+  /**
+   * 我们自己的显示偏好（侧栏那一行显示不显示）。
+   *
+   * ⚠️ 与上面所有域的区别：它**不碰 CPA、不发请求**，只决定本插件自己的界面。
+   */
+  readonly prefs: PrefsOps
 }
 
 /** 按域组装业务层。 */
@@ -121,5 +128,6 @@ export function createOperations(deps: OpsDeps): Operations {
       ...(deps.candidateModelRows === undefined ? {} : { candidateRows: deps.candidateModelRows }),
       ...(deps.logger === undefined ? {} : { logger: deps.logger }),
     }),
+    prefs: createPrefsOps(),
   }
 }

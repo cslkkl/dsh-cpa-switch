@@ -55,6 +55,14 @@ export const zh = {
    * 页面外壳 —— 那个外壳在中央列里没有别的回对话入口，所以这行返回是必需的。
    */
   back: '返回',
+  /**
+   * 面板最底部那个开关（2026-10-20）：侧栏那一行显示不显示。
+   *
+   * 文案口径：**标题只说「是什么」，描述只说「关掉之后什么样」**。
+   * 不写「点击以…」（开关自己会说话），也不解释实现（用户不需要知道它落在哪个文件）。
+   */
+  sidebarEntry: '侧栏入口',
+  sidebarEntryHint: '关掉后，面板只能从插件页打开',
   stopped: '未运行',
   /**
    * 状态条那一句：`<状态> · 127.0.0.1:<端口>`。
@@ -340,6 +348,9 @@ export const en: Record<LocaleKey, string> = {
   tab: 'CPA Switch',
   /** See the Chinese table: the standalone panel page's back control. */
   back: 'Back',
+  /** See the Chinese table: the bottom-of-panel switch for the sidebar row. */
+  sidebarEntry: 'Sidebar entry',
+  sidebarEntryHint: 'When off, the panel is only reachable from the Plugins page',
   stopped: 'Stopped',
   statusRunning: 'Running · 127.0.0.1:{port}',
   statusStopped: 'Stopped · 127.0.0.1:{port}',

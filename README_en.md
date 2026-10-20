@@ -64,6 +64,9 @@ its own tab:
   uncheck a model and save, and it disappears from the chat model picker (the panel still
   lists every model, so you can check it back at any time). Unchecked models remain callable;
   they are only hidden from the dropdown.
+- **Optional sidebar entry**: the bottom of the panel has a "Sidebar entry" switch (on by
+  default). Turn it off and the sidebar row disappears — the panel is then reachable from the
+  Plugins page only.
 
 ### The four channels
 
