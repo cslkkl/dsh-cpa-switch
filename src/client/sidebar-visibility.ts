@@ -14,10 +14,11 @@
  * 点了还跳面板）。而 `ctx.slots.inject` 的注册发生在 `apply()` 里、不受任何
  * 组件重渲染影响，所以两边要共享同一份状态。
  *
- * ## 默认开
+ * ## 默认关
  *
- * 未读到（`undefined`）时按**开**处理：入口消失比多一个入口难查得多
- * （用户看不到某个东西时，没有任何线索）。
+ * 未读到（`undefined`）时按**关**处理：侧栏是全宿主共用的一列，插件默认不占位；
+ * 面板始终能从插件页进，所以「默认不显示」不会让人找不到它。读到偏好为「开」
+ * 之后才挂那一行 —— 那一次推送来自宿主的真实值，不是猜的。
  *
  * ## 为什么不走 `use-resource` 的读缓存
  *
@@ -28,13 +29,13 @@
  * @module dsh-cpa-switch/client/sidebar-visibility
  */
 
-/** 当前值：`undefined` = 还没读到（按开处理）。 */
+/** 当前值：`undefined` = 还没读到（按关处理）。 */
 let enabled: boolean | undefined
 const listeners = new Set<() => void>()
 
-/** 侧栏那一行该不该显示（**未读到按开**）。 */
+/** 侧栏那一行该不该显示（**未读到按关**）。 */
 export function sidebarEntryVisible(): boolean {
-  return enabled !== false
+  return enabled === true
 }
 
 /**

@@ -311,9 +311,30 @@ const vm = require('node:vm')
 /** 捕获 `__ModuleLoader__.load({...})` 收到的那个对象。 */
 let captured
 
+/**
+ * 显示偏好的**本轮取值**：`apply` 里那次 `/panel-prefs` 读会拿到它。
+ *
+ * ⚠️ 沙箱里没有浏览器的 `fetch`。不补桩的话那次读必然失败，而「读失败」与
+ * 「用户关掉了」现在**同向**（默认关）⇒ 侧栏行永远注册不出来，下面那组断言
+ * 会退化成「测不到东西」。所以桩必须存在，且值要**按用例可改**。
+ */
+const prefs = { sidebarEntry: true }
+
 /** 产物会在作用域里找 `window` 与 `document`，沙箱直接给它们。 */
 const sandbox = {
   console,
+  /**
+   * 只应答显示偏好那条路由，其余一律 `{ok:false}` ——
+   * 本脚本只关心座位注册，别让别的读顺手打出网络错误。
+   */
+  fetch: async (url) => ({
+    ok: true,
+    status: 200,
+    text: async () =>
+      String(url).includes('/api/v1/cpa/panel-prefs')
+        ? JSON.stringify({ ok: true, sidebarEntry: prefs.sidebarEntry })
+        : JSON.stringify({ ok: false, error: 'not stubbed' }),
+  }),
   window: {
     __ModuleLoader__: {
       load(o) {
@@ -426,9 +447,22 @@ const locales = []
 const injectedDeps = []
 const selectedPanels = []
 const fakeSlots = {
+  /**
+   * ⚠️ **必须真的返回 disposer**（2026-10-20）：侧栏行的开关靠它摘除注册。
+   * 返回 `undefined` 时组件侧会兜成空函数，于是「关掉」在断言里**永远成立** ——
+   * 那正是本仓最怕的那类断言（看着绿、其实什么都没验）。
+   */
   inject: (name, cb) => {
     injected.push(name)
+    const before = new Set(registered)
     cb()
+    const added = registered.filter((entry) => !before.has(entry))
+    return () => {
+      for (const entry of added) {
+        const at = registered.indexOf(entry)
+        if (at >= 0) registered.splice(at, 1)
+      }
+    }
   },
   register: (opts) => registered.push(opts),
 }
@@ -466,6 +500,28 @@ mod.apply({
   },
 })
 
+/** 再跑一次 `apply` —— 只是为了让下面「偏好 = 关」那一档有一份自己的注册面。 */
+const applyAgain = () => {
+  mod.apply({
+    effect: (cb) => {
+      cb()
+    },
+    locale: fakeLocale,
+    slots: fakeSlots,
+    inject: (deps, cb) => {
+      injectedDeps.push(...deps)
+      cb(fakeScope)
+    },
+  })
+}
+
+/**
+ * ⚠️ **侧栏行现在要等那次 `/panel-prefs` 读回来才注册**（默认关 ⇒ 读到「开」才挂）。
+ * 读是 `fetch(...).then(...)`，至少跨一个微任务，所以这组断言必须排在它之后 ——
+ * 不 `await` 的话断言跑在注册之前，会**误判成「侧栏行没注册」**。
+ */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
 check(
   '注册了 plugins.bundle.config',
   registered.some((r) => r.name === 'plugins.bundle.config'),
@@ -489,73 +545,105 @@ check(
  * ⚠️ 这一组守的是**宿主会抛**的那种失败：侧栏按钮按 `id` 去 `main` 里找落点，
  * 找不到就抛在点击处理器里 —— 表现是「点了没反应」，只有控制台有声。
  * 所以两处的 id/key 必须**逐字相同**，而且只能是同一个来源。
- */
-const panellist = registered.find((r) => r.name === 'sidebar.panellist')
-check('注册了 sidebar.panellist（侧栏行）', panellist !== undefined)
-check('侧栏行有 list 座必需的 id', typeof panellist?.id === 'string' && panellist.id !== '')
-check('侧栏行的 order 是数字', typeof panellist?.order === 'number')
-check('侧栏行的 label 是函数（跟随语言）', typeof panellist?.label === 'function')
-const mainPanel = registered.find((r) => r.name === 'main')
-check('注册了 main（侧栏行点开的落点）', mainPanel !== undefined)
-check(
-  'main 的 key 与侧栏行的 id 逐字相同',
-  mainPanel !== undefined && panellist !== undefined && mainPanel.key === panellist.id,
-  `${mainPanel && mainPanel.key} vs ${panellist && panellist.id}`,
-)
-check(
-  '侧栏行没有占用官方那四个 id',
-  panellist !== undefined && !['plugins', 'schedules', 'usage-stats', 'ssh'].includes(panellist.id),
-  panellist && panellist.id,
-)
-check(
-  '等过 modelDirectories 与 layout（座位级门禁，不进 inject 数组）',
-  injectedDeps.includes('modelDirectories') && injectedDeps.includes('layout'),
-  JSON.stringify(injectedDeps),
-)
-check(
-  '导出的 inject 仍只有 slots + locale',
-  Array.isArray(mod.inject) &&
-    mod.inject.length === 2 &&
-    mod.inject.includes('slots') &&
-    mod.inject.includes('locale'),
-  JSON.stringify(mod.inject),
-)
-
-/**
- * 中央面板页的「返回」必须在**真的点击后**选回 `null`（回对话）。
  *
- * 这一条只能在这里测：`PanelPage` 里的 `goBack` 由注册处的 `inject` 交出去，
- * 而 Node 侧 import 不到组件（primitives 依赖浏览器宿主注入的 `clsx`）。
+ * ⚠️ 侧栏行**受偏好开关控制**（2026-10-20，默认关）：这一组跑在「偏好 = 开」
+ * 那一档上 —— 先等那次读回来，再断言它真的挂上了。默认关那一侧由
+ * `tests/sidebar-visibility.test.ts` 钉（`undefined` ⇒ 不可见）。
  */
-const pageInject = mainPanel?.inject
-if (typeof pageInject === 'function') {
-  const face = pageInject()
-  if (typeof face?.goBack === 'function') face.goBack()
+async function main() {
+  await settle()
+
+  const panellist = registered.find((r) => r.name === 'sidebar.panellist')
+  check('偏好为开时注册了 sidebar.panellist（侧栏行）', panellist !== undefined)
+  check('侧栏行有 list 座必需的 id', typeof panellist?.id === 'string' && panellist.id !== '')
+  check('侧栏行的 order 是数字', typeof panellist?.order === 'number')
+  check('侧栏行的 label 是函数（跟随语言）', typeof panellist?.label === 'function')
+  const mainPanel = registered.find((r) => r.name === 'main')
+  check('注册了 main（侧栏行点开的落点）', mainPanel !== undefined)
+  check(
+    'main 的 key 与侧栏行的 id 逐字相同',
+    mainPanel !== undefined && panellist !== undefined && mainPanel.key === panellist.id,
+    `${mainPanel && mainPanel.key} vs ${panellist && panellist.id}`,
+  )
+  check(
+    '侧栏行没有占用官方那四个 id',
+    panellist !== undefined &&
+      !['plugins', 'schedules', 'usage-stats', 'ssh'].includes(panellist.id),
+    panellist && panellist.id,
+  )
+  check(
+    '等过 modelDirectories 与 layout（座位级门禁，不进 inject 数组）',
+    injectedDeps.includes('modelDirectories') && injectedDeps.includes('layout'),
+    JSON.stringify(injectedDeps),
+  )
+  check(
+    '导出的 inject 仍只有 slots + locale',
+    Array.isArray(mod.inject) &&
+      mod.inject.length === 2 &&
+      mod.inject.includes('slots') &&
+      mod.inject.includes('locale'),
+    JSON.stringify(mod.inject),
+  )
+
+  /**
+   * 中央面板页的「返回」必须在**真的点击后**选回 `null`（回对话）。
+   *
+   * 这一条只能在这里测：`PanelPage` 里的 `goBack` 由注册处的 `inject` 交出去，
+   * 而 Node 侧 import 不到组件（primitives 依赖浏览器宿主注入的 `clsx`）。
+   */
+  const pageInject = mainPanel?.inject
+  if (typeof pageInject === 'function') {
+    const face = pageInject()
+    if (typeof face?.goBack === 'function') face.goBack()
+  }
+  check(
+    '返回动作选回对话（selectPanel(null)）',
+    selectedPanels.length === 1 && selectedPanels[0] === null,
+    JSON.stringify(selectedPanels),
+  )
+
+  /**
+   * 侧栏那条**显示偏好**的接线（2026-10-20）。
+   *
+   * 这一组守的都是「写坏了不报错」的形状：
+   * - 侧栏行改成动态注册后，`inject` 的返回值（disposer）必须被接住 —— 否则关掉
+   *   开关只是不再新注册，旧那条还在（表现为开关「时灵时不灵」）；
+   * - 偏好只能走 `panel-prefs` 那条路由 —— 写错路径是一次静默 404，开关会永远
+   *   停在默认值，而用户点了也「没反应」。
+   */
+  check('侧栏行的 disposer 被接住（关得掉）', /stopSidebarEntry/.test(clientSrc))
+  check('偏好读的是 panel-prefs 路由', clientSrc.includes('/api/v1/cpa/panel-prefs'))
+  check('偏好写回读值喂给侧栏状态', /setSidebarEntryVisible\(/.test(clientSrc))
+
+  /**
+   * 第二档：宿主这次说「**关**」。
+   *
+   * 不只看「不注册」—— 要看**那一行真的被摘掉**：再 apply 一次（它先按上一份
+   * 状态挂上），随后那次读把值翻成 false，两个订阅者都该摘掉自己那一条。
+   * 只有真的接住了 disposer，这里的 `registered` 才会干净。
+   */
+  prefs.sidebarEntry = false
+  applyAgain()
+  await settle()
+  check(
+    '偏好为关时侧栏行被摘除（disposer 真的跑了）',
+    !registered.some((r) => r.name === 'sidebar.panellist'),
+    registered.map((r) => r.name).join(','),
+  )
+  check(
+    '关掉侧栏行不影响 main（面板页不归这个开关管）',
+    registered.some((r) => r.name === 'main'),
+  )
+
+  check(
+    'require 只请求了宿主模块表里的东西',
+    required.every((r) => r in HOST_MODULES),
+    JSON.stringify(required),
+  )
+
+  console.log('')
+  console.log(`=== 结果: ${pass} 通过, ${fail} 失败 ===`)
+  process.exit(fail === 0 ? 0 : 1)
 }
-check(
-  '返回动作选回对话（selectPanel(null)）',
-  selectedPanels.length === 1 && selectedPanels[0] === null,
-  JSON.stringify(selectedPanels),
-)
 
-/**
- * 侧栏那条**显示偏好**的接线（2026-10-20）。
- *
- * 这一组守的都是「写坏了不报错」的形状：
- * - 侧栏行改成动态注册后，`inject` 的返回值（disposer）必须被接住 —— 否则关掉
- *   开关只是不再新注册，旧那条还在（表现为开关「时灵时不灵」）；
- * - 偏好只能走 `panel-prefs` 那条路由 —— 写错路径是一次静默 404，开关会永远
- *   停在默认值，而用户点了也「没反应」。
- */
-check('侧栏行的 disposer 被接住（关得掉）', /stopSidebarEntry/.test(clientSrc))
-check('偏好读的是 panel-prefs 路由', clientSrc.includes('/api/v1/cpa/panel-prefs'))
-check('偏好写回读值喂给侧栏状态', /setSidebarEntryVisible\(/.test(clientSrc))
-check(
-  'require 只请求了宿主模块表里的东西',
-  required.every((r) => r in HOST_MODULES),
-  JSON.stringify(required),
-)
-
-console.log('')
-console.log(`=== 结果: ${pass} 通过, ${fail} 失败 ===`)
-process.exit(fail === 0 ? 0 : 1)
+void main()

@@ -762,8 +762,9 @@ export interface PanelPrefs {
   /**
    * 侧栏那一行显示不显示。
    *
-   * ⚠️ **默认 true**，且「读不到 / 坏掉」也按 true —— 保守方向：宁可多一个入口，
-   * 也不要让用户在升级后发现「我的侧栏入口不见了」而没有线索。
+   * ⚠️ **默认 false**，且「读不到 / 坏掉」也按 false —— 侧栏是全宿主**共用**的一列，
+   * 插件默认不该占位；面板始终可以从插件页进，所以「默认不显示」不会让人找不到它。
+   * 想要常驻入口的用户按一次开关即可（那次写之后就以文件为准）。
    */
   sidebarEntry: boolean
   /** 写入时间，仅作展示。 */
@@ -772,21 +773,21 @@ export interface PanelPrefs {
 
 /** 默认偏好（= 首次安装 / 文件丢失时的样子）。 */
 function defaultPanelPrefs(): PanelPrefs {
-  return { sidebarEntry: true }
+  return { sidebarEntry: false }
 }
 
 /**
  * 读偏好。
  *
  * 只认 `source: 'panel'`（与账号意图、隐藏模型同规）：外部写坏不该改变我们的界面。
- * 字段不是布尔就回退默认值 —— 一个脏值不该让开关显示成「关」。
+ * 字段不是布尔就回退默认值 —— 一个脏值不该让开关显示成「开」。
  */
 export function readPanelPrefs(): PanelPrefs {
   const parsed = readJson<Record<string, unknown>>(panelPrefsPath())
   if (parsed === undefined) return defaultPanelPrefs()
   if (parsed['source'] !== 'panel') return defaultPanelPrefs()
   const raw = parsed['sidebarEntry']
-  return { sidebarEntry: typeof raw === 'boolean' ? raw : true }
+  return { sidebarEntry: typeof raw === 'boolean' ? raw : false }
 }
 
 /**

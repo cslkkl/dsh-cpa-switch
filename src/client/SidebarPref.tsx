@@ -16,9 +16,8 @@
  *    要等刷新页面才消失。
  * 3. ⚠️ **读失败不禁用开关**（2026-10-20 真机反馈「按不了」）：第一版把
  *    `checked === undefined`（还没读到）画成 disabled，于是路由一次读不到
- *    （旧宿主进程 / 404）就让这个开关**永久点不动**。而「读不到」与「用户关掉了」
- *    在界面上长得一样 —— 那正是本仓反复记的那类陷阱。现在未读到时按「开」画、
- *    照常可点：点一下就是一次写，写成功即成为事实。
+ *    （旧宿主进程 / 404）就让这个开关**永久点不动**。现在未读到时按**默认值（关）**
+ *    画、照常可点：点一下就是一次写，写成功即成为事实。
  *
  * @module dsh-cpa-switch/client/SidebarPref
  */
@@ -42,8 +41,9 @@ export function SidebarPref(props: SidebarPrefProps): ReactNode {
   /**
    * `undefined` = 还没读到（或读失败）。
    *
-   * ⚠️ 此时**按「开」画、照常可点** —— 见文件头第 3 条：把它画成禁用，
-   * 会让一次读失败变成「这个开关永远点不动」。
+   * ⚠️ 此时**按默认值（关）画、照常可点** —— 见文件头第 3 条：把它画成禁用，
+   * 会让一次读失败变成「这个开关永远点不动」。画成「开」也不行：界面会与
+   * 侧栏的真实状态（默认关）相反。
    */
   const [checked, setChecked] = useState<boolean | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -90,7 +90,7 @@ export function SidebarPref(props: SidebarPrefProps): ReactNode {
         <span className={css.prefHint}>{t('sidebarEntryHint')}</span>
       </span>
       <Switch
-        checked={checked ?? true}
+        checked={checked ?? false}
         /* 只有「正在写」才禁用：读不到不是理由（见文件头第 3 条）。 */
         disabled={busy}
         label={t('sidebarEntry')}

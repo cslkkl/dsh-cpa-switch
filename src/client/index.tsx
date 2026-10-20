@@ -381,7 +381,7 @@ export function apply(ctx: ClientContext): void {
       stopSidebarEntry = undefined
     }
 
-    // 先按当前值挂一次（默认开 ⇒ 首屏就有这一行），再订阅后续变化。
+    // 先按当前值挂一次（默认关 ⇒ 首屏没有这一行），再订阅后续变化。
     mountSidebarEntry()
     scope.effect(
       () =>
@@ -395,8 +395,8 @@ export function apply(ctx: ClientContext): void {
     /**
      * 读一次偏好并落进那份状态。
      *
-     * ⚠️ **失败静默**（保持默认开）：偏好读不到不该让入口消失 —— 那是
-     * 「配置读不到」与「用户关掉了」长得一样的最坏情形。
+     * ⚠️ **失败静默**（保持默认关）：读不到就按默认值走 —— 一次读失败不该让
+     * 侧栏凭空多出一行。用户要的「开」在文件里，读到之后下一帧就挂上。
      */
     void fetchPanelPrefs().then((result) => {
       if (!result.ok) return
