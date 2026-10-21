@@ -25,6 +25,10 @@
   - 导出：`runBoot` / 类型 `BootDeps`
   - ⚠️ 每一步都要看 `isCancelled()`：宿主可能在任何一步之间重建 fiber
   - ⚠️ 补装失败**只记日志**：网络抖动的异常放任冒出去会拖死整个 DSH 宿主（见 F17）
+  - ⚠️ CPA 未运行时的三段托管配置补齐（`server.host` 安全默认 / `access.api-keys`
+    鉴权收口 / `workbuddy.stream_head_timeout` 状态码保真）都挂在这里的
+    `!portBusy` 块内 —— 顺序在 `runtime.ensure()` 之前；各有独立 try/warn，互不阻断。
+    为什么必须在停止态改：CPA 运行中持有配置且保存时回写，竞态
   - 探活与拉起都经 [`runtime.ts`](runtime.ts)，这里不直接碰 `CpaProcess`
 - **`route-table.ts`** —— 路由表（声明式数据，16 条）。
   - 导出：`buildRoutes` / 类型 `RouteDeps`

@@ -98,6 +98,24 @@ export function managedPluginsDir(): string {
 }
 
 /**
+ * **本地补丁件**的目录（与 `plugins/` 同层，但**不在**它里面）。
+ *
+ * 为什么要有这一层：渠道插件的更新是「清空 `plugins/` 再解压」（`wipeOnReplace`），
+ * 用户手放进 `plugins/` 的补丁 dll 会在下一次「更新」时被静默冲掉 —— 而那份补丁
+ * 往往是针对上游还没修的 bug（2026-10-21 workbuddy 11-128 实例）。放这里：
+ *
+ * - **它不属于任何下载来源**，`extract()` 与 `wipeOnReplace` 都碰不到它；
+ * - **目录即清单**：里面有什么文件，就是当前生效着哪些本地补丁，不需要登记；
+ * - 回放由 [install.ts](install.ts) 的 `replayOverrides()` 负责 —— 每次渠道插件
+ *   解压完成后，把这里的文件覆盖进 `plugins/`。
+ *
+ * 退役 = 从本目录删掉那个文件 + 面板点一次「更新」。
+ */
+export function managedOverridesDir(): string {
+  return join(managedCpaDir(), 'overrides')
+}
+
+/**
  * 托管 CPA 的**启动输出**落点。
  *
  * 为什么要有这个文件：CPA 自己打印的失败原因（配置代际被拒、端口被占）

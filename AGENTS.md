@@ -146,6 +146,12 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 通路已存在，缺的是渠道插件没填值（实测 72 条 0 条带值）。
       删表判据是「**实测响应体带上字段**」，不是上游源码里有 →
       [决策记录](.agents/notes/2026-10-06-why-manual-table-remains.md)。
+- [ ] **workbuddy 11-128 本地补丁退役（等上游 PR #46 发版）** —— 补丁 dll 已进托管
+      `overrides/`（每次渠道更新后自动叠回），`stream_head_timeout: 5` 已固化进托管配置
+      （退役时**保留**，防未来一切请求级风控的级联）。上游 [PR #46](https://github.com/mmqz/cpa-multi-plugins/pull/46)
+      合并发版后：删 `overrides/workbuddy.dll` → 面板点一次「更新」→ 完事。
+      背景：`E:\新下载\workbuddy-11-128-fix\README.md`（补丁包自述）。
+      每次更新日志里的 `override` 步就是「补丁还压着官方」的提醒。
 - [ ] **Trae 侧 12 条既无窗口也无图像能力** —— 按「渠道侧证据不足」留空走兜底；
       别搬 WorkBuddy/ZCode 的值 → [channels 手册](src/channels/README.md)。
 - [ ] **待真机复验：对话界面两个座位 + 裸名** —— 组内只有裸名、选择器左侧余额读数
