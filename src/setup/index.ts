@@ -14,6 +14,7 @@ export {
   managedCpaDir,
   managedExePath,
   managedConfigPath,
+  managedOverridesDir,
   managedPluginsDir,
   managedStartupLogPath,
 } from './paths.ts'
@@ -36,12 +37,14 @@ export { installSource } from './install.ts'
 export type { InstallDeps, InstallOutcome, SetupStep } from './install.ts'
 export {
   CONFIG_VERSION,
+  STREAM_HEAD_TIMEOUT,
   generateApiKey,
   generateSecretKey,
   looksLikeBcrypt,
   patchAccessApiKeys,
   patchModelAlias,
   patchServerHost,
+  patchStreamHeadTimeout,
   readConfigVersion,
   readSecretKeyFromConfig,
   renderConfig,

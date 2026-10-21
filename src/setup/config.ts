@@ -81,6 +81,25 @@ export interface RenderConfigInput {
 export const CONFIG_VERSION = 8
 
 /**
+ * `plugins.configs.workbuddy.stream_head_timeout` 的固化值（秒）。
+ *
+ * ⚠️ **这是上游自 0.9.34 就声明的正式字段**（workbuddy 插件 `ConfigFields` 里的
+ * `stream_head_timeout`），不是任何本地补丁私有的 —— 所以官方 dll 上同样生效、无害。
+ *
+ * 它开启 `streamHeadGate`：首事件之前的失败走**同步路径**，上游的 HTTP 状态码
+ * 得以穿过插件→宿主的字符串边界到达宿主的分类器。没有它，流式失败一律变成
+ * 无状态的 in-band 文本错误，宿主只能按**凭据故障**处理 —— 一个请求被风控
+ * （如 2026-10-21 的 workbuddy 11-128）就会把整个账号池轮换 + 冷却一遍，
+ * 后续请求 `503 auth_unavailable` 级联数分钟。5 秒是补丁包 README 实测可用的值。
+ *
+ * 为什么固化进托管配置而不是留给用户手补：这个值**长期有价值**（防的是未来一切
+ * 请求级风控的级联，与 11-128 本身是否已修无关），而 `renderConfig` 只在配置
+ * 不存在时写一次、老机器的配置里没有它 —— 所以补写路（{@link patchStreamHeadTimeout}）
+ * 与生成路（`renderConfig`）都要带上，缺一就有一种机器永远拿不到它。
+ */
+export const STREAM_HEAD_TIMEOUT = 5
+
+/**
  * 从 YAML 文本里取顶层的 `config-version`。
  *
  * 只做朴素正则，不引 YAML 解析器（插件保持零依赖）：目标行是**顶格**的
@@ -111,12 +130,17 @@ export function readConfigVersion(text: string): number | undefined {
  * - `oauth.model-alias` 把同名模型拆成「渠道 / 模型」唯一值 —— 没有它，
  *   CPA 会在所有供给该模型的渠道之间轮询，跨渠道消耗别的号（见 `../model-alias.ts`）；
  * - `plugins.enabled: true` + `dir: "plugins"` 让插件机制生效；
- * - `plugins.configs.<渠道>.enabled: true` **逐个**启用，见 {@link RenderConfigInput.pluginIds}。
+ * - `plugins.configs.<渠道>.enabled: true` **逐个**启用，见 {@link RenderConfigInput.pluginIds}；
+ * - `plugins.configs.workbuddy.stream_head_timeout` 固化写 5 —— 见 {@link STREAM_HEAD_TIMEOUT}。
  */
 export function renderConfig(input: RenderConfigInput): string {
   const channelLines = [...input.pluginIds]
     .sort()
-    .flatMap((id) => [`    ${id}:`, '      enabled: true'])
+    .flatMap((id) => [
+      `    ${id}:`,
+      '      enabled: true',
+      ...(id === 'workbuddy' ? [`      stream_head_timeout: ${String(STREAM_HEAD_TIMEOUT)}`] : []),
+    ])
   const aliasBlock = input.aliases === undefined ? [] : renderAliasYaml(input.aliases).split('\n')
   const accessBlock =
     typeof input.apiKey === 'string' && input.apiKey !== ''
@@ -252,6 +276,91 @@ export function patchServerHost(): boolean {
       .map((line) => /^([ \t]+)(?![ \t]*#)\S/.exec(line)?.[1])
       .find((value) => value !== undefined) ?? '  '
   lines.splice(head + 1, 0, `${indent}host: "127.0.0.1"`)
+  return writeConfig(lines.join('\n'))
+}
+
+/**
+ * 把 `plugins.configs.workbuddy` 段下的 `stream_head_timeout` 补写进**已有**的配置。
+ *
+ * 为什么需要单独一条路：{@link renderConfig} 只在「配置文件不存在」时写 ——
+ * 老机器的配置（以及被 CPA 回写过整份缩进的配置）里没有这一行，11-128 这类
+ * 请求级风控就会毒死整个账号池（2026-10-21 实例）。与 {@link patchServerHost} /
+ * {@link patchAccessApiKeys} 同款纪律：只动一个片段、找不到锚点就放弃、
+ * **绝不重写整份文件**。
+ *
+ * 三种形状三种处置：
+ * - 没有 `plugins:` 段或 `configs:` 子段 → 看不懂的形状，放弃且不改文件
+ *   （生成路负责全新配置，这里只管已有配置）；
+ * - 有 `workbuddy:` 子段但缺 `stream_head_timeout` → 段内补（**缩进跟随段内既有键**，
+ *   与 {@link patchServerHost} 的缩进坑同源 —— CPA 回写用 4 空格，缩进跳变会让
+ *   整份配置非法且零信号）；
+ * - 已有 `stream_head_timeout`（含手改过的别的值）→ **一字节不动**：用户显式
+ *   配过这个值（含显式写 0 关掉），替用户改回去等于越权。
+ *
+ * ⚠️ **调用时机是「CPA 未运行时」**（与 {@link patchServerHost} 同理）：
+ * CPA 运行中持有该文件且会在保存时回写，运行中改它与它抢写是竞态。
+ *
+ * @returns 是否真的改写了文件。
+ */
+export function patchStreamHeadTimeout(): boolean {
+  let content: string
+  try {
+    content = readFileSync(managedConfigPath(), 'utf8')
+  } catch {
+    return false
+  }
+  const PLUGINS_HEAD = /^plugins:[ \t]*$/mu
+  if (!PLUGINS_HEAD.test(content)) return false
+  const lines = content.split('\n')
+  const pluginsHead = lines.findIndex((line) => PLUGINS_HEAD.test(line))
+
+  /**
+   * 逐层下探：`plugins:` → `configs:`（第一层缩进）→ `workbuddy:`（第二层缩进）。
+   * 每层的范围到下一个**同层或更浅**的键为止；`configs:` 或 `workbuddy:` 找不到
+   * 都算看不懂的形状，放弃。
+   */
+  const findChild = (parent: number, pattern: RegExp): number => {
+    for (let i = parent + 1; i < lines.length; i++) {
+      const line = lines[i] ?? ''
+      if (/^[^\s#]/.test(line)) break
+      if (pattern.test(line)) return i
+    }
+    return -1
+  }
+  const configsHead = findChild(pluginsHead, /^[ \t]+configs:[ \t]*$/)
+  if (configsHead === -1) return false
+  const wbHead = findChild(configsHead, /^[ \t]+workbuddy:[ \t]*$/)
+  if (wbHead === -1) return false
+
+  /** `workbuddy:` 子段的范围：到下一个同缩进键或更浅的键为止。 */
+  const wbIndent = /^([ \t]+)/.exec(lines[wbHead] ?? '')?.[1] ?? '  '
+  let wbEnd = lines.length
+  for (let i = wbHead + 1; i < lines.length; i++) {
+    const line = lines[i] ?? ''
+    if (line.trim() === '' || /^[ \t]*#/.test(line)) continue
+    const indent = /^([ \t]+)/.exec(line)?.[1] ?? ''
+    if (indent.length <= wbIndent.length) {
+      wbEnd = i
+      break
+    }
+  }
+  const section = lines.slice(wbHead + 1, wbEnd)
+  // 已有该键（任何值，含 0）→ 用户或生成路的决定，不动。
+  if (section.some((line) => /^[ \t]+stream_head_timeout:[ \t]/.test(line))) return false
+
+  /**
+   * 缩进跟随子段内第一个非注释键；空子段退回 `workbuddy:` 缩进再加两格。
+   */
+  const indent =
+    section
+      .map((line) => /^([ \t]+)(?![ \t]*#)\S/.exec(line)?.[1])
+      .find((value) => value !== undefined) ?? `${wbIndent}  `
+  /** 插在子段内最后一个非空行之后，段尾空行留在补块之后（与 patchAccessApiKeys 同款）。 */
+  let insertAt = wbHead + 1
+  for (let i = wbHead + 1; i < wbEnd; i++) {
+    if ((lines[i] ?? '').trim() !== '') insertAt = i + 1
+  }
+  lines.splice(insertAt, 0, `${indent}stream_head_timeout: ${String(STREAM_HEAD_TIMEOUT)}`)
   return writeConfig(lines.join('\n'))
 }
 
