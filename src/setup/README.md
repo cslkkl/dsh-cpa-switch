@@ -8,7 +8,8 @@
 
 - **`paths.ts`** —— 插件自己的运行时布局与下载源。
   - 导出：`SOURCES` / `SOURCE_KEYS` / `managedCpaDir` / `managedExePath` /
-    `managedConfigPath` / `managedPluginsDir` / `managedStartupLogPath` / 类型 `SourceKey`
+    `managedConfigPath` / `managedPluginsDir` / `managedOverridesDir` /
+    `managedStartupLogPath` / 类型 `SourceKey`
   - **家目录解析不在这里** —— 认 `DSH_HOME` 的那一层在 [`../paths.ts`](../paths.ts)
   - exe、`config.yaml`、`plugins/` **刻意同层** —— CPA 的 `plugins.dir` 相对工作目录解析
   - 每个来源自己声明**解压落点**（`targetDir`）与**能不能整目录替换**（`wipeOnReplace`）：
@@ -29,6 +30,12 @@
   - ⚠️ **本层不碰 CPA 进程**：Windows 上被加载的 dll 改不了名，所以「先停 CPA」
     由调用方（[../ops/plugin-update.ts](../ops/plugin-update.ts)）做；这里只在下手失败时如实报错
   - 安装的三件事（查 release / 下载 / 解压）**可注入**，判据因此不必真下 17 MB
+  - **overrides 回放**：渠道解压成功后把 [managedOverridesDir](paths.ts)（`cpa/overrides/`）
+    里的 `*.dll` 覆盖进 `plugins/`，每文件一步 `override` 上报、结果带在
+    `InstallOutcome.overrides`。渠道来源独占 `plugins/` 且**清空再解压**，用户手放的
+    补丁 dll（针对上游未修的 bug，2026-10-21 workbuddy 11-128）每次更新都会被冲掉；
+    放 `overrides/` 则官方更新照常跑、补丁自动叠回。**退役 = 删 override 文件 +
+    面板点一次「更新」**（只删文件不会变回官方版 —— 补丁已盖在 `plugins/` 里）
 - **`prepare.ts`** —— 环境准备的主流程：逐来源安装 → 写配置 → 探一次就位情况。
   - 导出：`prepare` / 类型 `PrepareInput` / `PrepareResult`
   - ⚠️ **「已有就跳过」不在这里** —— 它在 `install.ts` 里（见上）；本文件只管顺序与配置
@@ -39,8 +46,9 @@
     第四条 `update`（换某个来源到上游最新版）与 `run` **共用同一把运行态锁**
   - ⚠️ 换版本**只能由用户显式触发**：上游随时可能改行为，静默升级等于把上游的风险灌给用户（F5）
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
-  - 导出：`CONFIG_VERSION` / `readConfigVersion` / `renderConfig` / `patchModelAlias` /
-    `patchServerHost` / `patchAccessApiKeys` / `writeConfig` / `generateSecretKey` /
+  - 导出：`CONFIG_VERSION` / `STREAM_HEAD_TIMEOUT` / `readConfigVersion` / `renderConfig` /
+    `patchModelAlias` / `patchServerHost` / `patchStreamHeadTimeout` /
+    `patchAccessApiKeys` / `writeConfig` / `generateSecretKey` /
     `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`
   - ⚠️ `CONFIG_VERSION` 是上游的**硬校验**值（不是 `8` 就拒绝启动，没有降级兼容）。
     它与 CPA 的**软件版本号没有映射关系** —— 上游不存在「版本 → 代际」的表，
@@ -62,6 +70,13 @@
     段内补（缩进跟随）、**已有 `api-keys` 一字节不动**（那是用户的密钥清单）、
     空密钥 / 含引号换行的值一律不写（fail-open + boot 留 warn）——
     [决策记录](../../.agents/notes/2026-10-11-access-api-keys-enforcement.md)
+  - ⚠️ `renderConfig` / `patchStreamHeadTimeout` 把
+    `plugins.configs.workbuddy.stream_head_timeout: 5` **固化**进托管配置
+    （`STREAM_HEAD_TIMEOUT`）。这是上游 0.9.34+ 的正式字段（官方 dll 上同样生效），
+    开启 `streamHeadGate` 让流式失败保住 HTTP 状态码 —— 没有它，一次请求级风控
+    会被宿主当凭据故障，轮换 + 冷却整个账号池（级联 503，2026-10-21 workbuddy
+    11-128 实例）。补齐路纪律同上：只补 `workbuddy:` 子段内缺失的键、已有值
+    （含显式 0）一字节不动、`configs:` / `workbuddy:` 找不到就放弃
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
   - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
     `listPluginIds` / `sourcePresent` / `removeDir` / `inspect` / `humanSize` / 类型

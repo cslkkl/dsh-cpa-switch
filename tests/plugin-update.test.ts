@@ -332,3 +332,93 @@ describe('安装记录文件', () => {
     expect(Object.keys(raw.sources ?? {})).toEqual(['plugins'])
   })
 })
+
+/**
+ * 本地补丁件（overrides）的回放（2026-10-21 批次）：
+ * 渠道来源独占 `plugins/` 且**清空再解压**，用户手放的补丁 dll 每次更新都会被
+ * 冲掉。补丁件住 `overrides/`（不属任何来源），每次渠道解压成功后叠回
+ * `plugins/` —— 官方更新照常跑，补丁自动回到位。
+ */
+describe('installSource：overrides 回放', () => {
+  let overridesDir = ''
+
+  beforeEach(() => {
+    overridesDir = join(home, '.dsh', 'cpa-panel', 'runtime', 'cpa', 'overrides')
+    mkdirSync(overridesDir, { recursive: true })
+  })
+
+  it('⚠️ 渠道解压成功后把 overrides/*.dll 覆盖进 plugins/，并逐步上报', async () => {
+    writeFileSync(join(overridesDir, 'workbuddy.dll'), 'patched')
+    const steps: string[] = []
+    const outcome = await installSource('plugins', {
+      force: true,
+      ...fakeDownload(),
+      extract: async () => ({ ok: true }),
+      onStep: (step) => steps.push(step.phase),
+    })
+    expect(outcome.ok).toBe(true)
+    expect(existsSync(join(pluginsDir, 'workbuddy.dll'))).toBe(true)
+    expect(readFileSync(join(pluginsDir, 'workbuddy.dll'), 'utf8')).toBe('patched')
+    // 面板能看到这次叠回了什么（也是「override 还在」的提醒）
+    expect(steps).toContain('override')
+    expect(outcome.overrides).toEqual(['workbuddy.dll'])
+  })
+
+  it('⚠️ 清空再解压之后补丁仍在 —— 这正是回放存在的意义', async () => {
+    writeFileSync(join(overridesDir, 'workbuddy.dll'), 'patched')
+    // 模拟上一版有官方 workbuddy.dll：替换路径会把它连同整个目录清掉
+    writeFileSync(join(pluginsDir, 'workbuddy.dll'), 'official-old')
+    const outcome = await installSource('plugins', {
+      force: true,
+      ...fakeDownload(),
+      extract: async () => ({ ok: true }),
+    })
+    expect(outcome.ok).toBe(true)
+    // 清空发生过（旧内容没了），补丁版本叠回来了
+    expect(readFileSync(join(pluginsDir, 'workbuddy.dll'), 'utf8')).toBe('patched')
+  })
+
+  it('overrides 目录不存在（无补丁）时一切照旧', async () => {
+    const outcome = await installSource('plugins', {
+      force: true,
+      ...fakeDownload(),
+      extract: async () => ({ ok: true }),
+    })
+    expect(outcome.ok).toBe(true)
+    expect(outcome.overrides).toBeUndefined()
+  })
+
+  it('非 .dll 文件不回放（目录不是杂物箱的入口）', async () => {
+    writeFileSync(join(overridesDir, 'README.md'), 'note')
+    writeFileSync(join(overridesDir, 'WORKBUDDY.DLL'), 'patched-upper')
+    const outcome = await installSource('plugins', {
+      force: true,
+      ...fakeDownload(),
+      extract: async () => ({ ok: true }),
+    })
+    expect(existsSync(join(pluginsDir, 'README.md'))).toBe(false)
+    expect(readFileSync(join(pluginsDir, 'WORKBUDDY.DLL'), 'utf8')).toBe('patched-upper')
+    expect(outcome.overrides).toEqual(['WORKBUDDY.DLL'])
+  })
+
+  it('cpa 本体来源不回放（overrides 只与渠道插件同层共命）', async () => {
+    writeFileSync(join(overridesDir, 'cli-proxy-api.exe'), 'patched-exe')
+    const steps: string[] = []
+    const outcome = await installSource('cpa', {
+      force: true,
+      findAsset: async () => ({
+        tag: 'v9.9.9',
+        name: 'CLIProxyAPI_9.9.9_windows_amd64.zip',
+        url: 'https://example.invalid/x.zip',
+        size: 1,
+        digest: 'sha256:deadbeef',
+      }),
+      download: async () => ({ path: join(home, 'x.zip'), sha256: 'deadbeef', size: 1 }),
+      extract: async () => ({ ok: true }),
+      onStep: (step) => steps.push(step.phase),
+    })
+    expect(outcome.ok).toBe(true)
+    expect(steps).not.toContain('override')
+    expect(outcome.overrides).toBeUndefined()
+  })
+})

@@ -11,13 +11,21 @@
  * @module dsh-cpa-switch/boot
  */
 
+import { mkdirSync } from 'node:fs'
+
 import { ensureApiKey, resolveApiKey } from './credentials.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import type { PluginConfig } from './config.ts'
 import type { CpaRuntime } from './runtime.ts'
 import type { Operations } from './ops/index.ts'
 import type { SyncResult } from './route-registry.ts'
-import { inspect, patchAccessApiKeys, patchServerHost } from './setup/index.ts'
+import {
+  inspect,
+  managedOverridesDir,
+  patchAccessApiKeys,
+  patchServerHost,
+  patchStreamHeadTimeout,
+} from './setup/index.ts'
 import type { SetupSession } from './setup/index.ts'
 
 /** 生命周期流程的依赖。 */
@@ -126,6 +134,34 @@ export async function runBoot(deps: BootDeps): Promise<void> {
       }
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: access.api-keys 补齐失败（不影响启动）: %o', error)
+    }
+
+    /**
+     * **流式失败的状态码保真（2026-10-21 workbuddy 11-128 批次）**：
+     * 老配置缺 `stream_head_timeout` 时，流式失败在插件→宿主边界上丢掉 HTTP
+     * 状态码，宿主把请求级风控当凭据故障，轮换 + 冷却整个账号池（级联 503）。
+     * 字段是上游 0.9.34+ 的正式配置（官方 dll 上同样生效），值与理由见
+     * `setup/config.ts` 的 `STREAM_HEAD_TIMEOUT`。已有值（含显式 0）一字节不动。
+     */
+    try {
+      if (patchStreamHeadTimeout()) {
+        deps.logger?.warn?.(
+          'cpa-panel: 托管配置缺 plugins.configs.workbuddy.stream_head_timeout，已补 5（流式失败保住状态码，防整池冷却级联）',
+        )
+      }
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: stream_head_timeout 补齐失败（不影响启动）: %o', error)
+    }
+
+    /**
+     * **`overrides\` 预建（2026-10-21 批次）**：它只在「用户往里放补丁 dll」时
+     * 才有内容，机制本身是静默的 —— 空目录就是它的可见形态，兼作「补丁往哪放」
+     * 的提示。已存在时不碰（里面的东西一个字节不动）。
+     */
+    try {
+      mkdirSync(managedOverridesDir(), { recursive: true })
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: overrides 目录预建失败（不影响启动）: %o', error)
     }
   }
   if (!portBusy && preflight.manageLifecycle && missing.length > 0) {

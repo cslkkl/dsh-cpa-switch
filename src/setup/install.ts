@@ -23,11 +23,11 @@
  * @module dsh-cpa-switch/setup/install
  */
 
-import { copyFileSync, existsSync, renameSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { rememberInstall } from '../state.ts'
-import { SOURCES, managedCpaDir, managedExePath } from './paths.ts'
+import { SOURCES, managedCpaDir, managedExePath, managedOverridesDir } from './paths.ts'
 import type { SourceKey } from './paths.ts'
 import { download, extract, findAsset, removeDir, sourcePresent, verify } from './download.ts'
 import type { Asset, Downloaded } from './download.ts'
@@ -54,6 +54,8 @@ export interface InstallOutcome {
   readonly name?: string
   /** sha256 校验跑过没有（老 release 没给 digest 时是 `false`）。 */
   readonly verified?: boolean
+  /** 渠道安装后从 `overrides/` 叠回 `plugins/` 的本地补丁件（文件名）。 */
+  readonly overrides?: string[]
   /** 失败时的阶段。 */
   readonly phase?: string
   readonly error?: string
@@ -129,6 +131,49 @@ function discardBackup(key: SourceKey): void {
   } catch {
     /* 删不掉只是留个文件，不该让一次成功的安装报失败 */
   }
+}
+
+/**
+ * 渠道插件解压成功后，把 `overrides/` 里的本地补丁件覆盖进 `plugins/`。
+ *
+ * 用途是**临时覆盖**：上游偶尔有问题（未修 / 修复未发版）时，补丁 dll 手放进
+ * {@link managedOverridesDir}，每次「更新」清空 `plugins/` 后由这里叠回官方包
+ * 之上；上游修好后删文件 + 再点一次「更新」即退役。
+ *
+ * - 只在 `key === 'plugins'` 且**解压已成功**时跑 —— 本体来源没有这层关系；
+ * - 每覆盖一个文件记一步 `override`（面板能看到，也是「override 还压着官方」的
+ *   提醒 —— 忘了删它会一直盖住上游修复）;
+ * - 失败**不算安装失败**：官方包已就位，补丁没叠上只是回到「上游原样」，
+ *   如实报在返回值里，由调用方决定怎么提示。
+ */
+function replayOverrides(
+  key: SourceKey,
+  step: (phase: string, detail?: Record<string, unknown>) => void,
+): string[] {
+  if (key !== 'plugins') return []
+  const overridesDir = managedOverridesDir()
+  let names: string[]
+  try {
+    names = readdirSync(overridesDir).filter((name) => name.toLowerCase().endsWith('.dll'))
+  } catch {
+    return [] // 目录不存在 = 没有任何本地补丁，常态
+  }
+  const replayed: string[] = []
+  for (const name of names) {
+    try {
+      /**
+       * ⚠️ 回放自己保证落点目录存在：正常流程里 `extract()` 刚建好它，但回放
+       * 不该依赖那个先后 —— 目录缺了就建，少一个隐式时序依赖。
+       */
+      mkdirSync(SOURCES.plugins.targetDir(), { recursive: true })
+      copyFileSync(join(overridesDir, name), join(SOURCES.plugins.targetDir(), name))
+      replayed.push(name)
+      step('override', { name })
+    } catch {
+      /* 单个失败不影响其余；最常见原因是 CPA 还在跑、dll 被占用 —— 安装本身已成功 */
+    }
+  }
+  return replayed
 }
 
 /**
@@ -213,6 +258,8 @@ export async function installSource(
   }
 
   if (replacing) discardBackup(key)
+  /** 渠道解压完成后叠回本地补丁件（目录空 = 空数组，无动作）。 */
+  const overrides = replayOverrides(key, step)
   rememberInstall(key, {
     tag: asset.tag,
     ...(asset.name === '' ? {} : { name: asset.name }),
@@ -222,5 +269,6 @@ export async function installSource(
     tag: asset.tag,
     name: asset.name,
     verified: check.skipped !== true,
+    ...(overrides.length > 0 ? { overrides } : {}),
   }
 }

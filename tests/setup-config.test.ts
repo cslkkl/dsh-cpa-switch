@@ -9,6 +9,7 @@ import {
   looksLikeBcrypt,
   patchAccessApiKeys,
   patchServerHost,
+  patchStreamHeadTimeout,
   readConfigVersion,
   renderConfig,
 } from '../src/setup/config.ts'
@@ -59,6 +60,25 @@ describe('renderConfig', () => {
     const withExtra = renderConfig({ port: 8317, secretKey: 'x', pluginIds: ['kimi'] })
     expect(withExtra).toContain('    kimi:')
     expect(withExtra).not.toContain('    workbuddy:')
+  })
+
+  /**
+   * `stream_head_timeout` 固化在 workbuddy 子段下（2026-10-21 批次）：
+   * 值挂在**启用行之内**（更深缩进），且只跟 workbuddy 走 —— 别的渠道不写。
+   */
+  it('⚠️ workbuddy 子段固化 stream_head_timeout: 5，且只在 workbuddy 下', () => {
+    const lines = yaml.split('\n')
+    const wbIndex = lines.indexOf('    workbuddy:')
+    expect(wbIndex).toBeGreaterThanOrEqual(0)
+    expect(lines[wbIndex + 1]).toBe('      enabled: true')
+    expect(lines[wbIndex + 2]).toBe('      stream_head_timeout: 5')
+    // 只跟 workbuddy 走
+    expect(lines.filter((line) => line.includes('stream_head_timeout'))).toHaveLength(1)
+  })
+
+  it('清单里没有 workbuddy 时整份配置不出现该键', () => {
+    const noWb = renderConfig({ port: 8317, secretKey: 'x', pluginIds: ['kimi'] })
+    expect(noWb).not.toContain('stream_head_timeout')
   })
 })
 
@@ -495,6 +515,141 @@ describe('patchAccessApiKeys', () => {
     const inline = `${BASE}access: # custom\n  allow-localhost: true\n`
     seed(inline)
     expect(patchAccessApiKeys('call-key-1')).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(inline)
+  })
+})
+
+/**
+ * 老机器的流式状态码保真补齐：`plugins.configs.workbuddy.stream_head_timeout`
+ * 只在「配置不存在」时由 {@link renderConfig} 写 —— 老机器的配置里没有这一行，
+ * 流式失败会丢掉 HTTP 状态码，宿主把请求级风控当凭据故障轮换整池（2026-10-21
+ * workbuddy 11-128 实例）。补丁走与 {@link patchServerHost} 同款的外科手术纪律。
+ */
+describe('patchStreamHeadTimeout', () => {
+  let home: string
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
+
+  beforeEach(() => {
+    home = mkdtemp()
+    mkdirSync(join(home, 'cpa-panel', 'runtime', 'cpa'), { recursive: true })
+  })
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 隔离 DSH_HOME（现读）并返回临时目录。 */
+  function mkdtemp(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'cpa-setup-sht-'))
+    process.env.DSH_HOME = dir
+    return dir
+  }
+
+  const BASE = [
+    'config-version: 8',
+    'server:',
+    '  host: "127.0.0.1"',
+    '  port: 8317',
+    '',
+    'management:',
+    '  secret-key: "plain-secret"',
+    '',
+    'plugins:',
+    '  enabled: true',
+    '  dir: "plugins"',
+    '  configs:',
+    '    workbuddy:',
+    '      enabled: true',
+    '    trae:',
+    '      enabled: true',
+    '',
+    'oauth:',
+    '  auth-dir: "~/.cli-proxy-api"',
+    '',
+  ].join('\n')
+
+  const seed = (content: string): void => {
+    writeFileSync(configPath(), content, 'utf8')
+  }
+
+  it('⚠️ workbuddy 子段缺键时补上 5，且只加这一行', () => {
+    seed(BASE)
+    expect(patchStreamHeadTimeout()).toBe(true)
+    const after = readFileSync(configPath(), 'utf8')
+    const lines = after.split('\n')
+    const wbIndex = lines.indexOf('    workbuddy:')
+    expect(lines[wbIndex + 1]).toBe('      enabled: true')
+    expect(lines[wbIndex + 2]).toBe('      stream_head_timeout: 5')
+    // 落点在 workbuddy 段内、trae 段之前
+    expect(lines.indexOf('    trae:')).toBeGreaterThan(wbIndex + 2)
+    // 其余内容原样 —— 外科手术
+    expect(after).toContain('secret-key: "plain-secret"')
+    expect(after).toContain('auth-dir: "~/.cli-proxy-api"')
+    expect(lines.filter((line) => line.includes('stream_head_timeout'))).toHaveLength(1)
+  })
+
+  it('⚠️ 已有该键（任何值，含显式 0）时一字节不动', () => {
+    const withZero = BASE.replace(
+      '    workbuddy:\n      enabled: true',
+      '    workbuddy:\n      enabled: true\n      stream_head_timeout: 0',
+    )
+    seed(withZero)
+    expect(patchStreamHeadTimeout()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(withZero)
+  })
+
+  it('⚠️ 没有 plugins: 段时放弃且不改文件', () => {
+    const noPlugins =
+      BASE.slice(0, BASE.indexOf('plugins:')) + 'oauth:\n  auth-dir: "~/.cli-proxy-api"\n'
+    seed(noPlugins)
+    expect(patchStreamHeadTimeout()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(noPlugins)
+  })
+
+  it('⚠️ configs: 或 workbuddy: 子段缺失时放弃（看不懂的形状绝不重写）', () => {
+    const noConfigs = BASE.replace('  configs:\n', '')
+    seed(noConfigs)
+    expect(patchStreamHeadTimeout()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(noConfigs)
+
+    const noWb = BASE.replace('    workbuddy:\n      enabled: true\n', '')
+    seed(noWb)
+    expect(patchStreamHeadTimeout()).toBe(false)
+    expect(readFileSync(configPath(), 'utf8')).toBe(noWb)
+  })
+
+  it('⚠️ 配置文件不存在时不创建（全新安装路径由 renderConfig 负责）', () => {
+    expect(patchStreamHeadTimeout()).toBe(false)
+    expect(() => readFileSync(configPath(), 'utf8')).toThrow()
+  })
+
+  /**
+   * 与 server.host 同坑：CPA 回写用 4 空格，补进去的行必须跟随段内既有键的缩进，
+   * 缩进跳变（2 → 4）会让整份配置非法且零信号。
+   */
+  it('⚠️ 段内既有键是 4 空格时，补进去的行也必须是 4 空格（缩进跳变 = 非法 YAML）', () => {
+    const fourSpace = [
+      'config-version: 8',
+      'plugins:',
+      '    enabled: true',
+      '    configs:',
+      '        workbuddy:',
+      '            enabled: true',
+      '',
+    ].join('\n')
+    seed(fourSpace)
+    expect(patchStreamHeadTimeout()).toBe(true)
+    const after = readFileSync(configPath(), 'utf8')
+    const lines = after.split('\n')
+    const wbIndex = lines.indexOf('        workbuddy:')
+    expect(lines[wbIndex + 1]).toBe('            enabled: true')
+    expect(lines[wbIndex + 2]).toBe('            stream_head_timeout: 5')
+  })
+
+  it('plugins: 头带行内内容时放弃（朴素正则不猜结构）', () => {
+    const inline = BASE.replace('plugins:', 'plugins: # managed')
+    seed(inline)
+    expect(patchStreamHeadTimeout()).toBe(false)
     expect(readFileSync(configPath(), 'utf8')).toBe(inline)
   })
 })
