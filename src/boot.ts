@@ -11,6 +11,8 @@
  * @module dsh-cpa-switch/boot
  */
 
+import { mkdirSync } from 'node:fs'
+
 import { ensureApiKey, resolveApiKey } from './credentials.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import type { PluginConfig } from './config.ts'
@@ -19,6 +21,7 @@ import type { Operations } from './ops/index.ts'
 import type { SyncResult } from './route-registry.ts'
 import {
   inspect,
+  managedOverridesDir,
   patchAccessApiKeys,
   patchServerHost,
   patchStreamHeadTimeout,
@@ -148,6 +151,17 @@ export async function runBoot(deps: BootDeps): Promise<void> {
       }
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: stream_head_timeout 补齐失败（不影响启动）: %o', error)
+    }
+
+    /**
+     * **`overrides\` 预建（2026-10-21 批次）**：它只在「用户往里放补丁 dll」时
+     * 才有内容，机制本身是静默的 —— 空目录就是它的可见形态，兼作「补丁往哪放」
+     * 的提示。已存在时不碰（里面的东西一个字节不动）。
+     */
+    try {
+      mkdirSync(managedOverridesDir(), { recursive: true })
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: overrides 目录预建失败（不影响启动）: %o', error)
     }
   }
   if (!portBusy && preflight.manageLifecycle && missing.length > 0) {
