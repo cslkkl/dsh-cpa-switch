@@ -30,6 +30,8 @@ const JUDGEMENT_FILES = new Set([
   'src/model-alias.ts',
   'src/model-caps.ts',
   'src/action-outcome.ts',
+  'src/intent-drift.ts',
+  'src/relogin.ts',
 ])
 
 /** 判据允许的依赖：契约层与渠道层（两者都是纯的）。 */

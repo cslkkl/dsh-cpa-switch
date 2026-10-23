@@ -456,6 +456,7 @@
 | `/api/v1/cpa/action`           | POST     | `{plugin, kind, authIndex}` → 签到 / 任务                                                                          |
 | `/api/v1/cpa/account-select`   | POST     | `{plugin, authIndex}` → **选择账号**（启用它，同渠道其余自动禁用）                                                 |
 | `/api/v1/cpa/account-enabled`  | POST     | `{plugin, authIndex, enabled}` → 单个启用 / 禁用                                                                   |
+| `/api/v1/cpa/account-remove`   | POST     | `{plugin, authIndex}` → **删除**该号的凭据文件（不可逆，拿回来必须重新授权）                                       |
 | `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                                                                    |
 | `/api/v1/cpa/account-drift`    | GET/POST | GET 只探不写（`?plugin=`，**便宜探针**）；POST `{plugin}` → 把**被上游重新启用**的用户禁用号禁回去（只此一个方向） |
 | `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`）                                                |

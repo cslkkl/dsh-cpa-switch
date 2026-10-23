@@ -11,11 +11,20 @@
  * @module dsh-cpa-switch/client/use-account-login
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cacheKeys } from './cache-keys.ts'
 import { authCancel, paths, startAuth } from './endpoints.ts'
 import { invalidateReads } from './read-cache.ts'
 import { useResource } from './use-resource.ts'
+
+/**
+ * 弹窗的**来意** —— 决定标题说「添加账号」还是「重新登录」。
+ *
+ * ⚠️ 两条来意在协议上是**同一件事**（同一个 `auth-url`，落盘按 uid 覆盖），
+ * 所以不分成两个 hook；但**标题必须分开**：用户点的是卡片上的「重新登录」，
+ * 弹窗却写着「添加账号」，他会以为这个号要变成第二个号。
+ */
+export type LoginIntent = 'add' | 'relogin'
 
 /**
  * 弹窗状态。
@@ -25,19 +34,30 @@ import { useResource } from './use-resource.ts'
  * - `{phase:'starting'}` —— 正在起登录
  * - `{phase:'wait', url, state}` —— 等用户去浏览器授权，正在轮询
  * - `{phase:'error', error}` —— 起登录失败
+ *
+ * 除 `null` 外都带 `intent`（见 {@link LoginIntent}）。
  */
 export type LoginState =
   | null
-  | { readonly phase: 'idle' }
-  | { readonly phase: 'starting' }
-  | { readonly phase: 'wait'; readonly url: string; readonly state: string }
-  | { readonly phase: 'error'; readonly error: string }
+  | { readonly phase: 'idle'; readonly intent: LoginIntent }
+  | { readonly phase: 'starting'; readonly intent: LoginIntent }
+  | {
+      readonly phase: 'wait'
+      readonly intent: LoginIntent
+      readonly url: string
+      readonly state: string
+    }
+  | { readonly phase: 'error'; readonly intent: LoginIntent; readonly error: string }
 
 /** 弹窗的对外形状。 */
 export interface AccountLogin {
   readonly login: LoginState
-  /** 打开弹窗（还没起登录）。 */
-  readonly open: () => void
+  /**
+   * 打开弹窗（还没起登录）。
+   *
+   * @param intent - 来意；缺省 `'add'`（工具栏那个入口）。
+   */
+  readonly open: (intent?: LoginIntent) => void
   /** 起一次登录：拿授权页地址、自动打开、进入轮询。 */
   readonly start: () => Promise<void>
   /** 关闭弹窗，顺手取消 CPA 侧的会话（别留下悬挂状态）。 */
@@ -58,6 +78,11 @@ const POLL_MS = 2500
 export function useAccountLogin(options: UseAccountLoginOptions): AccountLogin {
   const { plugin, onAuthorized } = options
   const [login, setLogin] = useState<LoginState>(null)
+  /**
+   * 这次弹窗的来意。住在 ref 里而不是从 `login` 读 ——
+   * 见 `open` 的注释：`start` 若依赖 `login`，它每次渲染都会换引用。
+   */
+  const intentRef = useRef<LoginIntent>('add')
 
   /** 正在等待授权的 `state`；不在等待时是 `undefined`。 */
   const authState = login !== null && login.phase === 'wait' ? login.state : undefined
@@ -99,15 +124,26 @@ export function useAccountLogin(options: UseAccountLoginOptions): AccountLogin {
     setLogin(null)
   }, [plugin])
 
-  const open = useCallback((): void => {
-    setLogin({ phase: 'idle' })
+  const open = useCallback((intent: LoginIntent = 'add'): void => {
+    /**
+     * 来意同时记进 ref：`start` 里**不读 state**（它会是 `idle` 那一版，
+     * 但把 state 放进 `start` 的依赖会让这个回调每次渲染都换引用）。
+     * 来意在一次会话内不会变，所以 ref 是它该住的地方。
+     */
+    intentRef.current = intent
+    setLogin({ phase: 'idle', intent })
   }, [])
 
   const start = useCallback(async (): Promise<void> => {
-    setLogin({ phase: 'starting' })
+    /**
+     * 来意在点「开始登录」那一刻**定死**：它属于这次会话，
+     * 不该跟着后续渲染里的某个变量漂（那会让标题在轮询中途换字）。
+     */
+    const intent = intentRef.current
+    setLogin({ phase: 'starting', intent })
     const result = await startAuth(plugin)
     if (!result.ok) {
-      setLogin({ phase: 'error', error: String(result.error ?? 'failed') })
+      setLogin({ phase: 'error', intent, error: String(result.error ?? 'failed') })
       return
     }
     // 顺便自动打开一次授权页 —— 但保留链接让用户能手动再点
@@ -116,7 +152,7 @@ export function useAccountLogin(options: UseAccountLoginOptions): AccountLogin {
     } catch {
       /* 弹窗被拦就算了，界面上有链接 */
     }
-    setLogin({ phase: 'wait', url: String(result.url), state: String(result.state) })
+    setLogin({ phase: 'wait', intent, url: String(result.url), state: String(result.state) })
   }, [plugin])
 
   const close = useCallback((): void => {

@@ -118,6 +118,56 @@ export const zh = {
   tasks: '任务',
   disabled: '已禁用',
   /**
+   * 这个号的凭据被上游判死，只有重新授权才能恢复。
+   *
+   * 措辞刻意说「需要」而不是「已失效」：账号本身没被封、额度也没丢
+   * （token 的 `exp` 往往还有几周），失效的只是**那一份会话**。
+   * 说「账号失效」会让用户以为余额没了。
+   */
+  needsRelogin: '需重新登录',
+  /**
+   * 标签行那一排里放不下时的完整解释（`title`）。
+   *
+   * ⚠️ **必须说清「要做什么」**：用户看到「需重新登录」的第一反应是
+   * 「在哪登」—— 所以直接指到「添加账号」那个入口。
+   */
+  needsReloginHint:
+    '这个账号的登录会话已被上游判定失效，签到和任务都不会生效。点这张卡片下方的「重新登录」重新授权一次，余额不会丢。',
+  /**
+   * 单卡上的重登按钮。
+   *
+   * ⚠️ 与工具栏的「添加账号」是**两条不同的路**（那条是加一个新号）：
+   * 这条只重新授权**这一个**已存在的号，文件名按 uid 覆盖，不会多出一个号。
+   */
+  relogin: '重新登录',
+  /**
+   * 删除账号（不可逆）。
+   *
+   * ⚠️ 按钮文案**不带**「彻底」「永久」这类形容词 —— 那读起来像营销辞令；
+   * 真正要说清的话在确认弹窗里（见 {@link removeConfirmHint}）。
+   */
+  remove: '删除',
+  /**
+   * 删除确认弹窗的标题。
+   *
+   * ⚠️ 带账号名（`{name}`）：这个动作不可逆，用户必须能核对自己点的是哪一个。
+   * 泛泛一句「确定删除吗」在最需要具体信息的那一刻什么都没说。
+   */
+  removeConfirmTitle: '删除账号「{name}」？',
+  /**
+   * 删除确认弹窗的正文。
+   *
+   * ⚠️ **必须同时说清三件事**：删的是什么（凭据文件）、后果（要重新授权一次）、
+   * 以及**替代方案**（只想让它不参与调度的话用「禁用」）。
+   * 只说「不可撤销」是**不完整**的 —— 用户不知道还有别的选择，
+   * 于是会拿一个不可逆的动作去解决一个可逆的问题。
+   */
+  removeConfirmHint:
+    '会删掉这个账号的凭据文件，之后必须重新登录一次才能拿回来（余额不会丢）。只想让它暂时不参与调度的话，用卡片上的开关禁用即可。',
+  removeConfirmAction: '确认删除',
+  /** 删除成功后的提示（带账号名，让用户核对删的是哪一个）。 */
+  removed: '已删除「{name}」',
+  /**
    * ⚠️ 曾经有个 `enabled: '已启用'` 键，**已删除**（2026-10-05）：
    * 它唯一的用途是账号卡右上角开关旁边那行「已启用」文字，而那行文字
    * 已被删掉（开关本身就是最直接的信号，写出来是重复）。
@@ -381,6 +431,18 @@ export const en: Record<LocaleKey, string> = {
   tasksAll: 'Run tasks',
   tasks: 'Tasks',
   disabled: 'Disabled',
+  /** See the Chinese table: the account itself is fine — only that session is dead. */
+  needsRelogin: 'Sign in again',
+  needsReloginHint:
+    'The upstream invalidated this account\u2019s sign-in session, so check-ins and tasks do not take effect. Use the "Sign in again" button on this card to authorize it once more; the balance is not lost.',
+  relogin: 'Sign in again',
+  /** See the Chinese table: details live in the confirmation dialog. */
+  remove: 'Delete',
+  removeConfirmTitle: 'Delete the account "{name}"?',
+  removeConfirmHint:
+    'This deletes the account\u2019s credential file, so you will have to sign in once more to get it back (the balance is not lost). If you only want it out of rotation for now, use the switch on the card instead.',
+  removeConfirmAction: 'Delete',
+  removed: 'Deleted "{name}"',
   enable: 'Enable',
   disable: 'Disable',
   enableThis: 'Enable this account',

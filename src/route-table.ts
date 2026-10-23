@@ -354,6 +354,26 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
     },
     {
       /**
+       * **删除**一个账号的凭据（不可逆）。
+       *
+       * body: `{plugin, authIndex}`。
+       *
+       * ⚠️ 与 `/account-enabled` 是**两件事**：那条只把号从调度里拿掉
+       * （文件还在，改回来就恢复），这条**删文件** —— 拿回来必须重新授权。
+       * 所以界面上它带着二次确认，且只在该号确实没救时出现。
+       *
+       * ⚠️ 判据（定位 / 回读确认 / 清意图）全在 `ops/remove.ts`，
+       * 这里只解码请求。
+       */
+      path: '/api/v1/cpa/account-remove',
+      methods: ['POST'],
+      handle: async (request) => {
+        const body = await readBody(request)
+        return json(await ops.remove.remove(String(body.plugin ?? ''), body.authIndex))
+      },
+    },
+    {
+      /**
        * 把**被上游重新启用**的用户禁用号禁回去（`GET ?plugin=` 只探不写，`POST` 执行恢复）。
        *
        * 为什么需要 POST 那一条：渠道插件自带的额度生命周期（`lifecycle_auto`，默认开）会在

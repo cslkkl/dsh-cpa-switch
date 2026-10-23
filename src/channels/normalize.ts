@@ -57,12 +57,16 @@ function isChannelName(label: string): boolean {
  * @param plugin - 渠道 id。
  * @param accountsPayload - `/accounts` 的原始返回。
  * @param creditsPayload - `/credits` 的原始返回（可为空）。
+ * @param reloginOf - 凭据名（`auth_id`）→ 是否需要重新登录。
+ *   **不传 = 不知道**（该渠道没读到 `auth-files`），此时 `needsRelogin` 留 `undefined`，
+ *   界面据此**不显示**那条提示 —— 与「知道它是好的」是两件事（见 `src/relogin.ts`）。
  * @returns 统一形状的账号数组；未知渠道返回空数组。
  */
 export function normalizeAccounts(
   plugin: string,
   accountsPayload: unknown,
   creditsPayload: unknown,
+  reloginOf?: (authId: string) => boolean | undefined,
 ): NormalizedAccount[] {
   const channel = channelOf(plugin)
   if (channel === undefined) return []
@@ -82,6 +86,14 @@ export function normalizeAccounts(
 
   return rawList.map((account) => {
     const credit = creditsMap.get(account.auth_index)
+    /**
+     * ⚠️ 键用 `authId`（凭据文件名）而不是 `authIndex`：`auth-files` 里
+     * 两列都有，但那是**两份数据源**，只有文件名是逐字节相同的那一个
+     * （`auth_index` 在上游重写文件后仍稳定，但它不是跨接口的通用标识 ——
+     * 见 `contracts/domain.ts` 的 `authId` 注释）。
+     */
+    const authId = typeof account.auth_id === 'string' ? account.auth_id : ''
+    const needsRelogin = reloginOf === undefined ? undefined : reloginOf(authId)
     return {
       authIndex: account.auth_index,
       authId: account.auth_id,
@@ -93,6 +105,7 @@ export function normalizeAccounts(
       status: account.status,
       credits: credit ?? null,
       checkin: channel.parseCheckin(account, credit),
+      ...(needsRelogin === undefined ? {} : { needsRelogin }),
     }
   })
 }

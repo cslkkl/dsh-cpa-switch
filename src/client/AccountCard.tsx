@@ -37,6 +37,23 @@ export interface AccountCardProps {
    */
   readonly onAccountDisabled: (authIndex: string, disabled: boolean) => void
   /**
+   * 用户点了本卡的「重新登录」。
+   *
+   * ⚠️ 走**渠道级**登录会话（与「添加账号」同一个），不是 per-account 的：
+   * CPA 的 `/v8/management/oauth/auth-url` 只按 provider 起会话，协议里没有
+   * 「指定重登哪一个 uid」这一位。落到哪个号由**用户在授权页登录谁**决定，
+   * 凭据文件名按 uid 覆盖 —— 所以这个回调**不需要**账号参数。
+   */
+  readonly onRelogin: () => void
+  /**
+   * 用户点了本卡的「删除」。
+   *
+   * ⚠️ 这里**不直接删**：`onAskRemove` 只是把意图（删哪一个）交给父级，
+   * 由它弹确认框。原因是这个动作不可逆，而确认框需要账号名 ——
+   * 每张卡各弹一个自己的确认框，用户切渠道时就会看到好几份并存。
+   */
+  readonly onAskRemove: () => void
+  /**
    * 一次「设为唯一」之后，把**后端确认过的整渠道状态**交给父级（按凭据文件名）。
    *
    * 为什么与 {@link onAccountDisabled} 分开而不是复用：那个的键是
@@ -75,6 +92,8 @@ export function AccountCard(props: AccountCardProps): ReactNode {
     onReload,
     onAccountDisabled,
     onAccountSelectState,
+    onRelogin,
+    onAskRemove,
     onBusyChange,
     locked,
   } = props
@@ -297,6 +316,29 @@ export function AccountCard(props: AccountCardProps): ReactNode {
        */}
       <div className={css.tagRow}>
         {account.exhausted && <Tag tone="warning">{t('exhausted')}</Tag>}
+        {/*
+         * 「需重新登录」—— 只有**知道**它要重登时才出现（`needsRelogin === true`）。
+         *
+         * ⚠️ 用 `warning` 而不是 `danger`：账号没被封、余额也没丢（token 的 `exp`
+         * 往往还有几周），失效的只是那一份会话 —— 红色会把「去登一下就好」
+         * 说成「这东西坏了」。判据与取舍见 `src/relogin.ts`。
+         *
+         * ⚠️ 这一位**必须存在**：被判死的号 `status` 仍是 `active`、
+         * `disabled` 是 `false`，面板上它和正常的号长得一模一样，
+         * 只有额度格是空的（实测 2026-10-23）。不说，用户唯一能看到的线索
+         * 是「怎么不出余额」。
+         */}
+        {account.needsRelogin === true && (
+          /*
+           * ⚠️ `title` 挂在**外层 span** 上，不挂在 `Tag` 上：官方 `Tag` 的 props
+           * 只有 `tone` / `className` / `children`，多传一个 `title` 会被
+           * **静默丢掉**（类型会挡，但挡住的只是编译期 —— 一旦有人为了「让它编译过」
+           * 而加 `as any`，那个提示就是永久消失且没有任何信号）。
+           */
+          <span title={t('needsReloginHint')}>
+            <Tag tone="warning">{t('needsRelogin')}</Tag>
+          </span>
+        )}
         {account.checkin !== undefined && (
           /*
            * ⚠️ **「未签到」是 `neutral` 灰底，不是空心描边**（2026-10-12 维护者定案）。
@@ -403,6 +445,30 @@ export function AccountCard(props: AccountCardProps): ReactNode {
        * 不放灰色的假「签到」占位：那是个点不动的装饰，会让人以为本该能签到。
        */}
       <div className={css.actions}>
+        {/*
+         * 「重新登录」—— 只在**知道这个号要重登**时出现（`needsRelogin === true`）。
+         *
+         * ⚠️ 它**不占固定位置**，这与「按钮数量只看渠道能力、不看账号数量」那条
+         * 并不冲突：那条说的是「别让按钮随**账号个数**增减」，而这一位随的是
+         * **这个号自己的状态**。缺了它，被判死的号在界面上唯一的线索就是
+         * 「额度格空着」，用户没有任何入口知道该去哪儿修（实测 2026-10-23）。
+         *
+         * ⚠️ 走的是与「添加账号」**同一个**登录会话（`accountLogin`）：
+         * 本机模式下 CPA 自己收回调、按 uid 覆盖同名凭据文件 —— 所以
+         * 「重登一个旧号」与「加一个新号」在协议上是同一件事，
+         * 分叉实现只会多出一份要维护的轮询。
+         */}
+        {account.needsRelogin === true && (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={isBusy}
+            title={t('needsReloginHint')}
+            onClick={onRelogin}
+          >
+            {t('relogin')}
+          </Button>
+        )}
         {capabilities.checkin && (
           <Button variant="outline" size="sm" disabled={isBusy} onClick={() => void run('checkin')}>
             {t('checkin')}
@@ -444,6 +510,31 @@ export function AccountCard(props: AccountCardProps): ReactNode {
             {t('select')}
           </Button>
         )}
+
+        {/*
+         * 「删除」—— 排在**最后**，且用 `ghost`。
+         *
+         * 为什么是 `ghost` 而不是与其它按钮同款的 `outline`：这一排里只有它是
+         * **不可逆**的。同款灰边框会让它看起来和「签到」「任务」一个量级，
+         * 而实际上点错一次就要重新授权（见 `removeConfirmHint` 的取舍）。
+         * `ghost` 是无边框文字样式 —— 在这里正好：它**在场但不抢注意力**。
+         *
+         * ⚠️ 位置固定（永远最后一个），不随 `needsRelogin` / `disabled` 变化：
+         * 那两个条件会影响它前面几个按钮的有无，但「删除」始终在行尾 ——
+         * 用户第二次来点它时不会因为「多了一个重登按钮」而点错位置。
+         *
+         * ⚠️ **不在这里弹确认**：确认框是渠道级的（`PluginPanel` 持有），
+         * 因为「删哪个号」要连账号名一起说，而那张弹窗只该有一份。
+         */}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={isBusy}
+          title={t('removeConfirmHint')}
+          onClick={onAskRemove}
+        >
+          {t('remove')}
+        </Button>
       </div>
     </div>
   )

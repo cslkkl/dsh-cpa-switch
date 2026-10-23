@@ -10,14 +10,14 @@
  */
 
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Modal, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/domain.ts'
 import { cacheKeys } from './cache-keys.ts'
 import { AccountCard } from './AccountCard.tsx'
 import { unitTextOf } from './credit-text.ts'
 import { emptyHintOf } from './empty-hint.ts'
-import { paths } from './endpoints.ts'
+import { paths, removeAccount } from './endpoints.ts'
 import { fmt } from './format.ts'
 import { amountWithUnit, sumCredits } from './meter-text.ts'
 import { ModelVisibility } from './ModelVisibility.tsx'
@@ -184,6 +184,22 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   })
 
   /**
+   * 「删除账号」的待确认对象 —— `null` 表示没有弹窗。
+   *
+   * ⚠️ **只存要被删的那一个**（它的 `authIndex` 与显示名）：弹窗标题要带名字，
+   * 而这个动作不可逆，说错名字比不说更糟。存整条 `account` 也行，但那样
+   * 请求回来、列表刷新时它会变成一份**过时的快照** —— 只留两个不可变的字段。
+   *
+   * ⚠️ 删除成功 / 失败 / 用户取消都要清空它，否则下次点别的号会看到**上一个**
+   * 号的名字（那是这个动作最不该出的错）。
+   */
+  const [pendingRemove, setPendingRemove] = useState<{
+    readonly authIndex: string
+    readonly nickname: string
+  } | null>(null)
+  const [removing, setRemoving] = useState(false)
+
+  /**
    * 本渠道额度单位的**文案**（`积分` / `token`）。
    *
    * 面板与卡片都不做 `'credits' | 'tokens'` → 文案的判定 —— 那件事**只有一处**：
@@ -267,9 +283,66 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     )
   }
 
-  const openLogin = useCallback((): void => {
-    accountLogin.open()
-  }, [accountLogin])
+  /**
+   * 打开登录弹窗（两处入口）。
+   *
+   * ⚠️ 两个**分开的**回调，不是一个带参数的：`onClick={openLogin}` 会把
+   * `MouseEvent` 当第一个参数喂进去（本仓已经踩过一次同类 —— `onChange`
+   * 传的是新值、不要再取反）。分成两个零参箭头，误用就不可能发生。
+   *
+   * ⚠️ 依赖是 `accountLogin.open` 而**不是整个 `accountLogin`**：那个对象
+   * 每次渲染都是新的，拿它当依赖等于这个回调每次渲染都换引用 ——
+   * 而它会被传进每一张卡片。
+   */
+  const openAddLogin = useCallback((): void => {
+    accountLogin.open('add')
+  }, [accountLogin.open])
+
+  /** 卡片上的「重新登录」：同一个会话，只是标题与来意不同。 */
+  const openRelogin = useCallback((): void => {
+    accountLogin.open('relogin')
+  }, [accountLogin.open])
+
+  /**
+   * 卡片上点了「删除」—— **只弹确认，不删**。
+   *
+   * ⚠️ 确认框住在这里而不是每张卡片各自持有：这个动作不可逆，
+   * 而「删哪个号」必须连名字一起说。每张卡各弹一个自己的框，
+   * 切渠道时就会看到好几份并存（面板不随渠道重挂载，见 `Panel` 去掉 `key` 的决策）。
+   */
+  const askRemove = useCallback((authIndex: string, nickname: string): void => {
+    setPendingRemove({ authIndex, nickname })
+  }, [])
+
+  /** 关掉确认框。**删的过程中不许关** —— 否则用户以为取消了、其实已经发出去了。 */
+  const cancelRemove = useCallback((): void => {
+    setPendingRemove((current) => (removing ? current : null))
+  }, [removing])
+
+  /**
+   * 确认删除。
+   *
+   * ⚠️ 界面**不乐观更新**：删是不可逆的，而「请求成功」不等于「文件真没了」。
+   * 成功后只作废缓存让列表重读（`removeAccount` 里已作废），不手动从数组里抹掉 ——
+   * 拿真实结果说话（F33 的同一口径）。
+   */
+  const confirmRemove = useCallback(async (): Promise<void> => {
+    const target = pendingRemove
+    if (target === null) return
+    setRemoving(true)
+    try {
+      const result = await removeAccount(plugin, target.authIndex)
+      /**
+       * 文案带名字：成功时用户要能核对**删掉的是哪一个**。
+       * 失败时 `reportOf` 会把主机码翻成人话（不认识的原样带出）。
+       */
+      actions.report(result, result.ok ? t('removed', { name: target.nickname }) : t('remove'))
+      setPendingRemove(null)
+      if (result.ok) await reload({ force: true })
+    } finally {
+      setRemoving(false)
+    }
+  }, [pendingRemove, plugin, actions, t, reload])
 
   return (
     <>
@@ -507,13 +580,24 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
                 overrides.applySelectState(authId, disabled)
               }
               onBusyChange={actions.setCardBusy}
+              /*
+               * 「重新登录」走渠道级登录会话（与「添加账号」同一条）：
+               * CPA 的 auth-url 只按 provider 起会话，落盘按 uid 覆盖，
+               * 所以到哪个号由用户在授权页登录谁决定 —— 见 `AccountCard` 的注释。
+               */
+              onRelogin={openRelogin}
+              /*
+               * 删除只把「删哪一个」交给父级去弹确认 —— 不可逆的动作
+               * 不在卡片里就地执行（见 `askRemove` 的注释）。
+               */
+              onAskRemove={() => askRemove(account.authIndex ?? '', account.nickname)}
               /* 渠道级动作在飞时禁掉所有卡片按钮（反向由按钮上的 `cardBusy` 负责） */
               locked={actions.busy}
               onReload={() => reload({ force: true })}
             />
           ))
         )}
-        <button type="button" className={css.addCard} onClick={openLogin}>
+        <button type="button" className={css.addCard} onClick={openAddLogin}>
           <span className={css.addPlus}>+</span>
           <span>{t('addAccount')}</span>
         </button>
@@ -535,7 +619,16 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       <Modal
         open={accountLogin.login !== null}
         onClose={accountLogin.close}
-        title={t('addAccount') + ' · ' + meta.label}
+        /*
+         * 标题按**来意**分：卡片上点「重新登录」时弹窗写「添加账号」，
+         * 用户会以为这个号要变成第二个号。两条来意在协议上是同一件事
+         * （同一个 auth-url、落盘按 uid 覆盖），但话必须说对。
+         */
+        title={
+          (accountLogin.login?.intent === 'relogin' ? t('relogin') : t('addAccount')) +
+          ' · ' +
+          meta.label
+        }
         closeLabel={t('cancel')}
         footer={
           <>
@@ -572,6 +665,45 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         {(accountLogin.login?.phase === 'idle' || accountLogin.login?.phase === 'starting') && (
           <div className={css.hint}>{t('loginIntro')}</div>
         )}
+      </Modal>
+
+      {/*
+       * 「删除账号」的确认框。
+       *
+       * ⚠️ **必须存在**：删除是本插件唯一一个**不可逆**的账号动作
+       * （只改调度面的是「禁用」，文件还在）。没有确认就等于让一次误触
+       * 变成一次重新授权。
+       *
+       * 三条内容缺一不可：
+       * - 标题带**账号名** —— 用户要能核对自己点的是哪一个；
+       * - 正文说清**删什么 / 后果 / 替代方案**（只想不参与调度就用开关）；
+       * - 确认按钮说「确认删除」而不是「确定」—— 在最后一刻再复述一次动作。
+       *
+       * ⚠️ **删的过程中不许关**（`cancelRemove` 里挡了）：请求已经发出去，
+       * 关掉弹窗不会取消它，只会让用户以为没删成。
+       */}
+      <Modal
+        open={pendingRemove !== null}
+        onClose={cancelRemove}
+        title={t('removeConfirmTitle', { name: pendingRemove?.nickname ?? '' })}
+        closeLabel={t('cancel')}
+        footer={
+          <>
+            <Button variant="ghost" size="sm" disabled={removing} onClick={cancelRemove}>
+              {t('cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={removing}
+              onClick={() => void confirmRemove()}
+            >
+              {t('removeConfirmAction')}
+            </Button>
+          </>
+        }
+      >
+        <div className={css.hint}>{t('removeConfirmHint')}</div>
       </Modal>
 
       {/*

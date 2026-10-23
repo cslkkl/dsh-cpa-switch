@@ -194,9 +194,45 @@ describe('槽位 6 · actions —— 按渠道能力渲染，位置固定', () =
 
   it('「设为唯一」用 outline（与签到同款灰边框），不是 ghost', () => {
     const actions = card.slice(card.indexOf('css.actions'))
-    const selectBtn = actions.slice(actions.indexOf('{disabled && ('))
-    expect(selectBtn).toContain('variant="outline"')
-    expect(selectBtn).not.toContain('variant="ghost"')
+    /**
+     * ⚠️ **必须切到「设为唯一」那一块为止**（下一个按钮的注释开头）。
+     * 行尾还有一个**故意用 `ghost`** 的「删除」（见下面那条用例）——
+     * 不切的话，这条判据会拿别人的合法用法判红，而它守的其实是另一件事。
+     * 本仓已有同一类事故：`tests/card-slots.test.ts` 的签到块（2026-10-12），
+     * 拿整行做 `not.toMatch(/warning/)` 把「已用完」的合法色判红了。
+     *
+     * ⚠️ 切点用**注释里那句话**（`「删除」`）而不是 `t('remove')`：
+     * 后者的字面量在 `t('removeConfirmHint')` 里也出现过，且它落在按钮**之后**，
+     * 拿它当切点会把那个 `ghost` 圈进来。
+     */
+    const start = actions.indexOf('{disabled && (')
+    const end = actions.indexOf('「删除」')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const selectBlock = actions.slice(start, end)
+    expect(selectBlock).toContain('variant="outline"')
+    expect(selectBlock).not.toContain('variant="ghost"')
+  })
+
+  /**
+   * 「删除」用 `ghost`、位置固定在行尾（2026-10-23）。
+   *
+   * 两件事各有一个理由：
+   * - **`ghost`**：这一排里只有它**不可逆**。同款 `outline` 会让它看起来
+   *   和「签到」「任务」一个量级，而点错一次就要重新授权；
+   * - **永远最后**：前面几个按钮会随 `needsRelogin` / `disabled` 增减，
+   *   而「删除」不该跟着换位置 —— 用户第二次来点它时不能因为多了一个
+   *   重登按钮就点到隔壁。
+   */
+  it('⚠️「删除」用 ghost（唯一不可逆的动作）且永远排在行尾', () => {
+    const actions = card.slice(card.indexOf('css.actions'))
+    const removeAt = actions.indexOf('「删除」')
+    expect(removeAt).toBeGreaterThan(-1)
+    const removeBlock = actions.slice(removeAt)
+    expect(removeBlock).toContain('variant="ghost"')
+    expect(removeBlock).toContain("t('remove')")
+    // 它是这一块里**最后**一个按钮：那段之后不再有 `<Button`
+    expect(removeBlock.slice(removeBlock.indexOf("t('remove')"))).not.toContain('<Button')
   })
 
   it('按钮数量只看渠道能力，不看账号数量（重叠也接受）', () => {

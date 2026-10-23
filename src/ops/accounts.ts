@@ -12,9 +12,60 @@ import { disabledDriftOf } from '../intent-drift.ts'
 import { bareModelNameOf } from '../model-alias.ts'
 import { normalizeAccounts } from '../channels/normalize.ts'
 import { applyLedger } from '../checkin-ledger.ts'
+import { needsReloginOf } from '../relogin.ts'
 import { cacheKeys, type CpaGateway } from '../gateway.ts'
 import { localDay, readAccountIntent, readCheckinLedger } from '../state.ts'
 import { messageOf, type OpsResult, requireRunning } from './result.ts'
+
+/** `auth-files` 里一条凭据的最小形状（只取这里用得到的字段）。 */
+interface AuthFileRef {
+  name?: unknown
+  provider?: unknown
+  note?: unknown
+}
+
+/**
+ * 从 `/auth-files` 的返回里取出「凭据名 → 是否需要重登」。
+ *
+ * ## 为什么另打一条接口
+ *
+ * 「需要重新登录」这个事实**只在 `auth-files` 的 `note` 里**：渠道插件自己的
+ * `/accounts` 把同一个号报成 `status: active` + `disabled: false`，看不出差别
+ * （实测 2026-10-23：七个号里六个被判死，`/accounts` 那一份**一个字段都没变**）。
+ *
+ * ## 为什么失败就是「不知道」
+ *
+ * 这条读只是为了**界面上一句话**。为它让整份账号列表读失败，是把一个提示
+ * 升级成一次 outage —— 所以调用方 `.catch(() => undefined)`，失败时
+ * 整条提示不出现（`needsRelogin` 保持 `undefined`，界面不渲染）。
+ *
+ * @returns 凭据名 → `true`（需要重登）/ `false`（不需要）；
+ *   读不到 / 形状不对时返回 `undefined`（= 不知道）。
+ */
+function reloginLookup(
+  data: unknown,
+  plugin: string,
+): ((authId: string) => boolean | undefined) | undefined {
+  const files = (data as { files?: unknown } | undefined)?.files
+  if (!Array.isArray(files)) return undefined
+
+  const byName = new Map<string, boolean>()
+  for (const raw of files as AuthFileRef[]) {
+    if (typeof raw?.name !== 'string' || raw.name === '') continue
+    // 只认本渠道的号：`auth-files` 一次给全部渠道
+    if (raw.provider !== plugin) continue
+    byName.set(raw.name, needsReloginOf(raw.note))
+  }
+
+  /** 本渠道一个号都没在里面 → 这份数据与本渠道无关，等于不知道。 */
+  if (byName.size === 0) return undefined
+
+  return (authId: string): boolean | undefined => {
+    // 缺 `auth_id` 的账号（上游可能不给）→ 不知道它对应哪条凭据，不猜
+    if (authId === '') return undefined
+    return byName.get(authId)
+  }
+}
 
 /** 只读账号域需要的依赖：**只有通道**（不写、也不通知任何人）。 */
 export interface AccountsDeps {
@@ -67,13 +118,24 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
 
     try {
       const accountsPath = accountsPathOf(plugin)
-      const [base, creditData] = await Promise.all([
+      const [base, creditData, authFilesData] = await Promise.all([
         deps.gateway.fetch(accountsPath),
         channel.capabilities.credits
           ? deps.gateway.fetch(channel.creditsPath).catch(() => undefined)
           : Promise.resolve(undefined),
+        /**
+         * ⚠️ **失败就当没读到**（`.catch`）：它只服务界面上一句
+         * 「这个号要重登」。让它把整份账号列表拖垮，是把一个提示
+         * 升级成一次 outage（见 {@link reloginLookup}）。
+         */
+        deps.gateway.fetch('/v0/management/auth-files').catch(() => undefined),
       ])
-      const normalized = normalizeAccounts(plugin, base, creditData)
+      const normalized = normalizeAccounts(
+        plugin,
+        base,
+        creditData,
+        reloginLookup(authFilesData, plugin),
+      )
 
       /**
        * 叠上**今日签到账本**。

@@ -66,6 +66,13 @@ export const paths = {
   /** 单卡启用 / 禁用。 */
   accountEnabled: '/api/v1/cpa/account-enabled',
   /**
+   * **删除**一个账号的凭据（不可逆）。
+   *
+   * ⚠️ 与 `accountEnabled` 是两条路：那条改「参不参与调度」、文件还在；
+   * 这条**删文件**，拿回来必须重新授权。界面上它必须带二次确认。
+   */
+  accountRemove: '/api/v1/cpa/account-remove',
+  /**
    * 把被上游重新启用的**用户禁用**号禁回去（`POST {plugin}`）。
    *
    * 宿主侧判定只认「意图里写着禁用、实际却启用了」这一种漂移 —— 反向不动
@@ -172,6 +179,22 @@ export function setAccountEnabled(
   enabled: boolean,
 ): Promise<ApiResult> {
   return post(paths.accountEnabled, { plugin, authIndex, enabled }).then((result) => {
+    if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
+    return result
+  })
+}
+
+/**
+ * **删除**一个账号的凭据（不可逆）。
+ *
+ * 成功后作废该渠道的账号读 —— 那个号已经不存在了，界面必须重取。
+ *
+ * ⚠️ **不乐观更新**：不像启用态那样先把卡从界面抹掉。删是不可逆的，
+ * 而「请求成功」不等于「文件真没了」（宿主自己的回读也可能失败）——
+ * 所以这里只作废缓存，让界面读**真实**结果。
+ */
+export function removeAccount(plugin: string, authIndex: string): Promise<ApiResult> {
+  return post(paths.accountRemove, { plugin, authIndex }).then((result) => {
     if (result.ok) invalidateReads(cacheKeys.accounts(plugin))
     return result
   })

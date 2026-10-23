@@ -182,6 +182,31 @@ const WRITES: readonly WriteCase[] = [
     invalidates: 'workbuddy',
   },
   {
+    /**
+     * **删除账号**（2026-10-23 加）。
+     *
+     * 这一条尤其不能漏：删完不作废读，被删的卡会留在界面上，
+     * 用户以为没删掉、再点一次 —— 而第二次会报 `auth-not-found`
+     * （那个名字确实已经不在了），看起来像「删了两次，第二次坏了」。
+     *
+     * ⚠️ 假通道的 `AUTH_FILES` 回的是**固定**那份 `oneAccount()`，
+     * 所以「回读还在」那条分支会触发 → 这里要让删除本身也「生效」：
+     * 用 `oneAccount()` 的**可变**版本（见 `makeCpa` 的 `reply` 支持函数形式）。
+     */
+    name: '删除账号',
+    setup: (cpa) => {
+      let deleted = false
+      cpa.reply(AUTH_FILES, () => (deleted ? { files: [] } : oneAccount()))
+      // 删除请求本身：真实路径带 `?name=`，`reply` 按整串匹配，所以给个通配式
+      cpa.reply(`${AUTH_FILES}?name=${encodeURIComponent('a.json')}`, () => {
+        deleted = true
+        return { status: 'ok' }
+      })
+    },
+    run: async (ops) => await ops.remove.remove('workbuddy', '0'),
+    invalidates: 'workbuddy',
+  },
+  {
     name: '写优先级（真的有改动）',
     setup: (cpa) => {
       cpa.reply(AUTH_FILES, {

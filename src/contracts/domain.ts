@@ -164,6 +164,17 @@ export interface NormalizedAccount {
   readonly status: unknown
   readonly credits: CreditEntry | null
   readonly checkin: CheckinEntry | undefined
+  /**
+   * 这个号的凭据**已被上游判死**，只有重新授权才能恢复（判据见 `src/relogin.ts`）。
+   *
+   * ⚠️ 它与 {@link NormalizedAccount.disabled} 是**两件事**：被判死的号
+   * `status` 仍然是 `active`、`disabled` 是 `false` —— 面板上它和正常的号
+   * 长得一模一样，只有额度格是空的。所以必须单独一位来说，
+   * 否则用户唯一能看到的线索是「怎么不出余额」。
+   *
+   * `undefined` = 不知道（没读到 `auth-files`，或该渠道不提供这个信号）。
+   */
+  readonly needsRelogin?: boolean | undefined
 }
 
 /** 一次批量动作里**失败的那一个**账号。 */

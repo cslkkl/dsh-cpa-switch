@@ -25,6 +25,7 @@ import { createPrefsOps, type PrefsOps } from './prefs.ts'
 import type { CandidateRow as CandidateModelRow } from './model-visibility.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
 import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
+import { createRemoveOps, type RemoveOps } from './remove.ts'
 import { createSchedulingOps, type SchedulingOps } from './scheduling.ts'
 
 export type { OpsFailure, OpsResult, OpsSuccess } from './result.ts'
@@ -87,6 +88,13 @@ export interface Operations {
   readonly actions: ActionsOps
   /** 启用态、设为唯一、优先级、意图恢复（调度面）。 */
   readonly enable: EnableOps
+  /**
+   * 删掉一个账号的凭据（**不可逆**，只有重新授权才能拿回来）。
+   *
+   * ⚠️ 与 `enable` 分域而不是并进去：那条只改「参不参与调度」，文件还在；
+   * 这条**删文件**。混在一起最危险的后果是用户以为「禁用了 = 删了」。
+   */
+  readonly remove: RemoveOps
   /** 渠道登录三条。 */
   readonly oauth: OauthOps
   /** 路由策略、调度模式、自动签到开关。 */
@@ -114,6 +122,10 @@ export function createOperations(deps: OpsDeps): Operations {
     accounts: createAccountsOps(deps),
     actions: createActionsOps(deps),
     enable: createEnableOps(deps),
+    remove: createRemoveOps({
+      gateway: deps.gateway,
+      ...(deps.logger === undefined ? {} : { logger: deps.logger }),
+    }),
     oauth: createOauthOps(deps),
     scheduling: createSchedulingOps(deps),
     pluginUpdate: createPluginUpdateOps(deps),
