@@ -160,6 +160,12 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 
 **跨模块的静默失败**
 
+- **测试隔离要隔在「被读的那一层」** —— `src/paths.ts` 的优先链是「`$DSH_HOME` > `~/.dsh`」，
+  所以只 mock `node:os` 的 `homedir` **在设了 `DSH_HOME` 的机器上完全无效**，测试会直写
+  用户的真实状态（2026-10-24 实踩：覆盖掉 9 条账号意图，**而 CI 全绿** —— CI 没设
+  `DSH_HOME`）。现在有两道：`tests/setup.ts` 默认把 `DSH_HOME` 指到临时目录（默认安全），
+  `tests/state-isolation-guard.test.ts` 静态钉住「调写入方的测试必须显式隔离」。
+  → [事故复盘](docs/postmortem/2026-10-24-test-wrote-real-state.md)
 - **profile 层的同 id 行会整行吃掉 bundle 骨架** —— 用户的 `cordis.patch.yml` 里只要也写
   `- id: llm-pi-ai`，随包发布的四行 `cpa-*` 就**每次启动都不生效**（后层整行替换、不深合并），
   provider 只能靠运行时推 ⇒ 重启后首条消息报 `no adapter registered for provider "cpa-…"`。

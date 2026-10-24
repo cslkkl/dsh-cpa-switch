@@ -13,7 +13,10 @@
  * 第三种最坏：`/accounts` 与 `/auth-files` 都同时给 `auth_id` 与 `auth_index`，
  * 用错哪个都编译得过、都跑得动，只是标签贴错了人。
  *
- * ⚠️ 状态文件走真文件系统（`homedir` 指向临时目录），与 `ops-write-paths` 同款。
+ * ⚠️ 隔离走 `DSH_HOME`（`src/paths.ts` 现读它），与 `remove-account.test.ts` 同款。
+ * 那个文件初版只 mock 了 `homedir`，在设了 `DSH_HOME` 的开发机上**隔离整个失效**、
+ * 把测试数据写进了用户真实状态 —— 复盘写在它的文件头。这个文件是**只读**的
+ * （`accounts.list`），但同批设上：只读与可写之间只差一次改动。
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -22,6 +25,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let home: string
+/** 进测试前用户原本的 `DSH_HOME`，`afterEach` 要原样还回去。 */
+let previousHome: string | undefined
 
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>()
@@ -111,9 +116,14 @@ async function listAccounts(ops: Operations): Promise<NormalizedAccount[]> {
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cpa-relogin-'))
+  // ⚠️ 真正的隔离，见文件头：只 mock `homedir` 在设了 `DSH_HOME` 的机器上无效
+  previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(home, '.dsh')
 })
 
 afterEach(() => {
+  if (previousHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = previousHome
   rmSync(home, { recursive: true, force: true })
 })
 

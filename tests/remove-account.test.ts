@@ -10,16 +10,29 @@
  * | 忘了清意图里那一条 | 以后用同一个 uid 重登，那号带着**上辈子**的启用态回来 |
  * | 删完不作废读缓存 | 被删的卡还留在界面上，用户以为没删掉、再点一次 |
  *
- * ⚠️ 状态文件走真文件系统（`homedir` → 临时目录），与 `ops-write-paths` 同款。
- * 这一域**真的会写意图文件**，所以隔离不是可选项。
+ * ⚠️ 状态文件走真文件系统，隔离**必须走 `DSH_HOME`**（`src/paths.ts` 现读它）。
+ *
+ * **这里踩过一次真坑（2026-10-24）**：本文件初版照抄了 `ops-write-paths` 的
+ * `vi.mock('node:os', …homedir)`。那在**没设 `DSH_HOME` 的机器上**能用，
+ * 但开发机设了 `DSH_HOME=C:\Users\11965\.dsh`，而 `paths.ts` 的优先级是
+ * 「`$DSH_HOME`（非空白）> `~/.dsh`」⇒ **mock 整个失效**，测试直接把
+ * `{"enabled":{"other.json":true}}` 写进了**用户真实的意图文件**，
+ * 覆盖掉了他先前 9 条账号选择。症状：面板上「我没动它，号全亮了」。
+ * 唯一的代价是开发机状态被改写，而 **CI 上永远绿**（CI 没有 `DSH_HOME`）。
+ *
+ * 所以：`beforeEach` 里设 `process.env.DSH_HOME`，`afterEach` 还原。
+ * `homedir` 那个 mock 留着只是为了兜住「既没 `DSH_HOME` 也没临时目录」的路径 ——
+ * 实际拦截靠的是环境变量这一层。
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let home: string
+/** 进测试前用户原本的 `DSH_HOME`，`afterEach` 要原样还回去。 */
+let previousHome: string | undefined
 
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>()
@@ -112,9 +125,17 @@ const file = (name: string, authIndex: string, provider = 'workbuddy'): unknown 
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cpa-remove-'))
+  /**
+   * ⚠️ **这一行才是真正的隔离**（见文件头的复盘）。
+   * 不设它，`paths.ts` 会走「用户机器的 `$DSH_HOME`」，测试就写到真实状态上。
+   */
+  previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(home, '.dsh')
 })
 
 afterEach(() => {
+  if (previousHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = previousHome
   rmSync(home, { recursive: true, force: true })
 })
 
@@ -259,7 +280,6 @@ describe('意图文件同步', () => {
   it('⚠️ 意图文件不可信时不写它', async () => {
     const cpa = makeCpa([file(NAME, 'idx-dead')])
     // 直接造一份「没有 source: panel」的文件
-    const { writeFileSync, mkdirSync } = await import('node:fs')
     const dir = join(home, '.dsh', 'storages')
     mkdirSync(dir, { recursive: true })
     writeFileSync(
@@ -273,7 +293,6 @@ describe('意图文件同步', () => {
     // 删除本身照常成功（那是 CPA 的事实，与意图文件可不可信无关）
     expect(result.ok).toBe(true)
     // 但意图文件一个字都没动
-    const { readFileSync } = await import('node:fs')
     const raw = readFileSync(join(dir, 'cpa-panel-accounts.json'), 'utf8')
     expect(JSON.parse(raw).enabled[NAME]).toBe(true)
   })
