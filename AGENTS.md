@@ -146,12 +146,24 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 通路已存在，缺的是渠道插件没填值（实测 72 条 0 条带值）。
       删表判据是「**实测响应体带上字段**」，不是上游源码里有 →
       [决策记录](.agents/notes/2026-10-06-why-manual-table-remains.md)。
-- [ ] **workbuddy 11-128 本地补丁退役（等上游 PR #46 发版）** —— 补丁 dll 已进托管
-      `overrides/`（每次渠道更新后自动叠回），`stream_head_timeout: 5` 已固化进托管配置
-      （退役时**保留**，防未来一切请求级风控的级联）。上游 [PR #46](https://github.com/mmqz/cpa-multi-plugins/pull/46)
-      合并发版后：删 `overrides/workbuddy.dll` → 面板点一次「更新」→ 完事。
+- [ ] **上游 v0.8.84 适配结论：不需要改代码，面板可直接「更新」（2026-10-25，装完即删本条）** ——
+      四类耦合面（管理路由路径 / 响应字段名 / 配置键名 / dll 与 tag）逐条核过 `v0.8.84`
+      （workbuddy 0.9.70、trae 0.12.80、qoder 0.8.67、zcode 0.2.4）**全未漂移**：
+      `stream_head_timeout` 字段健在、四条 spec 的每条路径都还在（zcode 仍是 `/models`）、
+      余额结构无变化。装完按三条判据核对：已装 tag 记为 `v0.8.84`、
+      `plugins/workbuddy.dll` 不再是补丁件、更新日志无 `override` 步；
+      判据与证据见[决策记录](.agents/notes/2026-10-25-upstream-v084-audit.md)。
+- [ ] **workbuddy 11-128 本地补丁退役（已可执行）** —— 上游 [PR #46](https://github.com/mmqz/cpa-multi-plugins/pull/46) /
+      [#49](https://github.com/mmqz/cpa-multi-plugins/pull/49) 已随 workbuddy **0.9.63** 发布（全角色清洗），
+      不需要再等。**三步**：① 确认端口上的 CPA 是本插件启的（外部实例会被拒）；
+      ② 面板点一次「更新」（内部先停 CPA —— Windows 上被加载的 dll 改不了名 —— 再清空
+      `plugins/` 解压，**不自动重启**，之后自己点「启动」）；③ 起来后核对三件事：
+      已装 tag = 上游最新、`plugins/workbuddy.dll` 的 sha256 不再是补丁件、更新日志里**没有**
+      `override` 步。`stream_head_timeout: 5` **保留不动**（退役只去掉补丁 dll，这个值防的是
+      未来一切请求级风控的级联）。⚠️ 本机实测：托管 `overrides/` 已空，补丁件是**直接压在
+      `plugins/` 里**的那个 —— 所以「删 override 文件」这一步本机无事可做，更新会顺手冲掉它；
+      补丁件与官方件的 sha256 判据见[决策记录](.agents/notes/2026-10-25-upstream-v084-audit.md)。
       背景：`E:\新下载\workbuddy-11-128-fix\README.md`（补丁包自述）。
-      每次更新日志里的 `override` 步就是「补丁还压着官方」的提醒。
 - [ ] **Trae 侧 12 条既无窗口也无图像能力** —— 按「渠道侧证据不足」留空走兜底；
       别搬 WorkBuddy/ZCode 的值 → [channels 手册](src/channels/README.md)。
 - [ ] **待真机复验：对话界面两个座位 + 裸名** —— 组内只有裸名、选择器左侧余额读数
