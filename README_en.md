@@ -37,7 +37,8 @@ next to Plugins / Automation tasks / Usage statistics / SSH). Each of the four c
 its own tab:
 
 - **See account balances**: available / used / quota pool / package count; tokens and credits
-  are shown separately and never summed together.
+  are shown separately and never summed together. Balances at the million mark are abbreviated
+  (`508M tokens` — one `M` step only, never rewritten as B).
 - **Quota cycle reminders**: when the provider supplies a valid cycle end date, expand a notice in
   the last seven days to see the account, package, remaining quota, and end time. A cycle ending
   does not necessarily mean unused quota expires.

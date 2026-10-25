@@ -162,3 +162,38 @@ describe('两格数字：缺数就是 `—`，不编 0', () => {
     expect(creditViewOf({ t: tzh, unit: 'credits', credits: workbuddy }).meter.show).toBe(true)
   })
 })
+
+/**
+ * 百万级额度的**端到端**写法（2026-10-25 维护者定案：只上 M 一档）。
+ *
+ * 缩写本身由 [format.ts](../src/client/format.ts) 的 `fmt` 做（判据在
+ * `tests/format.test.ts`），这里只验证**两格数字确实走了那条路**：卡片与汇总
+ * 各自调 `fmt`，任何一处换回别的格式化（或在原地自己 `/= 1e6`）都会让同一屏
+ * 出现两种写法，而它不报错。
+ */
+describe('百万级数字：缩写 + 单位（真文案表，中英各一次）', () => {
+  const zcodeBig: CreditEntry = {
+    remain: 508_000_000,
+    used: 4_572_000_000,
+    size: 5_080_000_000,
+    packages: [],
+  }
+
+  it('英文：`508M tokens` / `4,572M tokens`（只上 M，不变 B）', () => {
+    const view = creditViewOf({ t: ten, unit: 'tokens', credits: zcodeBig })
+    expect(view.remainText).toBe('508M tokens')
+    expect(view.usedText).toBe('4,572M tokens')
+  })
+
+  it('中文：单位文案是 `token`，缩写规则一模一样', () => {
+    const view = creditViewOf({ t: tzh, unit: 'tokens', credits: zcodeBig })
+    expect(view.remainText).toBe('508M token')
+    expect(view.usedText).toBe('4,572M token')
+  })
+
+  it('小于一百万不缩写（千分位照旧）', () => {
+    expect(creditViewOf({ t: tzh, unit: 'credits', credits: workbuddy }).remainText).toBe(
+      '4,939 积分',
+    )
+  })
+})

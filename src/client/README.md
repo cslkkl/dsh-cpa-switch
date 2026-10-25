@@ -433,8 +433,16 @@
     界面要拿到新值还得有人真去读一次。`autoCheckinOf` 取的就是宿主写完自己回读出来的
     那个值（宿主 `ops/scheduling.ts` 的 `setAutoCheckin` 特意回读一次再回），
     不是我们请求的那个值
-- **`format.ts`** —— 千分位格式化（`fmt`）。与传输 / 缓存 / 端点**都不沾边**，
-  所以分开：`amountWithUnit` 那类判据只想要一个格式化函数，不该被迫认识 HTTP
+- **`format.ts`** —— 额度数字的格式化（`fmt`）：千分位 + **百万起缩写为 `M` 一档**
+  （`508M`、`5,080M`，**只上 M、不变 B**；`< 1e6` 保持千分位；缺失 `—`）。与传输 / 缓存 / 端点
+  **都不沾边**，所以分开：`amountWithUnit` 那类判据只想要一个格式化函数，不该被迫认识 HTTP
+  - 缩写**只由数值量级**决定，与单位无关：这一层不认识 `CreditUnit`（单位判定只有一处，
+    在 [credit-text.ts](credit-text.ts)）
+  - ⚠️ **百万这个常数全仓只有这一处**：卡片两格、汇总三格、周期余量、会话读数**全都**经 `fmt`
+    拿数字，所以改这一处四处同时生效、不可能出现「同屏两种写法」。判据
+    `tests/format.test.ts` 扫 `src/client/**`：除本文件外出现 `1e6` / `1000000` / `1_000_000` 即判红
+  - ⚠️ **`M` 落在数字那一半**：「值 + 单位 → 最终字符串」仍是 [meter-text.ts](meter-text.ts) 的
+    `amountWithUnit`（含「0 不带单位」），所以汇总按 `' ' + unit` 拆节点的做法照旧成立
 - **`locales.ts`** —— 中英文案 + 插值。
   - 导出：`zh`（`as const`）/ `en`（`Record<LocaleKey, string>`）/ `makeTranslate` /
     类型 `LocaleKey` / `Translate` / `RawTranslate`
@@ -615,7 +623,8 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [model-visibility.ts](model-visibility.ts)         | 模型可见性的**判定**（不含 JSX）：文件存「隐藏的」、界面勾「显示的」，换算只有一处；**提交裸名不是行 id**（行 id 带别名会失配）。同步 `tests/model-visibility-client.test.ts`                                                                                                                                                                                                                                                                         |
 | [plan-text.ts](plan-text.ts)                       | 上游取值的翻译边界：**实测过的才映射，认不出的原样**；**中文档位名统一带「版」**（单写「免费」会被读成「这个号免费」）；`套餐：` 前缀不在这里加（那是 [credit-text.ts](credit-text.ts) 的事）                                                                                                                                                                                                                                                         |
 | [credit-text.ts](credit-text.ts)                   | 额度区的**唯一组装处**（单位文案 + 两格数字 + 说明行）：**只组装，判据一律向 `plan-text` / `meter-text` 要**；**单位判定只此一处**。同步 `tests/credit-text.test.ts`（含「全仓只有它判 `'tokens'`」的护栏）                                                                                                                                                                                                                                           |
-| [meter-text.ts](meter-text.ts)                     | 余额区判据：**没有分母就不画条、`used` 缺失就留空、条画「剩余占比」**；同步[决策记录](../../.agents/notes/2026-10-05-meter-bar-shows-remaining.md) + `tests/meter-text.test.ts`                                                                                                                                                                                                                                                                       |
+| [meter-text.ts](meter-text.ts)                     | 余额区判据：**没有分母就不画条、`used` 缺失就留空、条画「剩余占比」**；`amountWithUnit` 是「值 + 单位」的**唯一拼装处**（0 不带单位）—— 百万级缩写**不在这一层**（它只拼字符串，数字由 [format.ts](format.ts) 的 `fmt` 缩成 `508M`）；同步[决策记录](../../.agents/notes/2026-10-05-meter-bar-shows-remaining.md) + `tests/meter-text.test.ts`                                                                                                        |
+| [format.ts](format.ts)                             | 额度数字的格式化（`fmt`）：千分位 + **百万起缩写为 `M` 一档**（`508M` / `5,080M`，**只上 M 不变 B**）。⚠️ 百万常数与 `toLocaleString` **全仓只此一处**（卡片两格 / 汇总三格 / 周期余量 / 会话读数全部经它）；别处再写 `/= 1e6` 会让同屏出现两种写法却不报错。判据 `tests/format.test.ts`                                                                                                                                                              |
 | [routing-text.ts](routing-text.ts)                 | 路由策略的本地化与警示判定：**三个合法值都要有中文**；同步 `tests/routing-text.test.ts` + [../ops/scheduling.ts](../ops/scheduling.ts) 的策略白名单                                                                                                                                                                                                                                                                                                   |
 | [select-visibility.ts](select-visibility.ts)       | 「设为唯一」**什么时候出现**的判定（纯函数、不含 JSX）：**恰好一个号启用时那个号不显示、其余禁用卡照旧显示；0 个或多个启用时每张卡都显示**。⚠️ 别写回 `disabled &&`（启用即隐藏）—— 多开时已启用的卡会全没入口。`enabledCount` 必须由 `PluginPanel` 从**套过即时覆盖层的**列表算（用后端读数会闪）。同步 `tests/select-visibility.test.ts` + `tests/card-slots.test.ts` 的切片锚点                                                                    |
 | [panel.module.css](panel.module.css)               | 只用 `--dsw-*` token；**卡片是固定槽位网格**，改行结构先读文件头；⚠️ **自定义属性不会被 CSS Modules 改名**（只有类名与 `@keyframes` 会），所以一律带 `--cpa-` 前缀且**不写在 `:root`**；⚠️ **纵向几何只有一处来源**（六槽位高度是 `.card` 上的 `--cpa-slot-*`，`.card` 高度是它们的 `calc()`，算式不许含内边距或边框），**状态用 `data-*`**。判据 `tests/skeleton.test.ts` / `tests/card-geometry.test.ts`                                            |
