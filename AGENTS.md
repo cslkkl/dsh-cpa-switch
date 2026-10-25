@@ -143,6 +143,13 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
       [决策记录](.agents/notes/2026-10-13-model-visibility-in-panel.md)。
 - [ ] **待真机复验：0.14.0 那批** —— 四个分组 / 每会话重选一次 / 无 Effort 行的模型 /
       对调档位 / 「未签到」灰底 → 清单与判据见[验收记录](.agents/notes/2026-10-19-acceptance-history.md)。
+- [ ] **待真机复验：0.20.0 那批** ——
+      ①「设为唯一」：同渠道**开两个号** → 两张卡上都有；点其中一个 → 只留它启用，此时
+      **只有被禁用的那张**还有按钮；全部禁用 → 每张都有（口径在 `src/client/select-visibility.ts`，
+      判据 `tests/select-visibility.test.ts`）；
+      ② 百万档缩写：ZCode 账号显示 `508M token`、汇总三格同样带 `M`、对话界面选择器左侧读数带 `M`；
+      WorkBuddy 那种几千的积分**不变**（`4,939 积分`）；`0` 仍不带单位（口径 `src/client/format.ts`）。
+      ⚠️ 先 `pnpm build`；只改了浏览器半端 → **刷新页面**即可，不必重启 DSH。
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 通路已存在，缺的是渠道插件没填值（实测 72 条 0 条带值）。
       删表判据是「**实测响应体带上字段**」，不是上游源码里有 →
       [决策记录](.agents/notes/2026-10-06-why-manual-table-remains.md)。
