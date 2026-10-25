@@ -158,7 +158,10 @@
     结果对象上，`result.data` 能编译却恒为 `undefined`（2026-10-13 的静默事故）
   - 提示复用渠道动作那套 toast（`driftRestored`）—— 界面**不许**静默改用户账号
   - 为什么需要：渠道插件自带的额度生命周期会在 09:00 / 21:00 之后撤销用户的禁用，
-    用户看到「我没动它，号全亮起来了」、而「设为唯一」按钮整排消失（零报错）。决策见
+    用户看到「我没动它，号全亮起来了」—— 界面**静默**改了用户的账号，零报错。
+    （旧规则下这一幕还多一个症状：「设为唯一」按钮**整排消失**，因为它是「启用即隐藏」，
+    被全部打开之后一张卡都不再显示入口。2026-10-25 改规则后入口按启用数走 ——
+    多开时**全都有**，所以现在只剩「账号被改」这一件事要防。）决策见
     [决策记录](../../.agents/notes/2026-10-15-user-disabled-intent-is-authoritative.md)
 - **`use-drift-watch.ts` + `drift-view.ts` + `use-page-visible.ts`** —— **漂移看门狗**
   （2026-10-19）。
@@ -479,6 +482,22 @@
 **控件样式**：`设为唯一` 用 `variant="outline"`（与签到同款灰边框），**不是 `ghost`** ——
 ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 
+**`设为唯一` 什么时候出现**（2026-10-25 维护者定案，各渠道通用）：
+
+- 本渠道**恰好一个号启用** → 那个启用的号**没有**这个按钮（它自己已经是「唯一」了，
+  对它按下去等于「先打开一个已打开的号、再把别人关一遍」，绕一圈什么都没变）；
+  **禁用的**卡照旧有 —— 那正是「换成这个号」的入口；
+- 启用 **0 个** 或 **多个** → **每张卡都有**，**包括已启用的**（多开时「就它，别的关掉」
+  正是最常用的一次点击）。
+
+⚠️ 别写回 `disabled &&`（「启用即隐藏」）：多开时已经启用的卡会**全都没有入口**，
+用户只能先把别的号一个个手动关掉才收敛得了。判定**只在一处** ——
+[select-visibility.ts](select-visibility.ts) 的 `showSelectButton`（纯函数、不含 JSX、
+不引 UI 包，Node 侧测得到，判据 `tests/select-visibility.test.ts`）；
+`enabledCount` 由 `PluginPanel` 用同一个文件的 `enabledCountOf` 从**套过即时覆盖层**的
+账号列表算出后传下来 —— 卡片只看得到自己那一个号，自己数会数错，而换用后端读数算，
+刚点完开关时会闪一下。
+
 ### 骨架与扫光
 
 首屏（打开面板到数据到达）用骨架，不用文字占位 —— 文字比真实内容矮得多，换成内容时整块会跳。判据 `tests/skeleton.test.ts` 与 `tests/skeleton-hint.test.ts`。
@@ -598,6 +617,7 @@ ghost 是无边框文字样式，混在按钮行里像一句普通说明。
 | [credit-text.ts](credit-text.ts)                   | 额度区的**唯一组装处**（单位文案 + 两格数字 + 说明行）：**只组装，判据一律向 `plan-text` / `meter-text` 要**；**单位判定只此一处**。同步 `tests/credit-text.test.ts`（含「全仓只有它判 `'tokens'`」的护栏）                                                                                                                                                                                                                                           |
 | [meter-text.ts](meter-text.ts)                     | 余额区判据：**没有分母就不画条、`used` 缺失就留空、条画「剩余占比」**；同步[决策记录](../../.agents/notes/2026-10-05-meter-bar-shows-remaining.md) + `tests/meter-text.test.ts`                                                                                                                                                                                                                                                                       |
 | [routing-text.ts](routing-text.ts)                 | 路由策略的本地化与警示判定：**三个合法值都要有中文**；同步 `tests/routing-text.test.ts` + [../ops/scheduling.ts](../ops/scheduling.ts) 的策略白名单                                                                                                                                                                                                                                                                                                   |
+| [select-visibility.ts](select-visibility.ts)       | 「设为唯一」**什么时候出现**的判定（纯函数、不含 JSX）：**恰好一个号启用时那个号不显示、其余禁用卡照旧显示；0 个或多个启用时每张卡都显示**。⚠️ 别写回 `disabled &&`（启用即隐藏）—— 多开时已启用的卡会全没入口。`enabledCount` 必须由 `PluginPanel` 从**套过即时覆盖层的**列表算（用后端读数会闪）。同步 `tests/select-visibility.test.ts` + `tests/card-slots.test.ts` 的切片锚点                                                                    |
 | [panel.module.css](panel.module.css)               | 只用 `--dsw-*` token；**卡片是固定槽位网格**，改行结构先读文件头；⚠️ **自定义属性不会被 CSS Modules 改名**（只有类名与 `@keyframes` 会），所以一律带 `--cpa-` 前缀且**不写在 `:root`**；⚠️ **纵向几何只有一处来源**（六槽位高度是 `.card` 上的 `--cpa-slot-*`，`.card` 高度是它们的 `calc()`，算式不许含内边距或边框），**状态用 `data-*`**。判据 `tests/skeleton.test.ts` / `tests/card-geometry.test.ts`                                            |
 | [Skeleton.tsx](Skeleton.tsx)                       | 首屏骨架：容器**全部复用真实布局类**（卡高 / 列宽 / 间距因此只有一份定义）；⚠️ **只盖「还没到的数据」**（「添加账号」是真按钮、网格始终渲染，不占位、不参与卡数）；⚠️ **加载期汇总必须一起占位**；⚠️ **扫光挂在「块」上、不在骨头上**（挂骨头上时同一张卡里会同时播两种动效）。判据 `tests/skeleton.test.ts`                                                                                                                                          |
 | [skeleton-hint.ts](skeleton-hint.ts)               | 骨架卡数的**提示**：⚠️ **不能「从缓存数账号」**（骨架出现的前提就是缓存为空）；它只决定摆几张骨架卡，**不参与任何显示或判断**，读不到 / 写不进 / 脏值一律回退兜底常量。判据 `tests/skeleton-hint.test.ts`                                                                                                                                                                                                                                             |
