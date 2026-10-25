@@ -21,6 +21,7 @@ import { paths, removeAccount } from './endpoints.ts'
 import { fmt } from './format.ts'
 import { amountWithUnit, sumCredits } from './meter-text.ts'
 import { ModelVisibility } from './ModelVisibility.tsx'
+import { enabledCountOf } from './select-visibility.ts'
 import { rememberAccountCount } from './skeleton-hint.ts'
 import { SkeletonCards, SkeletonStatus, SkeletonSummary } from './Skeleton.tsx'
 import { summaryViewOf } from './summary-hint.ts'
@@ -209,6 +210,20 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const unitText = unitTextOf(t, meta.unit)
 
   const accounts = overrides.accounts
+
+  /**
+   * 本渠道**启用中**的号数 —— 决定每张卡上「设为唯一」出不出现。
+   *
+   * ⚠️ **必须数 `overrides.accounts`（套过即时覆盖层的那份）**，不是
+   * `accountsResource.data.accounts`（后端那份）：用户刚点完开关、重读还没回来时，
+   * 后端读数会说「一个号启用」，照它算就会在一瞬间把按钮画出来又收回 ——
+   * 那正是覆盖层要消灭的那种跳（判据 `tests/select-visibility.test.ts`）。
+   *
+   * 为什么这数算在面板、而不是每张卡自己数：卡片只看得到自己那一个号，
+   * 「这个渠道里还有几个开着」是**渠道级**的事实。判定本身在
+   * `select-visibility.ts` 的 `showSelectButton`（纯函数，Node 侧测得到）。
+   */
+  const enabledCount = enabledCountOf(accounts)
 
   /**
    * 汇总三格的呈现 —— **判定不在这里**，在 `summary-hint.ts`（纯函数、Node 侧测得到）。
@@ -593,6 +608,12 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               onAskRemove={() => askRemove(account.authIndex ?? '', account.nickname)}
               /* 渠道级动作在飞时禁掉所有卡片按钮（反向由按钮上的 `cardBusy` 负责） */
               locked={actions.busy}
+              /*
+               * 「设为唯一」出不出现由它决定（判定在 `select-visibility.ts`）。
+               * 同一渠道的所有卡共用一个数 —— 这正是「唯一启用时那张卡没有按钮、
+               * 多开时每张都有」能成立的前提。
+               */
+              enabledCount={enabledCount}
               onReload={() => reload({ force: true })}
             />
           ))
