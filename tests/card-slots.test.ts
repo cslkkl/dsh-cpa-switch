@@ -204,14 +204,24 @@ describe('槽位 6 · actions —— 按渠道能力渲染，位置固定', () =
      * ⚠️ 切点用**注释里那句话**（`「删除」`）而不是 `t('remove')`：
      * 后者的字面量在 `t('removeConfirmHint')` 里也出现过，且它落在按钮**之后**，
      * 拿它当切点会把那个 `ghost` 圈进来。
+     *
+     * ⚠️ **起点是渲染条件本身**（`{selectVisible && (`），不是旧的
+     * `{disabled && (` —— 2026-10-25 那条规则改了（唯一启用时该号不显示、
+     * 0 个/多个启用时全显示），旧切点在本文件里会 `indexOf` 成 -1、**整块空片**，
+     * 于是下面两条 `toContain` 全红。规则本身（四种组合）的判据在
+     * `tests/select-visibility.test.ts`，这里只守**样式与切片范围**。
      */
-    const start = actions.indexOf('{disabled && (')
+    const start = actions.indexOf('{selectVisible && (')
     const end = actions.indexOf('「删除」')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const selectBlock = actions.slice(start, end)
     expect(selectBlock).toContain('variant="outline"')
     expect(selectBlock).not.toContain('variant="ghost"')
+    // 旧写法（启用即隐藏）不许回来 —— 多开时已启用的卡就没有入口了。
+    // ⚠️ 断言前先剥注释：上面那段注释里就写着 `disabled &&` 这几个字（当作「别再写回」的提醒），
+    // 拿原文断言会被自己的墓志铭判红（本仓 2026-10-05 踩过一次，见文件头的 `css` 说明）。
+    expect(actions.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('{disabled && (')
   })
 
   /**

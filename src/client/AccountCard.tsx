@@ -9,6 +9,7 @@ import { useCallback, useState } from 'react'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { creditViewOf } from './credit-text.ts'
 import { act, selectCpaAccount, setAccountEnabled } from './endpoints.ts'
+import { showSelectButton } from './select-visibility.ts'
 import type { Capabilities, CreditUnit, NormalizedAccount } from '../contracts/domain.ts'
 import type { Translate } from './locales.ts'
 import css from './panel.module.css'
@@ -17,6 +18,17 @@ import css from './panel.module.css'
 export interface AccountCardProps {
   readonly account: NormalizedAccount
   readonly plugin: string
+  /**
+   * 本渠道**启用中**的号数（`select-visibility.ts` 的 `enabledCountOf`）。
+   *
+   * 为什么由父级传下来、卡片不自己数：卡片只看得到自己那一个号，
+   * 「这个渠道里还有几个是开着的」是**渠道级**的事实，只有 `PluginPanel` 有
+   * （而且要取**套过即时覆盖层**的那份列表，否则刚点完开关会闪一下）。
+   *
+   * ⚠️ 这里只收数字，判定不在这里 —— `showSelectButton` 是纯函数，
+   * 住在 `select-visibility.ts` 才有 Node 侧的判据。
+   */
+  readonly enabledCount: number
   /**
    * 渠道额度单位 —— 原样的 `'credits' | 'tokens'`，**不是翻好的文案**。
    *
@@ -96,6 +108,7 @@ export function AccountCard(props: AccountCardProps): ReactNode {
     onAskRemove,
     onBusyChange,
     locked,
+    enabledCount,
   } = props
 
   /**
@@ -237,6 +250,17 @@ export function AccountCard(props: AccountCardProps): ReactNode {
    * 统计失真）。
    */
   const isSelected = !disabled
+
+  /**
+   * 「设为唯一」这一张卡上有没有 —— **判定不在这里**，在
+   * [`select-visibility.ts`](select-visibility.ts) 的 `showSelectButton`
+   * （纯函数、Node 侧测得到，判据 `tests/select-visibility.test.ts`）。
+   *
+   * ⚠️ 别把条件内联回 JSX：上一版就是 `{disabled && (<Button …/>)}`，
+   * 它表达的是「**启用即隐藏**」—— 多开的时候已经启用的卡全都没有入口，
+   * 用户只能先把别的号一个个手动关掉才收敛得了（2026-10-25 改）。
+   */
+  const selectVisible = showSelectButton({ disabled, enabledCount })
 
   return (
     /*
@@ -491,15 +515,22 @@ export function AccountCard(props: AccountCardProps): ReactNode {
          * 代价（刻意）：该渠道唯一的号不可用时请求直接失败，**没有兜底** ——
          * 宁可失败，也不要偷偷换号把上游缓存打散、把积分花在别的号上。
          *
-         * 只在**当前是关的**时出现：已经启用且可能不止一个时按它没有意义
-         * （那会先把该号打开再关别人，绕一圈）。开着的号想收敛到它，
-         * 用户直接点它的开关即可 —— 语义一样，少一次误触。
+         * 什么时候出现 —— **判定在 `select-visibility.ts` 的 `showSelectButton`**：
+         * - 本渠道**恰好一个号启用**：那个号不显示（它自己已经是「唯一」了，
+         *   对这个号按下去等于「先打开一个已打开的号，再把别人关一遍」，绕一圈
+         *   什么都没变）；**禁用的**卡照旧显示 —— 那才是「换成这个号」的入口；
+         * - **0 个**启用（目标还没确定）或**多个**（候选不止一个）：**每张卡都显示**，
+         *   包括已经启用的那个 —— 多开时「就它，别的关掉」正是最常用的一次点击。
+         *
+         * ⚠️ 别再写回 `disabled &&`：那是「启用即隐藏」，多开时已启用的卡全都没有
+         * 入口，只能先把别的号一个个手动关掉才能收敛（2026-10-25 维护者定案改的，
+         * 判据 `tests/select-visibility.test.ts` 里有一格专门钉住这个差别）。
          *
          * ⚠️ `variant="outline"`（与「签到」「任务」同款灰边框），**不是 `ghost`**：
          * ghost 是无边框文字样式，混在按钮行里看着像一句普通说明
          * （2026-10-05 维护者指出「不再像普通文字混在按钮里」）。
          */}
-        {disabled && (
+        {selectVisible && (
           <Button
             variant="outline"
             size="sm"
