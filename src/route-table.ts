@@ -444,15 +444,9 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
     },
     {
       /**
-       * 显示偏好：侧栏那一行显示不显示、以及它放在哪。
+       * 显示偏好：侧栏入口显示不显示。
        *
-       * body:
-       * - `{sidebarEntry: boolean}` → 有没有侧栏入口；
-       * - `{sidebarPinned: boolean}` → 入口钉在栏上（`true`）还是收在「更多」里（`false`）。
-       *
-       * 两个字段**各自可选、互不联动**（一次只改一个）：合起来写会让「只想打开开关」
-       * 的那次请求顺手把位置也设成某个值，而调用方根本没表达过位置。
-       * 一个字段都没带 ⇒ 空操作，回读值照旧。
+       * body: `{sidebarEntry: boolean}`；`GET` 读、`POST` 写。
        *
        * ⚠️ 它**不碰 CPA**（不唤醒进程、不改账号），所以不走 `requireRunning`
        * 那套前置 —— 开关该在 CPA 没跑的时候也能改。
@@ -462,7 +456,6 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       handle: async (request) => {
         if (request.method === 'GET') return json(ops.prefs.get())
         const body = await readBody(request)
-        if ('sidebarPinned' in body) return json(ops.prefs.setSidebarPinned(body.sidebarPinned))
         return json(ops.prefs.setSidebarEntry(body.sidebarEntry))
       },
     },

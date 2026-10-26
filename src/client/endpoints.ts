@@ -334,31 +334,6 @@ export function sidebarEntryOf(result: ApiResult): boolean | undefined {
 }
 
 /**
- * 写「入口放在哪」：`true` = 钉在侧栏栏上，`false` = 收在侧栏的「更多」菜单里。
- *
- * ⚠️ 与 {@link setSidebarEntry} 是**两个字段、两条写**：合起来发会让
- * 「只想换位置」的那次请求顺手把开关也改掉（反之亦然），而调用方并没表达那个意思。
- * 同样不作废读缓存（这个值不进缓存）。
- */
-export function setSidebarPinned(pinned: boolean): Promise<ApiResult> {
-  return post(paths.panelPrefs, { sidebarPinned: pinned })
-}
-
-/**
- * 从响应里取「入口放在哪」。
- *
- * 与 {@link sidebarEntryOf} 同规：**只认布尔**，取不到就 `undefined`（调用方保持原值）。
- * ⚠️ 老文件里没有这个字段时，**宿主**会按 `false` 补齐再回读 ——
- * 也就是说浏览器这一侧收到坏形状只可能是响应本身坏了。
- *
- * @param result - 读或写请求的返回。
- */
-export function sidebarPinnedOf(result: ApiResult): boolean | undefined {
-  const value = result['sidebarPinned']
-  return typeof value === 'boolean' ? value : undefined
-}
-
-/**
  * 取消登录会话。
  *
  * ⚠️ 走 `POST` 而不是 `DELETE`：DSH 的 `ConnectionFetchMethod` 只有
