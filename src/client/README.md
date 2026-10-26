@@ -211,6 +211,11 @@
     不复位会让切回来时显示上一个渠道的勾选；不播种则上次没保存的乱动会留在那里
   - 落在**工具栏**（与「刷新 / 全部签到 / 全部任务」同排）：维护者真机指定的位置 ——
     收在网格下面的折叠节里他会找不到
+  - ⚠️ **弹窗里是两句、两个层级**（2026-10-26）：标题下的 `modelsLead` 走宿主
+    `Modal` 的 `description` 槽位（14px 主色），**只说价值**（选择器会变短）；
+    正文的 `modelsHint`（12px tertiary）只说机制（没勾 ≠ 删不掉）+ 生效时机。
+    写成一大段时没有层级，读起来像免责声明 —— 而且旧句里带 `**`，界面不渲染
+    Markdown，星号原样显示（真机截图一眼看见）。判据 `tests/locales.test.ts`
   - 判定 `tests/model-visibility-client.test.ts`；宿主侧
     `tests/ops-model-visibility.test.ts` + `tests/hidden-models-state.test.ts`
 - **`channel-registry.ts` / `channel-balance.ts` / `ModelLabel.tsx` / `CreditReadout.tsx` /

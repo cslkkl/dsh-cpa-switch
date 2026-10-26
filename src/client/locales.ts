@@ -273,11 +273,19 @@ export const zh = {
    *
    * ⚠️ `modelsHint` 是本功能**唯一会造成误解**的地方：用户会以为「不勾 = 把模型删了 /
    * 不能用了」，其实只是不在选择器里出现 —— 模型在 CPA 那边照常在、接口也照常能调。
+   *
+   * 两句分工（2026-10-26 维护者定案：原来的单句「又长又没说出好处」）：
+   * - `modelsLead` 是弹窗标题下那句（宿主 `Modal` 的 `description` 槽位），
+   *   **只说价值** —— 选择器会变短，其余收起来。机制不在这里讲。
+   * - `modelsHint` 只留机制那一句（不勾 ≠ 删掉 / 不能用）+ 生效时机。
+   *
+   * ⚠️ **不写 `**`**：界面不渲染 Markdown，星号会原样显示成两个星号
+   * （旧句里就有，真机截图一眼看见）。判据 `tests/locales.test.ts` 钉住。
    */
   modelsTitle: '模型',
-  modelsHint:
-    '这里只决定**对话界面的模型下拉里出现哪些**。不勾的模型照常能调通，只是不在下拉里 —— 点「保存」后立即生效。',
-  modelsEmpty: '这个渠道还没有可用的模型（先在 CPA 里加一个号）。',
+  modelsLead: '只把常用的模型留在对话的选择器里，其余的收起来。',
+  modelsHint: '没勾的模型仍可正常调用，只是不出现在选择器里；点「保存」生效。',
+  modelsEmpty: '这个渠道还没有模型，先在 CPA 里加一个号。',
   modelsSelectAll: '全选',
   modelsSelectNone: '全不选',
   save: '保存',
@@ -508,9 +516,10 @@ export const en: Record<LocaleKey, string> = {
   creditsPartlyUnreadable: 'Credits unavailable for {count} account(s)',
   creditsPartlyUnreadableHint: 'The totals above exclude them; click "{action}" to retry',
   modelsTitle: 'Models',
-  modelsHint:
-    'This only decides **which models appear in the chat model picker**. Unchecked models still work through the API — they are just hidden from the dropdown. Takes effect after you click Save.',
-  modelsEmpty: 'This channel has no models yet (add an account in CPA first).',
+  /** See the Chinese table: value first, mechanism in `modelsHint`. */
+  modelsLead: 'Keep the chat model picker down to the models you actually use.',
+  modelsHint: 'Unchecked models still work; they just stay out of the picker. Applies on Save.',
+  modelsEmpty: 'This channel has no models yet — add an account in CPA first.',
   modelsSelectAll: 'Select all',
   modelsSelectNone: 'Select none',
   save: 'Save',
