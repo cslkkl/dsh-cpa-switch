@@ -92,6 +92,34 @@ describe('文案表：每个键都必须有引用', () => {
 })
 
 /**
+ * 文案里不许有 Markdown 记号（2026-10-26）。
+ *
+ * 界面**不渲染 Markdown** —— 文案是原样进 `<p>` / `<div>` 的。所以写成
+ * `这里只决定**对话界面的模型下拉里出现哪些**` 时，用户在弹窗里看到的是
+ * **两个星号**，不是加粗（维护者真机截图一眼看见：整段又长又夹着 `**`）。
+ *
+ * ⚠️ 想强调就**改写句子**（把重点放句首、或拆成两句），别指望记号 ——
+ * 这个仓里唯一能承载层级的只有「主句 + `.hint`」这一对槽位。
+ */
+describe('文案里不许出现 Markdown 记号', () => {
+  const markdownMarkers = (text: string): boolean =>
+    text.includes('**') || /<\/?b>|<\/?strong>/.test(text)
+
+  it.each([
+    ['zh', zh],
+    ['en', en],
+  ] as const)('%s 表里没有 `**` / `<b>` 这类写法', (_locale, table) => {
+    const entries = Object.entries(table) as [string, string][]
+    const offenders = entries.filter(([, text]) => markdownMarkers(text)).map(([key]) => key)
+    expect(
+      offenders,
+      '这些键把 Markdown 记号写进了展示文本（界面不渲染，会原样显示成星号）：' +
+        offenders.join(' / '),
+    ).toEqual([])
+  })
+})
+
+/**
  * 面板名与插件列表里那个名字**必须是同一个词**（2026-10-19）。
  *
  * 真源是 `locale/{zh,en}.json` 的 `meta.title` —— 宿主读它来显示插件列表里的名字，

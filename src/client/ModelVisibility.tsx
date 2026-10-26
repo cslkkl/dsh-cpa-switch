@@ -61,6 +61,12 @@ export function ModelVisibility(props: ModelVisibilityProps): ReactNode {
         open={models.isOpen}
         onClose={models.close}
         title={t('modelsTitle')}
+        /*
+         * 标题下那句走 `description`（宿主给的 14px 主色槽位），只说**价值**；
+         * 机制的半句留在正文的 `.hint` 里。两句都在正文里时没有层级，
+         * 一整段读下来像免责声明（2026-10-26 维护者：「有点啰嗦而且宣传不出来」）。
+         */
+        description={t('modelsLead')}
         closeLabel={t('cancel')}
         footer={
           <>
@@ -79,7 +85,7 @@ export function ModelVisibility(props: ModelVisibilityProps): ReactNode {
         }
       >
         {/* ⚠️ 说清「不勾 ≠ 删掉」——本功能唯一会造成的误解 */}
-        <p className={css.hint}>{t('modelsHint')}</p>
+        <div className={css.hint}>{t('modelsHint')}</div>
 
         {models.state === 'loading' && <div className={css.hint}>{t('loading')}</div>}
 
