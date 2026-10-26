@@ -63,6 +63,18 @@ export const zh = {
    */
   sidebarEntry: '侧栏入口',
   sidebarEntryHint: '关掉后，面板只能从插件页打开',
+  /**
+   * 「入口放在哪」（2026-10-26）：只在这一行开关**打开时**才有意义，
+   * 关掉时整行不出现（不注册任何东西，位置也就无从谈起）。
+   *
+   * ⚠️ 两档的名字必须各自**说清「在哪」**：「默认」或「自动」这种词在这个位置
+   * 什么也没说 —— 用户要知道的是「栏上」还是「更多里」。而「更多」是宿主侧栏
+   * 那个按钮的名字，所以文案里要带「更多」这个字，否则用户不知道去哪找。
+   */
+  sidebarPlacement: '入口位置',
+  sidebarPlacementMore: '收在「更多」里',
+  sidebarPlacementRail: '钉在侧栏栏上',
+  sidebarPlacementHint: '「更多」是侧栏底部那个按钮；栏上则是常驻的一行',
   stopped: '未运行',
   /**
    * 状态条那一句：`<状态> · 127.0.0.1:<端口>`。
@@ -414,6 +426,11 @@ export const en: Record<LocaleKey, string> = {
   /** See the Chinese table: the bottom-of-panel switch for the sidebar row. */
   sidebarEntry: 'Sidebar entry',
   sidebarEntryHint: 'When off, the panel is only reachable from the Plugins page',
+  /** See the Chinese table: both option names must say *where*, not "default". */
+  sidebarPlacement: 'Entry position',
+  sidebarPlacementMore: 'Inside “More”',
+  sidebarPlacementRail: 'Pinned to the sidebar',
+  sidebarPlacementHint: '“More” is the button at the bottom of the sidebar; pinned keeps a row',
   stopped: 'Stopped',
   statusRunning: 'Running · 127.0.0.1:{port}',
   statusStopped: 'Stopped · 127.0.0.1:{port}',

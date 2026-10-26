@@ -317,12 +317,24 @@ let captured
  * ⚠️ 沙箱里没有浏览器的 `fetch`。不补桩的话那次读必然失败，而「读失败」与
  * 「用户关掉了」现在**同向**（默认关）⇒ 侧栏行永远注册不出来，下面那组断言
  * 会退化成「测不到东西」。所以桩必须存在，且值要**按用例可改**。
+ *
+ * ⚠️ `sidebarPinned` 决定挂**哪一个座**（2026-10-26）：`false` ⇒
+ * `sidebar.panellist.actions`（「更多」里那一行）；`true` ⇒ `sidebar.panellist`
+ * （栏上那个图标）。两档互斥 —— 同挂会让用户看到两个入口通向同一个面板。
  */
-const prefs = { sidebarEntry: true }
+const prefs = { sidebarEntry: true, sidebarPinned: false }
 
 /** 产物会在作用域里找 `window` 与 `document`，沙箱直接给它们。 */
 const sandbox = {
   console,
+  /**
+   * 浏览器里 `setTimeout` / `clearTimeout` 是**全局**的（不在 `window` 上才怪，
+   * 但作用域里直接可用）。产物用它们做「旧宿主兜底」的宽限等待，沙箱不补就会在
+   * 那次读回来之后抛 `clearTimeout is not defined` —— 而那是**我们自己的代码**
+   * 在真实浏览器里不会遇到的问题，别把它赖到产物上。
+   */
+  setTimeout,
+  clearTimeout,
   /**
    * 只应答显示偏好那条路由，其余一律 `{ok:false}` ——
    * 本脚本只关心座位注册，别让别的读顺手打出网络错误。
@@ -332,7 +344,11 @@ const sandbox = {
     status: 200,
     text: async () =>
       String(url).includes('/api/v1/cpa/panel-prefs')
-        ? JSON.stringify({ ok: true, sidebarEntry: prefs.sidebarEntry })
+        ? JSON.stringify({
+            ok: true,
+            sidebarEntry: prefs.sidebarEntry,
+            sidebarPinned: prefs.sidebarPinned,
+          })
         : JSON.stringify({ ok: false, error: 'not stubbed' }),
   }),
   window: {
@@ -553,23 +569,21 @@ check(
 async function main() {
   await settle()
 
-  const panellist = registered.find((r) => r.name === 'sidebar.panellist')
-  check('偏好为开时注册了 sidebar.panellist（侧栏行）', panellist !== undefined)
-  check('侧栏行有 list 座必需的 id', typeof panellist?.id === 'string' && panellist.id !== '')
-  check('侧栏行的 order 是数字', typeof panellist?.order === 'number')
-  check('侧栏行的 label 是函数（跟随语言）', typeof panellist?.label === 'function')
-  const mainPanel = registered.find((r) => r.name === 'main')
-  check('注册了 main（侧栏行点开的落点）', mainPanel !== undefined)
+  const panellistSeat = registered.find((r) => r.name === 'sidebar.panellist')
+  const moreSeat = registered.find((r) => r.name === 'sidebar.panellist.actions')
   check(
-    'main 的 key 与侧栏行的 id 逐字相同',
-    mainPanel !== undefined && panellist !== undefined && mainPanel.key === panellist.id,
-    `${mainPanel && mainPanel.key} vs ${panellist && panellist.id}`,
+    '默认位置（更多里）注册的是 sidebar.panellist.actions',
+    moreSeat !== undefined && panellistSeat === undefined,
+    registered.map((r) => r.name).join(','),
   )
+  check('「更多」那一行有自己的 id', typeof moreSeat?.id === 'string' && moreSeat.id !== '')
+  check('「更多」那一行的 order 是数字', typeof moreSeat?.order === 'number')
+  const mainPanel = registered.find((r) => r.name === 'main')
+  check('注册了 main（入口点开的落点）', mainPanel !== undefined)
   check(
-    '侧栏行没有占用官方那四个 id',
-    panellist !== undefined &&
-      !['plugins', 'schedules', 'usage-stats', 'ssh'].includes(panellist.id),
-    panellist && panellist.id,
+    'main 的 key 是 PANEL_ID',
+    mainPanel !== undefined && mainPanel.key === 'cpa-panel',
+    mainPanel && mainPanel.key,
   )
   check(
     '等过 modelDirectories 与 layout（座位级门禁，不进 inject 数组）',
@@ -603,38 +617,70 @@ async function main() {
   )
 
   /**
-   * 侧栏那条**显示偏好**的接线（2026-10-20）。
+   * 侧栏入口那条**显示偏好**的接线（2026-10-20）。
    *
    * 这一组守的都是「写坏了不报错」的形状：
-   * - 侧栏行改成动态注册后，`inject` 的返回值（disposer）必须被接住 —— 否则关掉
+   * - 入口改成了动态注册，`inject` 的返回值（disposer）必须被接住 —— 否则关掉
    *   开关只是不再新注册，旧那条还在（表现为开关「时灵时不灵」）；
    * - 偏好只能走 `panel-prefs` 那条路由 —— 写错路径是一次静默 404，开关会永远
    *   停在默认值，而用户点了也「没反应」。
    */
-  check('侧栏行的 disposer 被接住（关得掉）', /stopSidebarEntry/.test(clientSrc))
+  check('入口的 disposer 被接住（关得掉 / 换得了位置）', /stopSidebarEntry/.test(clientSrc))
   check('偏好读的是 panel-prefs 路由', clientSrc.includes('/api/v1/cpa/panel-prefs'))
   check('偏好写回读值喂给侧栏状态', /setSidebarEntryVisible\(/.test(clientSrc))
+  check('位置写回读值喂给侧栏状态', /setSidebarEntryPinned\(/.test(clientSrc))
+  /**
+   * ⚠️ **旧宿主兜底**（2026-10-26）：「更多」那个座是 `0.2.1-rc.3` 才声明的，
+   * 而 `slots.inject` 在槽位**从未声明**时永远不跑回调 —— 于是默认档在旧宿主上
+   * 等于「侧栏什么都没有」，而用户明明打开了开关。兜底必须真的存在。
+   */
+  check('有「更多」座没声明时的兜底（退回栏上那一行）', /moreFallback/.test(clientSrc))
 
   /**
-   * 第二档：宿主这次说「**关**」。
+   * 第二档：位置 = **钉在栏上** ⇒ 换挂 `sidebar.panellist`，且菜单那一行摘掉。
+   *
+   * ⚠️ 必须**两边都断言**：只断言新座出现了，抓不住「两档同时挂着」那种形态
+   * （用户会看到两个入口通向同一个面板）。
+   */
+  prefs.sidebarPinned = true
+  applyAgain()
+  await settle()
+  check(
+    '位置 = 栏上时注册了 sidebar.panellist',
+    registered.some((r) => r.name === 'sidebar.panellist'),
+    registered.map((r) => r.name).join(','),
+  )
+  check(
+    '位置 = 栏上时「更多」那一行被摘掉（两档互斥）',
+    !registered.some((r) => r.name === 'sidebar.panellist.actions'),
+    registered.map((r) => r.name).join(','),
+  )
+  const railRow = registered.find((r) => r.name === 'sidebar.panellist')
+  check('栏上那一行有 list 座必需的 id', typeof railRow?.id === 'string' && railRow.id !== '')
+  check('栏上那一行的 label 是函数（跟随语言）', typeof railRow?.label === 'function')
+
+  /**
+   * 第三档：偏好 = **关** ⇒ 两档都不注册。
    *
    * 不只看「不注册」—— 要看**那一行真的被摘掉**：再 apply 一次（它先按上一份
-   * 状态挂上），随后那次读把值翻成 false，两个订阅者都该摘掉自己那一条。
+   * 状态挂上），随后那次读把值翻成 false，订阅者都该摘掉自己那一条。
    * 只有真的接住了 disposer，这里的 `registered` 才会干净。
    */
+  prefs.sidebarPinned = false
   prefs.sidebarEntry = false
   applyAgain()
   await settle()
   check(
-    '偏好为关时侧栏行被摘除（disposer 真的跑了）',
-    !registered.some((r) => r.name === 'sidebar.panellist'),
+    '偏好为关时两侧入口都被摘除（disposer 真的跑了）',
+    !registered.some(
+      (r) => r.name === 'sidebar.panellist' || r.name === 'sidebar.panellist.actions',
+    ),
     registered.map((r) => r.name).join(','),
   )
   check(
-    '关掉侧栏行不影响 main（面板页不归这个开关管）',
+    '关掉侧栏入口不影响 main（面板页不归这个开关管）',
     registered.some((r) => r.name === 'main'),
   )
-
   check(
     'require 只请求了宿主模块表里的东西',
     required.every((r) => r in HOST_MODULES),

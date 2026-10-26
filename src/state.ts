@@ -767,13 +767,26 @@ export interface PanelPrefs {
    * 想要常驻入口的用户按一次开关即可（那次写之后就以文件为准）。
    */
   sidebarEntry: boolean
+  /**
+   * 入口**放在哪**：`false`（默认）= 收在侧栏的「更多」菜单里；`true` = 钉在栏上。
+   *
+   * 为什么要落盘（2026-10-26）：宿主的钉住状态 `panelPins.unpinned` 是**内存态**
+   * （`ui-sidebar` 的 `createPanelPins` 注释原话：held in memory until plugin reload）。
+   * 不存的话，我们每次加载都得重新 `onPinnedChange(id, false)` 才能维持「默认在更多里」，
+   * 而那会把**用户手动钉回栏上**的操作在刷新后抹掉 —— 界面在跟用户抢。
+   *
+   * ⚠️ 与 `sidebarEntry` 的分工别混：那个是「有没有入口」，这个是「入口在哪」。
+   * 前者关掉时这个值没有意义（不注册任何东西），但也不清空 —— 用户重开开关时
+   * 应该回到他上次选的位置。
+   */
+  sidebarPinned: boolean
   /** 写入时间，仅作展示。 */
   updatedAt?: string
 }
 
 /** 默认偏好（= 首次安装 / 文件丢失时的样子）。 */
 function defaultPanelPrefs(): PanelPrefs {
-  return { sidebarEntry: false }
+  return { sidebarEntry: false, sidebarPinned: false }
 }
 
 /**
@@ -781,13 +794,21 @@ function defaultPanelPrefs(): PanelPrefs {
  *
  * 只认 `source: 'panel'`（与账号意图、隐藏模型同规）：外部写坏不该改变我们的界面。
  * 字段不是布尔就回退默认值 —— 一个脏值不该让开关显示成「开」。
+ *
+ * ⚠️ **缺 `sidebarPinned` 的老文件合法**（2026-10-26 之前写的那份只有 `sidebarEntry`）：
+ * 缺失按默认 `false` 读，也就是「升级后入口默认收进更多」。这不是容错，是**迁移**：
+ * 老用户没表达过位置偏好，而新默认就是「在更多里」。
  */
 export function readPanelPrefs(): PanelPrefs {
   const parsed = readJson<Record<string, unknown>>(panelPrefsPath())
   if (parsed === undefined) return defaultPanelPrefs()
   if (parsed['source'] !== 'panel') return defaultPanelPrefs()
-  const raw = parsed['sidebarEntry']
-  return { sidebarEntry: typeof raw === 'boolean' ? raw : false }
+  const entry = parsed['sidebarEntry']
+  const pinned = parsed['sidebarPinned']
+  return {
+    sidebarEntry: typeof entry === 'boolean' ? entry : false,
+    sidebarPinned: typeof pinned === 'boolean' ? pinned : false,
+  }
 }
 
 /**
@@ -800,6 +821,7 @@ export function updatePanelPrefs(mutate: (current: PanelPrefs) => PanelPrefs): v
   void _dropped
   writeJson(panelPrefsPath(), {
     sidebarEntry: rest.sidebarEntry,
+    sidebarPinned: rest.sidebarPinned,
     updatedAt: new Date().toISOString(),
     source: 'panel',
   })

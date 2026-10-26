@@ -31,6 +31,8 @@
 
 /** 当前值：`undefined` = 还没读到（按关处理）。 */
 let enabled: boolean | undefined
+/** 位置：`false`（默认）= 收在「更多」里；`true` = 钉在栏上。 */
+let pinned = false
 const listeners = new Set<() => void>()
 
 /** 侧栏那一行该不该显示（**未读到按关**）。 */
@@ -39,7 +41,17 @@ export function sidebarEntryVisible(): boolean {
 }
 
 /**
- * 改值。
+ * 入口该不该钉在栏上（`false` = **收在侧栏的「更多」菜单里**，这也是默认）。
+ *
+ * ⚠️ 默认 `false` 而不是「未读到就当场决定」：这个值只在开关为开时才有意义，
+ * 而开关为开之后，位置必须来自**用户那次选择**或宿主的**默认收纳**。
+ */
+export function sidebarEntryPinned(): boolean {
+  return pinned === true
+}
+
+/**
+ * 改「显示不显示」。
  *
  * ⚠️ **比较的是「可见性」而不是原始值**：`undefined → true` 在存储上是变化，
  * 但订阅方看到的结果一样（都是开），通知它只会白做一次注册/摘除。
@@ -47,6 +59,21 @@ export function sidebarEntryVisible(): boolean {
 export function setSidebarEntryVisible(next: boolean): void {
   const before = sidebarEntryVisible()
   enabled = next
+  if (before === next) return
+  for (const listener of [...listeners]) listener()
+}
+
+/**
+ * 改「放在哪」。
+ *
+ * 与 {@link setSidebarEntryVisible} 共用同一份订阅：换位置等于**换注册**
+ * （`sidebar.panellist` ↔ `sidebar.panellist.actions`），而注册发生在 `apply()`
+ * 里、不在 React 树里 —— 不通知就只是记住了值、界面上什么都没变。
+ * 值没变同样不通知。
+ */
+export function setSidebarEntryPinned(next: boolean): void {
+  const before = sidebarEntryPinned()
+  pinned = next
   if (before === next) return
   for (const listener of [...listeners]) listener()
 }
@@ -62,5 +89,6 @@ export function subscribeSidebarEntry(listener: () => void): () => void {
 /** 测试用：把状态复位（生产代码不调用）。 */
 export function resetSidebarEntryForTests(): void {
   enabled = undefined
+  pinned = false
   listeners.clear()
 }
