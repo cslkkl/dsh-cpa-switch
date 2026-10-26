@@ -120,6 +120,45 @@ describe('文案里不许出现 Markdown 记号', () => {
 })
 
 /**
+ * 删除确认框那段文案：**收短了，但三件事一件都不许少**（2026-10-26）。
+ *
+ * 维护者原话：「点击删除后出现的弹窗里面的文字也啰嗦了」。收短很安全，
+ * 丢信息很危险 —— 这段是用户在一个**不可逆**动作前的最后一屏，它必须同时说出
+ * 「删的是什么 / 会怎样 / 有没有别的路」。只写「不可撤销」是不完整的：
+ * 用户不知道还能禁用，就会拿一个不可逆的动作去解决一个可逆的问题。
+ *
+ * ⚠️ 判据查的是**语义关键词**，不是逐字相等 —— 文案还会再改，但
+ * 这三件事不能被删掉。改文案时若换了说法，同批改这里的关键词。
+ */
+describe('删除确认框的三件事', () => {
+  it('中文：凭据 / 余额不受影响 / 要重新登录 / 有「禁用」这条替代路', () => {
+    const text = zh.removeConfirmHint
+    expect(text, '删的是什么').toContain('凭据文件')
+    expect(text, '余额是否受影响').toContain('余额不受影响')
+    expect(text, '后果').toContain('重新登录')
+    expect(text, '替代方案').toContain('禁用')
+  })
+
+  it('英文同样四件事都在', () => {
+    const text = en.removeConfirmHint
+    expect(text).toContain('credential')
+    expect(text).toContain('balance')
+    expect(text).toContain('sign in')
+    expect(text.toLocaleLowerCase()).toContain('switch')
+  })
+
+  /**
+   * ⚠️ 顺手钉住「别反弹回长句」：中英都在 100 字符以内。
+   * 这不是文风洁癖 —— 这段是弹窗正文，超过两行就会把「确认删除」挤到视线之外，
+   * 而那就是**误点**的来源。
+   */
+  it('中英都不超过 100 字符（超了就会把确认按钮挤出视线）', () => {
+    expect([...zh.removeConfirmHint].length).toBeLessThanOrEqual(100)
+    expect(en.removeConfirmHint.length).toBeLessThanOrEqual(100)
+  })
+})
+
+/**
  * 面板名与插件列表里那个名字**必须是同一个词**（2026-10-19）。
  *
  * 真源是 `locale/{zh,en}.json` 的 `meta.title` —— 宿主读它来显示插件列表里的名字，

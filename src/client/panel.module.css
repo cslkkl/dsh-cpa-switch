@@ -771,6 +771,36 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* ---- Destructive action ------------------------------------------------ */
+
+/* The buttons in this panel that cannot be undone: 「删除」 on a card, and the
+ * 「确认删除」 that actually commits it. Both wear `variant="outline"` plus this
+ * class, so the whole way from entry to commit speaks one language.
+ *
+ * **黑框 + 红字**（2026-10-26 维护者定案，已被两轮真机筛过）：
+ * - 边框**与同排兄弟逐字相同**（宿主的 `.outline`），这里一个字节都不碰它 ——
+ *   这一排的几何、右端对齐、亮暗主题全部自动跟随，不用维护第二份；
+ * - 红只在**文字**上。第一版把红放在 0.5px 边框上，维护者真机一眼否掉：
+ *   「这个很丑」—— 28px 高的小按钮描一圈 0.5px 红，像给一条**错误**描了框，
+ *   而不是像「删除」。红字才是这一排里读得懂的那一半。
+ *
+ * ⚠️ 那句「红字在本产品里已经是状态的语言」仍然成立，只是不再重要：
+ * 状态红出现在**说明文字**里（`.error`、`state-error-primary` 的正文），
+ * 而这里是一个**按钮**（有边框、有悬停、可点）。形状本身就区分了两者。
+ *
+ * ⚠️ **只设 `color`**，别的什么都不设：不设 border（那是宿主的）、
+ * 不设 background（悬停沿用 `.outline:hover` 的中性底，与兄弟一致）、
+ * 不设宽度。破坏性动作与兄弟的差别**只有一个颜色通道**。
+ *
+ * ⚠️ 写成 `.danger:not(:disabled)` 是为了**特异性**：宿主 `.button` 也设
+ * `color`，且同为 (0,1,0) —— 同分就只剩「谁后注入」，而我们在另一张样式表里。
+ * (0,2,0) 是判据，不是洁癖。副作用也对：禁用中的破坏性按钮回到原色，
+ * 且本来就有 `.button:disabled` 的 0.4 透明度。
+ */
+.danger:not(:disabled) {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 /* The read-failed sentence. **Failure only** — "nothing to show yet" moved to the
    skeleton below (2026-10-07), so the two no longer share a name. Sharing one made
    the same position read as "loading" on one channel and "broken" on another. */

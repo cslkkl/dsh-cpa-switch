@@ -196,14 +196,15 @@ describe('槽位 6 · actions —— 按渠道能力渲染，位置固定', () =
     const actions = card.slice(card.indexOf('css.actions'))
     /**
      * ⚠️ **必须切到「设为唯一」那一块为止**（下一个按钮的注释开头）。
-     * 行尾还有一个**故意用 `ghost`** 的「删除」（见下面那条用例）——
-     * 不切的话，这条判据会拿别人的合法用法判红，而它守的其实是另一件事。
+     * 行尾那个「删除」也是 `outline`，但**多挂一个 `css.danger`**（2026-10-26 改的）——
+     * 不切的话，下面那条 `not.toContain('css.danger')` 会拿别人的合法用法判红，
+     * 而它守的其实是另一件事。
      * 本仓已有同一类事故：`tests/card-slots.test.ts` 的签到块（2026-10-12），
      * 拿整行做 `not.toMatch(/warning/)` 把「已用完」的合法色判红了。
      *
      * ⚠️ 切点用**注释里那句话**（`「删除」`）而不是 `t('remove')`：
      * 后者的字面量在 `t('removeConfirmHint')` 里也出现过，且它落在按钮**之后**，
-     * 拿它当切点会把那个 `ghost` 圈进来。
+     * 拿它当切点会把删除那个按钮圈进来。
      *
      * ⚠️ **起点是渲染条件本身**（`{selectVisible && (`），不是旧的
      * `{disabled && (` —— 2026-10-25 那条规则改了（唯一启用时该号不显示、
@@ -218,6 +219,8 @@ describe('槽位 6 · actions —— 按渠道能力渲染，位置固定', () =
     const selectBlock = actions.slice(start, end)
     expect(selectBlock).toContain('variant="outline"')
     expect(selectBlock).not.toContain('variant="ghost"')
+    // ⚠️ 破坏性样式只属于「删除」：这一排别的动作都不该挂 `css.danger`
+    expect(selectBlock).not.toContain('css.danger')
     // 旧写法（启用即隐藏）不许回来 —— 多开时已启用的卡就没有入口了。
     // ⚠️ 断言前先剥注释：上面那段注释里就写着 `disabled &&` 这几个字（当作「别再写回」的提醒），
     // 拿原文断言会被自己的墓志铭判红（本仓 2026-10-05 踩过一次，见文件头的 `css` 说明）。
@@ -225,24 +228,73 @@ describe('槽位 6 · actions —— 按渠道能力渲染，位置固定', () =
   })
 
   /**
-   * 「删除」用 `ghost`、位置固定在行尾（2026-10-23）。
+   * 「删除」用**与兄弟同款的黑框 + 红字**、位置固定在行尾（2026-10-26 改造，
+   * 之前是 `ghost`）。
    *
-   * 两件事各有一个理由：
-   * - **`ghost`**：这一排里只有它**不可逆**。同款 `outline` 会让它看起来
-   *   和「签到」「任务」一个量级，而点错一次就要重新授权；
+   * 三件事各有理由：
+   * - **`outline` 不是 `ghost`**：ghost 是无边框文字样式，维护者真机上说它
+   *   「看着不像按钮」—— 这一排其它动作都有灰边框，无边框文字读起来像一句说明。
+   * - **红在文字、框保持中性**：第一版把红放在 0.5px 边框上，维护者一眼否掉
+   *   （「这个很丑」）—— 28px 小按钮描一圈红，像给一条错误描框，不像删除。
+   *   框与兄弟逐字相同，差别只留一个颜色通道。
    * - **永远最后**：前面几个按钮会随 `needsRelogin` / `disabled` 增减，
    *   而「删除」不该跟着换位置 —— 用户第二次来点它时不能因为多了一个
    *   重登按钮就点到隔壁。
+   *
+   * ⚠️ 只断言「类名接上了、变体是对的」：红到底长什么样只有 CSS 能说，
+   * 那部分由下面「`.danger` 只设 color」那条守。
    */
-  it('⚠️「删除」用 ghost（唯一不可逆的动作）且永远排在行尾', () => {
+  it('⚠️「删除」用 outline + `css.danger`（黑框红字）且永远排在行尾', () => {
     const actions = card.slice(card.indexOf('css.actions'))
     const removeAt = actions.indexOf('「删除」')
     expect(removeAt).toBeGreaterThan(-1)
     const removeBlock = actions.slice(removeAt)
-    expect(removeBlock).toContain('variant="ghost"')
+    expect(removeBlock).toContain('variant="outline"')
+    expect(removeBlock).toContain('className={css.danger}')
+    expect(removeBlock).not.toContain('variant="ghost"')
     expect(removeBlock).toContain("t('remove')")
     // 它是这一块里**最后**一个按钮：那段之后不再有 `<Button`
     expect(removeBlock.slice(removeBlock.indexOf("t('remove')"))).not.toContain('<Button')
+  })
+
+  /**
+   * 确认框那个「确认删除」与卡片上的「删除」**同一套外观**（2026-10-26）：
+   * 从入口到真正动手是一种语言。原先它是 `primary` —— 一个蓝色实心按钮
+   * 在做不可逆的事，而入口那个是灰的，两次点击看到的份量不一样。
+   */
+  it('⚠️ 确认框的「确认删除」也用 outline + `css.danger`（入口与动手同一套）', () => {
+    const at = panel.indexOf("t('removeConfirmAction')")
+    expect(at).toBeGreaterThan(-1)
+    // 按钮开始于文案之前最近的 `<Button`
+    const start = panel.lastIndexOf('<Button', at)
+    const block = panel.slice(start, at)
+    expect(block).toContain('variant="outline"')
+    expect(block).toContain('className={css.danger}')
+    expect(block).not.toContain('variant="primary"')
+  })
+
+  /**
+   * ⚠️ 破坏性样式**只有一个颜色通道**（2026-10-26 维护者定案）：
+   * 边框必须与兄弟逐字相同（宿主的 `.outline` 说了算），所以 `.danger`
+   * **只许设 `color`** —— 一旦这里出现 `border` / `border-color`，那一排的
+   * 几何（0.5px 细边、右端对齐、亮暗主题）就开始分叉，而且**坏了不报错**。
+   */
+  it('⚠️ `.danger` 只设 color，不碰边框与背景', () => {
+    const start = css.indexOf('.danger:not(:disabled) {')
+    expect(start).toBeGreaterThan(-1)
+    const block = css.slice(start, css.indexOf('}', start))
+    expect(block).toContain('color: var(--dsw-alias-state-error-primary)')
+    // 边框归宿主的 `.outline`（与兄弟逐字相同）；这里出现任何边框/背景声明即红
+    expect(block).not.toMatch(/border|background/)
+  })
+
+  /**
+   * ⚠️ 特异性不是洁癖：宿主 `.button` 也设 `color`，且同为 (0,1,0) ——
+   * 同分就只剩「谁后注入」，而我们在另一张样式表里。`:not(:disabled)` 把
+   * 特异性抬到 (0,2,0) 才是判据；顺带也让禁用态回到原色（本就叠加 0.4 透明度）。
+   */
+  it('⚠️ `.danger` 的选择器必须压过宿主的 `.button`（靠特异性，不靠顺序）', () => {
+    expect(css).toContain('.danger:not(:disabled)')
   })
 
   it('按钮数量只看渠道能力，不看账号数量（重叠也接受）', () => {

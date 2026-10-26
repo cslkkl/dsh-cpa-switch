@@ -543,12 +543,16 @@ export function AccountCard(props: AccountCardProps): ReactNode {
         )}
 
         {/*
-         * 「删除」—— 排在**最后**，且用 `ghost`。
+         * 「删除」—— 排在**最后**，用**与兄弟同款的黑框 + 红字**（`outline` + `css.danger`）。
          *
-         * 为什么是 `ghost` 而不是与其它按钮同款的 `outline`：这一排里只有它是
-         * **不可逆**的。同款灰边框会让它看起来和「签到」「任务」一个量级，
-         * 而实际上点错一次就要重新授权（见 `removeConfirmHint` 的取舍）。
-         * `ghost` 是无边框文字样式 —— 在这里正好：它**在场但不抢注意力**。
+         * 两件事各有一个理由，都是 2026-10-26 改的（原来是 `ghost`）：
+         * - **`outline`**：`ghost` 是无边框文字样式，维护者真机上说它「看着不像按钮」——
+         *   这一排其它动作（签到 / 任务 / 设为唯一）都有灰边框，混在里面的无边框文字
+         *   读起来像一句说明。
+         * - **红只在文字、框一个字节都不改**：试过把红放边框上（0.5px 红细边），
+         *   维护者一眼否掉（「这个很丑」）—— 28px 的小按钮描一圈红像给一条**错误**
+         *   描了框。框与兄弟逐字相同、差别只留一个颜色通道，才是「同款按钮、这是危险的那个」。
+         *   规则只有一处：`panel.module.css` 的 `.danger`。
          *
          * ⚠️ 位置固定（永远最后一个），不随 `needsRelogin` / `disabled` 变化：
          * 那两个条件会影响它前面几个按钮的有无，但「删除」始终在行尾 ——
@@ -558,8 +562,9 @@ export function AccountCard(props: AccountCardProps): ReactNode {
          * 因为「删哪个号」要连账号名一起说，而那张弹窗只该有一份。
          */}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
+          className={css.danger}
           disabled={isBusy}
           title={t('removeConfirmHint')}
           onClick={onAskRemove}
