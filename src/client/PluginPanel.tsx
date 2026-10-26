@@ -471,16 +471,21 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
       {/*
        * 工具栏一直在（不是只有 `ready` 才渲染）：它是这一块的入口，
        * 加载中禁用即可。加载完又出现一次会造成一次布局跳动。
+       *
+       * ## 顺序（2026-10-26 维护者定案）
+       *
+       * **全部签到 → 全部任务 → 模型 → 刷新**
+       *
+       * 依据是**点的频率与分量**，不是习惯：前三个是「对号做事」的动作
+       * （签到 / 任务 / 选模型），刷新是**读**，而且它在最坏情况下只是「重看一遍」。
+       * 于是把**低频的那一个放末尾**，常用动作留在左边 —— 从左往右读是
+       * 「做什么 → 看什么」，与面板其它区域（先数据、后工具）同一个方向。
+       *
+       * ⚠️ 顺序由 `tests/card-slots.test.ts` 的「工具栏顺序」钉住：
+       * 这几个按钮的**渲染条件**各不相同（签到 / 任务看渠道能力），
+       * 手一抖把块挪个位置不会报错，只会让某个渠道的按钮悄悄换位子。
        */}
       <div className={css.toolbar}>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={actions.busy || accountsResource.loading}
-          onClick={() => void reload({ force: true })}
-        >
-          {t('refresh')}
-        </Button>
         {capabilities.checkin && (
           <Button
             variant="primary"
@@ -511,6 +516,15 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
          * 勾选清单在它自己的弹窗里，见 `ModelVisibility.tsx`。
          */}
         <ModelVisibility plugin={plugin} t={t} />
+        {/* 刷新排**末尾**：它是「重看一遍」，不是对号做事（理由见上面那段注释） */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={actions.busy || accountsResource.loading}
+          onClick={() => void reload({ force: true })}
+        >
+          {t('refresh')}
+        </Button>
         {/*
          * 自动签到开关。
          *

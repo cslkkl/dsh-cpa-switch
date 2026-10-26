@@ -366,6 +366,42 @@ describe('顶部汇总：三格，单位并入额度池', () => {
   })
 })
 
+describe('工具栏顺序：全部签到 → 全部任务 → 模型 → 刷新', () => {
+  /**
+   * 2026-10-26 维护者定案。依据是**点的频率与分量**：前三个是「对号做事」
+   * （签到 / 任务 / 选模型），刷新是**读**、而且最坏情况只是「重看一遍」，
+   * 所以低频那个放末尾。
+   *
+   * ⚠️ 这几个按钮的**渲染条件各不相同**（签到 / 任务看渠道能力），
+   * 手一抖把块挪个位置**不报错**，只会让某个渠道的按钮悄悄换位子 ——
+   * 所以顺序要断言，不能靠人记得。
+   *
+   * ⚠️ 断言前剥注释：上面那段注释里就写着这串顺序（当作说明），
+   * 拿原文 `indexOf` 会被自己的墓志铭命中。
+   */
+  const code = panel.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('四个入口在 DOM 里就是这个次序', () => {
+    const toolbar = code.slice(code.indexOf('css.toolbar'), code.indexOf('css.switchRow'))
+    const order = ["t('checkinAll')", "t('tasksAll')", '<ModelVisibility', "t('refresh')"].map(
+      (needle) => {
+        const at = toolbar.indexOf(needle)
+        expect(at, `工具栏里找不到 ${needle}`).toBeGreaterThan(-1)
+        return at
+      },
+    )
+    expect(order, '工具栏顺序被改动了').toEqual([...order].sort((a, b) => a - b))
+  })
+
+  it('刷新在**最末**（低频、且只是重看一遍）', () => {
+    const toolbar = code.slice(code.indexOf('css.toolbar'), code.indexOf('css.switchRow'))
+    const refreshAt = toolbar.indexOf("t('refresh')")
+    for (const needle of ["t('checkinAll')", "t('tasksAll')", '<ModelVisibility']) {
+      expect(toolbar.indexOf(needle)).toBeLessThan(refreshAt)
+    }
+  })
+})
+
 describe('卡片等高：六槽位 + 确定高度', () => {
   it('用 `height` 而非 `min-height`（min-height 是地板，四渠道内容从不低于它）', () => {
     const card = css.slice(css.indexOf('.card {'))
