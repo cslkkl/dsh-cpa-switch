@@ -157,13 +157,18 @@ export const zh = {
   /**
    * 删除确认弹窗的正文。
    *
-   * ⚠️ **必须同时说清三件事**：删的是什么（凭据文件）、后果（要重新授权一次）、
-   * 以及**替代方案**（只想让它不参与调度的话用「禁用」）。
+   * ⚠️ **必须同时说清三件事**：删的是什么（凭据文件）、后果（要重新登录一次、
+   * 余额不受影响）、以及**替代方案**（只想让它不参与调度的话用「禁用」）。
    * 只说「不可撤销」是**不完整**的 —— 用户不知道还有别的选择，
    * 于是会拿一个不可逆的动作去解决一个可逆的问题。
+   *
+   * ⚠️ **两句就够**（2026-10-26 维护者：「这里的文字也啰嗦了」）：原来是一长句
+   * 加一个从句，三件事被「才能拿回来」「的话」「即可」这些填充词拖长。
+   * 三件事一件都没少，只是每件只给一个短句 —— 逐字比对的判据见
+   * `tests/locales.test.ts`（三件事的关键词必须都在）。
    */
   removeConfirmHint:
-    '会删掉这个账号的凭据文件，之后必须重新登录一次才能拿回来（余额不会丢）。只想让它暂时不参与调度的话，用卡片上的开关禁用即可。',
+    '删掉它的凭据文件，余额不受影响，之后要重新登录一次。只想暂停调度，用卡片上的开关禁用即可。',
   removeConfirmAction: '确认删除',
   /** 删除成功后的提示（带账号名，让用户核对删的是哪一个）。 */
   removed: '已删除「{name}」',
@@ -448,7 +453,7 @@ export const en: Record<LocaleKey, string> = {
   remove: 'Delete',
   removeConfirmTitle: 'Delete the account "{name}"?',
   removeConfirmHint:
-    'This deletes the account\u2019s credential file, so you will have to sign in once more to get it back (the balance is not lost). If you only want it out of rotation for now, use the switch on the card instead.',
+    'Deletes the credential file; the balance stays, but you sign in again. To pause it, use the switch.',
   removeConfirmAction: 'Delete',
   removed: 'Deleted "{name}"',
   enable: 'Enable',

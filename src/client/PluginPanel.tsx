@@ -700,6 +700,16 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
        * - 正文说清**删什么 / 后果 / 替代方案**（只想不参与调度就用开关）；
        * - 确认按钮说「确认删除」而不是「确定」—— 在最后一刻再复述一次动作。
        *
+       * ⚠️ **确认按钮与卡片上的「删除」同一套外观**（`outline` + `css.danger`，
+       * 2026-10-26）：**同款黑框、红字**，从入口到真正动手是一种语言。原先这里是
+       * `primary` —— 一个蓝色实心按钮在做不可逆的事，而入口那个是灰的，用户两次点击
+       * 看到的是两种不同的分量。
+       *
+       * ⚠️ **刻意不是实心红、也不是红边框**：宿主没有 danger 实心按钮（`Button` 只有
+       * ghost / primary / outline / toolbar），自己拼一个就要连带处理暗色下白字压在
+       * red-400 上的对比度；红边框那版维护者真机一眼否掉（0.5px 红细边像给错误描框）。
+       * 黑框 + 红字已经是这一排读得懂的那一半。
+       *
        * ⚠️ **删的过程中不许关**（`cancelRemove` 里挡了）：请求已经发出去，
        * 关掉弹窗不会取消它，只会让用户以为没删成。
        */}
@@ -714,8 +724,9 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               {t('cancel')}
             </Button>
             <Button
-              variant="primary"
+              variant="outline"
               size="sm"
+              className={css.danger}
               disabled={removing}
               onClick={() => void confirmRemove()}
             >
