@@ -66,9 +66,11 @@ its own tab:
   lists every model, so you can check it back at any time). Unchecked models remain callable;
   they are only hidden from the dropdown.
 - **Sidebar entry, off by default**: the bottom of the panel has a "Sidebar entry" switch
-  (off by default). Turn it on and a sidebar row opens the panel directly; with it off (the
-  default) the panel is reachable from the Plugins page only — the sidebar is shared with the
-  host and other plugins, so this one does not claim a slot until you ask for it.
+  (off by default). Turn it on and the entry lands **inside the sidebar's "More" menu** by
+  default (it does not take a row on the rail); the same place also offers "pinned to the
+  sidebar". With the switch off (the default) the panel is reachable from the Plugins page
+  only — the sidebar is shared with the host and other plugins, so this one does not claim a
+  slot until you ask for it.
 
 ### The four channels
 

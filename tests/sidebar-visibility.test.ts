@@ -17,6 +17,8 @@ import {
   resetSidebarEntryForTests,
   setSidebarEntryVisible,
   sidebarEntryVisible,
+  setSidebarEntryPinned,
+  sidebarEntryPinned,
   subscribeSidebarEntry,
 } from '../src/client/sidebar-visibility.ts'
 
@@ -53,6 +55,36 @@ describe('侧栏行的显示状态', () => {
     stop()
     setSidebarEntryVisible(true)
     expect(listener).not.toHaveBeenCalled()
+  })
+
+  /**
+   * 位置（2026-10-26）：默认 `false` = 收在「更多」里。
+   *
+   * ⚠️ 这里的默认方向与「开关」那条**相反**：开关默认关是「不占位」，位置默认
+   * 「更多」也是「不占位」—— 两者指向同一件事，别把它读成「默认钉在栏上」。
+   */
+  it('位置默认是「更多里」（false），可以改成「栏上」再改回来', () => {
+    expect(sidebarEntryPinned()).toBe(false)
+    setSidebarEntryPinned(true)
+    expect(sidebarEntryPinned()).toBe(true)
+    setSidebarEntryPinned(false)
+    expect(sidebarEntryPinned()).toBe(false)
+  })
+
+  /**
+   * ⚠️ 位置变化**必须通知**：换位置等于换注册（`sidebar.panellist` ↔
+   * `sidebar.panellist.actions`），不通知就只是记住了值、界面上什么都没变 ——
+   * 而用户以为切换成功了。这是本仓最典型的那类「坏了不报错」。
+   */
+  it('⚠️ 位置变化会通知订阅方（换位置就是换注册）', () => {
+    const listener = vi.fn()
+    subscribeSidebarEntry(listener)
+    setSidebarEntryPinned(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+    setSidebarEntryPinned(true) // 同值不通知
+    expect(listener).toHaveBeenCalledTimes(1)
+    setSidebarEntryPinned(false)
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 
   it('多个订阅者都收到（面板与槽位注册各一个）', () => {
