@@ -448,30 +448,30 @@
 
 浏览器半边只调这些路由，**不带任何密钥**。宿主半边是唯一持有密钥的一侧。
 
-| 路由                           | 方法     | 作用                                                                                                                                                                 |
-| ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/v1/cpa/setup`            | GET/POST | 环境状态 / 一键下载 CPA 与渠道插件                                                                                                                                   |
-| `/api/v1/cpa/plugins-update`   | GET/POST | 渠道插件查版本（`?key=`）/ 更新（停 CPA → 覆盖替换）                                                                                                                 |
-| `/api/v1/cpa/status`           | GET      | CPA 运行状态、端口、是否已配密钥                                                                                                                                     |
-| `/api/v1/cpa/plugins`          | GET      | 已装渠道列表与能力（每项带派生字段 `providerId`）                                                                                                                    |
-| `/api/v1/cpa/accounts?plugin=` | GET      | 账号 + 余额（`&fresh=1` 跳过缓存）                                                                                                                                   |
-| `/api/v1/cpa/models?plugin=`   | GET      | 该渠道可选模型                                                                                                                                                       |
-| `/api/v1/cpa/school`           | GET      | 成长中心（任务 / 奖励）信息                                                                                                                                          |
-| `/api/v1/cpa/action`           | POST     | `{plugin, kind, authIndex}` → 签到 / 任务                                                                                                                            |
-| `/api/v1/cpa/account-select`   | POST     | `{plugin, authIndex}` → **选择账号**（启用它，同渠道其余自动禁用）                                                                                                   |
-| `/api/v1/cpa/account-enabled`  | POST     | `{plugin, authIndex, enabled}` → 单个启用 / 禁用                                                                                                                     |
-| `/api/v1/cpa/account-remove`   | POST     | `{plugin, authIndex}` → **删除**该号的凭据文件（不可逆，拿回来必须重新授权）                                                                                         |
-| `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                                                                                                                      |
-| `/api/v1/cpa/account-drift`    | GET/POST | GET 只探不写（`?plugin=`，**便宜探针**）；POST `{plugin}` → 把**被上游重新启用**的用户禁用号禁回去（只此一个方向）                                                   |
-| `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`）                                                                                                  |
-| `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                                                                                                                         |
-| `/api/v1/cpa/model-rows`       | GET      | 某渠道**会被推送的候选行**（面板勾选清单的来源，键与推送侧同一份）                                                                                                   |
-| `/api/v1/cpa/model-visibility` | GET/POST | 哪些模型进**选择器**（`{channel, names}` 是**要隐藏**的那批）                                                                                                        |
-| `/api/v1/cpa/panel-prefs`      | GET/POST | 显示偏好：`{sidebarEntry}` 有没有侧栏入口（**默认关**）、`{sidebarPinned}` 入口钉在栏上还是收在「更多」里（**默认更多**）；一次只改一个字段（**唯一不碰 CPA 的写**） |
-| `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                                                                                                                     |
-| `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                                                                                                                               |
-| `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                                                                                                                  |
-| `/api/v1/cpa/start`            | POST     | 手动拉起 CPA                                                                                                                                                         |
+| 路由                           | 方法     | 作用                                                                                                               |
+| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `/api/v1/cpa/setup`            | GET/POST | 环境状态 / 一键下载 CPA 与渠道插件                                                                                 |
+| `/api/v1/cpa/plugins-update`   | GET/POST | 渠道插件查版本（`?key=`）/ 更新（停 CPA → 覆盖替换）                                                               |
+| `/api/v1/cpa/status`           | GET      | CPA 运行状态、端口、是否已配密钥                                                                                   |
+| `/api/v1/cpa/plugins`          | GET      | 已装渠道列表与能力（每项带派生字段 `providerId`）                                                                  |
+| `/api/v1/cpa/accounts?plugin=` | GET      | 账号 + 余额（`&fresh=1` 跳过缓存）                                                                                 |
+| `/api/v1/cpa/models?plugin=`   | GET      | 该渠道可选模型                                                                                                     |
+| `/api/v1/cpa/school`           | GET      | 成长中心（任务 / 奖励）信息                                                                                        |
+| `/api/v1/cpa/action`           | POST     | `{plugin, kind, authIndex}` → 签到 / 任务                                                                          |
+| `/api/v1/cpa/account-select`   | POST     | `{plugin, authIndex}` → **选择账号**（启用它，同渠道其余自动禁用）                                                 |
+| `/api/v1/cpa/account-enabled`  | POST     | `{plugin, authIndex, enabled}` → 单个启用 / 禁用                                                                   |
+| `/api/v1/cpa/account-remove`   | POST     | `{plugin, authIndex}` → **删除**该号的凭据文件（不可逆，拿回来必须重新授权）                                       |
+| `/api/v1/cpa/account-intent`   | GET/POST | 读 / 恢复「用户上次的账号选择」                                                                                    |
+| `/api/v1/cpa/account-drift`    | GET/POST | GET 只探不写（`?plugin=`，**便宜探针**）；POST `{plugin}` → 把**被上游重新启用**的用户禁用号禁回去（只此一个方向） |
+| `/api/v1/cpa/auth`             | GET/POST | 起登录（`?plugin=`）/ 查进度（`?state=`）/ 取消（POST + `{state}`）                                                |
+| `/api/v1/cpa/auto-checkin`     | GET/POST | 自动签到开关                                                                                                       |
+| `/api/v1/cpa/model-rows`       | GET      | 某渠道**会被推送的候选行**（面板勾选清单的来源，键与推送侧同一份）                                                 |
+| `/api/v1/cpa/model-visibility` | GET/POST | 哪些模型进**选择器**（`{channel, names}` 是**要隐藏**的那批）                                                      |
+| `/api/v1/cpa/panel-prefs`      | GET/POST | 显示偏好：`{sidebarEntry}` 有没有侧栏入口，**默认关**（**唯一不碰 CPA 的写**）；打开后入口在侧栏「更多」菜单里     |
+| `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                                                                   |
+| `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                                                                             |
+| `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                                                                |
+| `/api/v1/cpa/start`            | POST     | 手动拉起 CPA                                                                                                       |
 
 > 上表是**可读索引**；权威事实源是 [route-table.ts](route-table.ts) 的 `buildRoutes()`。
 

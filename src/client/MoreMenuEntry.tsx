@@ -41,6 +41,8 @@ import type { ReactNode } from 'react'
 
 import { MenuItemButton } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { PanelGlyph } from './PanelGlyph.tsx'
+
 /**
  * 这个槽位的 owner props —— **只写我们用到的那个**。
  *
@@ -65,6 +67,16 @@ export function MoreMenuEntry(props: MoreMenuEntryProps): ReactNode {
   const { label, open, onDismiss } = props
   return (
     <MenuItemButton
+      /*
+       * ⚠️ **必须给图标**（2026-10-26 真机）：另外两行（浏览更多插件 / 创建你的
+       * 插件）各带一个 16px 图标，我们那一行不给的话文字会**贴到最左边**，
+       * 一眼看出「这行不是亲生的」。用侧栏那个字形（`PanelGlyph`）而不是随便
+       * 找个官方图标：同一个面板在两处（栏上 / 菜单里）应该是同一张脸。
+       *
+       * ⚠️ 尺寸**必须 16**：菜单里那几个 `Icon…OutlineRegular` 都是 16、
+       * 描边 1，而 `PanelGlyph` 本来就是照同一套几何画的（见它的文件头）。
+       */
+      icon={<PanelGlyph size={16} />}
       onSelect={() => {
         // 顺序固定：先关菜单再跳面板 —— 反过来的话菜单会在面板切走之后
         // 还挂在屏幕上（它靠 `onClose` 收，而面板切换不会触发它）。

@@ -27,8 +27,6 @@ export interface PrefsOps {
   readonly get: () => OpsResult
   /** 写「侧栏那行显示不显示」。 */
   readonly setSidebarEntry: (enabled: unknown) => OpsResult
-  /** 写「入口放在哪」（`true` = 钉在栏上，`false` = 收在「更多」里）。 */
-  readonly setSidebarPinned: (pinned: unknown) => OpsResult
 }
 
 /**
@@ -39,8 +37,8 @@ export interface PrefsOps {
  */
 export function createPrefsOps(): PrefsOps {
   function get(): OpsResult {
-    const { sidebarEntry, sidebarPinned } = readPanelPrefs()
-    return { ok: true, sidebarEntry, sidebarPinned }
+    const { sidebarEntry } = readPanelPrefs()
+    return { ok: true, sidebarEntry }
   }
 
   function setSidebarEntry(enabled: unknown): OpsResult {
@@ -51,20 +49,5 @@ export function createPrefsOps(): PrefsOps {
     return get()
   }
 
-  /**
-   * 改「入口放在哪」。
-   *
-   * ⚠️ 与 {@link setSidebarEntry} 是两个独立字段，**不联动**：
-   * 关掉入口时位置偏好保留（重开时回到用户上次选的位置）；
-   * 改位置也不代表打开入口 —— 那由开关说了算。
-   */
-  function setSidebarPinned(pinned: unknown): OpsResult {
-    if (typeof pinned !== 'boolean') {
-      return { ok: false, error: '这个开关只接受布尔值。', reason: 'bad-shape' }
-    }
-    updatePanelPrefs((current) => ({ ...current, sidebarPinned: pinned }))
-    return get()
-  }
-
-  return { get, setSidebarEntry, setSidebarPinned }
+  return { get, setSidebarEntry }
 }

@@ -322,7 +322,7 @@ let captured
  * `sidebar.panellist.actions`（「更多」里那一行）；`true` ⇒ `sidebar.panellist`
  * （栏上那个图标）。两档互斥 —— 同挂会让用户看到两个入口通向同一个面板。
  */
-const prefs = { sidebarEntry: true, sidebarPinned: false }
+const prefs = { sidebarEntry: true }
 
 /** 产物会在作用域里找 `window` 与 `document`，沙箱直接给它们。 */
 const sandbox = {
@@ -344,11 +344,7 @@ const sandbox = {
     status: 200,
     text: async () =>
       String(url).includes('/api/v1/cpa/panel-prefs')
-        ? JSON.stringify({
-            ok: true,
-            sidebarEntry: prefs.sidebarEntry,
-            sidebarPinned: prefs.sidebarPinned,
-          })
+        ? JSON.stringify({ ok: true, sidebarEntry: prefs.sidebarEntry })
         : JSON.stringify({ ok: false, error: 'not stubbed' }),
   }),
   window: {
@@ -572,7 +568,7 @@ async function main() {
   const panellistSeat = registered.find((r) => r.name === 'sidebar.panellist')
   const moreSeat = registered.find((r) => r.name === 'sidebar.panellist.actions')
   check(
-    '默认位置（更多里）注册的是 sidebar.panellist.actions',
+    '入口注册在 sidebar.panellist.actions（侧栏「更多」）',
     moreSeat !== undefined && panellistSeat === undefined,
     registered.map((r) => r.name).join(','),
   )
@@ -628,50 +624,38 @@ async function main() {
   check('入口的 disposer 被接住（关得掉 / 换得了位置）', /stopSidebarEntry/.test(clientSrc))
   check('偏好读的是 panel-prefs 路由', clientSrc.includes('/api/v1/cpa/panel-prefs'))
   check('偏好写回读值喂给侧栏状态', /setSidebarEntryVisible\(/.test(clientSrc))
-  check('位置写回读值喂给侧栏状态', /setSidebarEntryPinned\(/.test(clientSrc))
+
   /**
    * ⚠️ **旧宿主兜底**（2026-10-26）：「更多」那个座是 `0.2.1-rc.3` 才声明的，
    * 而 `slots.inject` 在槽位**从未声明**时永远不跑回调 —— 于是默认档在旧宿主上
    * 等于「侧栏什么都没有」，而用户明明打开了开关。兜底必须真的存在。
    */
   check('有「更多」座没声明时的兜底（退回栏上那一行）', /moreFallback/.test(clientSrc))
-
   /**
-   * 第二档：位置 = **钉在栏上** ⇒ 换挂 `sidebar.panellist`，且菜单那一行摘掉。
-   *
-   * ⚠️ 必须**两边都断言**：只断言新座出现了，抓不住「两档同时挂着」那种形态
-   * （用户会看到两个入口通向同一个面板）。
+   * ⚠️ 「更多」里那一行**必须带图标**（2026-10-26 真机）：另外两行各有一个
+   * 16px 图标，不给的话文字贴到最左边，一眼看出不是亲生的。
+   * 断言锚在**产物里的真实写法**上：MenuItemButton 的 icon: 后面紧跟
+   * PanelGlyph，且 size 是 16（与官方 Icon…OutlineRegular 同档）。
    */
-  prefs.sidebarPinned = true
-  applyAgain()
-  await settle()
   check(
-    '位置 = 栏上时注册了 sidebar.panellist',
-    registered.some((r) => r.name === 'sidebar.panellist'),
-    registered.map((r) => r.name).join(','),
+    '「更多」那一行有 16px 图标（我们的侧栏字形）',
+    /icon:\s*\/\* @__PURE__ \*\/ \(0, react_jsx_runtime\.jsx\)\(PanelGlyph, \{\s*size: 16\s*\}\)/.test(
+      clientSrc,
+    ),
   )
-  check(
-    '位置 = 栏上时「更多」那一行被摘掉（两档互斥）',
-    !registered.some((r) => r.name === 'sidebar.panellist.actions'),
-    registered.map((r) => r.name).join(','),
-  )
-  const railRow = registered.find((r) => r.name === 'sidebar.panellist')
-  check('栏上那一行有 list 座必需的 id', typeof railRow?.id === 'string' && railRow.id !== '')
-  check('栏上那一行的 label 是函数（跟随语言）', typeof railRow?.label === 'function')
 
   /**
-   * 第三档：偏好 = **关** ⇒ 两档都不注册。
+   * 第二档：偏好 = **关** ⇒ 入口摘掉。
    *
    * 不只看「不注册」—— 要看**那一行真的被摘掉**：再 apply 一次（它先按上一份
    * 状态挂上），随后那次读把值翻成 false，订阅者都该摘掉自己那一条。
    * 只有真的接住了 disposer，这里的 `registered` 才会干净。
    */
-  prefs.sidebarPinned = false
   prefs.sidebarEntry = false
   applyAgain()
   await settle()
   check(
-    '偏好为关时两侧入口都被摘除（disposer 真的跑了）',
+    '偏好为关时入口被摘除（disposer 真的跑了）',
     !registered.some(
       (r) => r.name === 'sidebar.panellist' || r.name === 'sidebar.panellist.actions',
     ),

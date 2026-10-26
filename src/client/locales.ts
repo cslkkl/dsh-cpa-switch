@@ -62,19 +62,16 @@ export const zh = {
    * 不写「点击以…」（开关自己会说话），也不解释实现（用户不需要知道它落在哪个文件）。
    */
   sidebarEntry: '侧栏入口',
-  sidebarEntryHint: '关掉后，面板只能从插件页打开',
   /**
-   * 「入口放在哪」（2026-10-26）：只在这一行开关**打开时**才有意义，
-   * 关掉时整行不出现（不注册任何东西，位置也就无从谈起）。
+   * ⚠️ 提示必须**说出它落在哪一个入口**（2026-10-26 维护者给定文案）：
+   * 打开后从「更多」进，而不是栏上 —— 不点明的话用户打开开关会发现栏上
+   * 什么也没多，以为没生效。
    *
-   * ⚠️ 两档的名字必须各自**说清「在哪」**：「默认」或「自动」这种词在这个位置
-   * 什么也没说 —— 用户要知道的是「栏上」还是「更多里」。而「更多」是宿主侧栏
-   * 那个按钮的名字，所以文案里要带「更多」这个字，否则用户不知道去哪找。
+   * ⚠️ **不描述「更多」在哪**（「左侧栏底部」这类）：那个按钮的位置随宿主版本变，
+   * 写死了迟早错；「更多」是宿主自己的控件名，用户看得见。
    */
-  sidebarPlacement: '入口位置',
-  sidebarPlacementMore: '收在「更多」里',
-  sidebarPlacementRail: '钉在侧栏栏上',
-  sidebarPlacementHint: '「更多」是侧栏底部那个按钮；栏上则是常驻的一行',
+  sidebarEntryHint: '开启时可以在「更多」里面打开；关掉后，面板只能从插件页打开',
+
   stopped: '未运行',
   /**
    * 状态条那一句：`<状态> · 127.0.0.1:<端口>`。
@@ -425,12 +422,9 @@ export const en: Record<LocaleKey, string> = {
   back: 'Back',
   /** See the Chinese table: the bottom-of-panel switch for the sidebar row. */
   sidebarEntry: 'Sidebar entry',
-  sidebarEntryHint: 'When off, the panel is only reachable from the Plugins page',
-  /** See the Chinese table: both option names must say *where*, not "default". */
-  sidebarPlacement: 'Entry position',
-  sidebarPlacementMore: 'Inside “More”',
-  sidebarPlacementRail: 'Pinned to the sidebar',
-  sidebarPlacementHint: '“More” is the button at the bottom of the sidebar; pinned keeps a row',
+  /** See the Chinese table: the hint must say *where* the entry lands. */
+  sidebarEntryHint: 'On, open it from “More”; off, only from the Plugins page',
+
   stopped: 'Stopped',
   statusRunning: 'Running · 127.0.0.1:{port}',
   statusStopped: 'Stopped · 127.0.0.1:{port}',
