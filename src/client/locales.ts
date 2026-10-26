@@ -283,8 +283,8 @@ export const zh = {
    * （旧句里就有，真机截图一眼看见）。判据 `tests/locales.test.ts` 钉住。
    */
   modelsTitle: '模型',
-  modelsLead: '只把常用的模型留在对话的选择器里，其余的收起来。',
-  modelsHint: '没勾的模型仍可正常调用，只是不出现在选择器里；点「保存」生效。',
+  modelsLead: '只把常用的模型留在选择器里，其余收起。',
+  modelsHint: '没勾的模型照常可用，只是不出现在选择器里；点「保存」生效。',
   modelsEmpty: '这个渠道还没有模型，先在 CPA 里加一个号。',
   modelsSelectAll: '全选',
   modelsSelectNone: '全不选',
