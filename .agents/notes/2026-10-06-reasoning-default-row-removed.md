@@ -1,6 +1,6 @@
 # 决策：声明路由默认档位，去掉选择器里的 `Default` 行（2026-10-06）
 
-状态：生效
+状态：被取代（2026-10-27 删除路由级默认档位，理由见文末「后续」一节）
 
 ## 问题
 
@@ -81,7 +81,28 @@
 
 ## 实现位置
 
-- `model-caps.ts` —— `REASONING_DEFAULT`（常量）+ `reasoningDefaultOf(开关)`；
-- `route-registry.ts` —— 构造 `RouteProfile` 时按**同一个开关**带上 `reasoning`；
-- 判据：`tests/model-reasoning.test.ts`（常量与联动）、
-  `tests/route-registry.test.ts` 的「思考档位声明」一节（真的落进 profile + 关闭时一起撤）。
+- `model-caps.ts` —— 曾为 `REASONING_DEFAULT`（常量）+ `reasoningDefaultOf(开关)`，**已于 2026-10-27 删除**（见文末「后续」）；
+- `route-registry.ts` —— 构造 `RouteProfile` 时按**同一个开关**带上 `reasoning`，**已删除**；
+- 判据：`tests/model-reasoning.test.ts`、`tests/route-registry.test.ts` 的「思考档位声明」一节。
+
+## 后续（2026-10-27）：这个默认档位被删除
+
+路由级 `reasoning` 对**整条路由上的每个模型**生效，而档位能力是**逐模型**的 ——
+而被 `model-caps.ts` 摘掉档位的模型（宿主只认 `off`）在请求路径上拿不到界面值，
+就退回这个 `high` ⇒ `UNSUPPORTED_REASONING_EFFORT`，**每次请求都炸整轮对话**，
+界面还没有入口能改（用户报「没有思考强度下拉框、默认却是 high、还用不了」）。
+
+于是 `REASONING_DEFAULT` / `reasoningDefaultOf` 一起删掉，路由 profile 不再声明
+`reasoning` —— 选择器里那行 `Default` 回来。
+
+**为什么接受**：档位本身可以直接依赖上游。它按模型和版本一直在变，硬编码猜不准，
+所以 `Default`（= 不发这个参数、由上游自己决定）本来就是**兜底**，留着比崩强。
+这也是本仓对档位的既有态度：只暴露两个语义确定的值，测不准的不硬编。
+
+**代价**：选择器多一行 `Default`（它就是上游默认，不是第三种档位）。
+
+**排除的替代方案**：默认改 `off`（不崩但没有 `Default` 行）、只给「全模型都有档位」
+的路由声明默认（四个组三样）、把摘档位的模型拆到单独 provider（改分组结构，为一行不值）。
+
+判据：`tests/model-reasoning.test.ts`（纯函数）、`tests/route-registry.test.ts`
+里「路由级不许出现 `reasoning`」那一条。

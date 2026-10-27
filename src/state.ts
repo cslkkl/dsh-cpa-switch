@@ -252,6 +252,11 @@ interface CachedRoutesFile {
  * 丢 `maxTokens` = 输出上限回退宿主兜底、丢 `input` = 图片被拒、
  * 丢 `reasoningEfforts` = 档位行消失。三种都是**静默**的。
  * 推送侧（`buildCpaRouteProfile`）新增字段时，这里要同批加。
+ *
+ * ⚠️ **路由级字段不在这个形状里，而且不该在**：曾经推过路由级 `reasoning`
+ * （默认档位），它在这里被解析丢掉 ⇒ 缓存推出去的那份与读全后推的那份**不一致**
+ * （一个崩一个不崩），那次事故的直接原因就是它。现在推送侧也不再声明，两边一致。
+ * 见[决策记录](../.agents/notes/2026-10-06-reasoning-default-row-removed.md)。
  */
 interface CachedProfile {
   displayName: string

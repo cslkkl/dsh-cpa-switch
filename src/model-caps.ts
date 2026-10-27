@@ -162,8 +162,13 @@ export interface ModelCaps {
    *
    * 宿主对省略 `reasoningEfforts` 的模型条目落 `reasoning: false`
    * （`dsh-llm-pi-ai` 的 `resolveModelReasoning`，`efforts === void 0` 分支），
-   * 界面不给该模型档位列 —— 正是「假旋钮就摘掉」。路由级默认档位
-   * （{@link REASONING_DEFAULT}）不受影响，其余模型照常。
+   * 界面不给该模型档位列 —— 正是「假旋钮就摘掉」。其余模型照常带两档。
+   *
+   * ⚠️ **摘了档位的模型与「路由级默认档位」水火不容**（2026-10-27 实机事故）：
+   * 路由级 `reasoning` 是**整条路由共用**的，而被摘掉档位的模型宿主只认 `off`；
+   * 请求路径上拿不到界面值就退回这个默认值 ⇒ **每次都抛
+   * `UNSUPPORTED_REASONING_EFFORT`、整轮对话失败**，而界面没有入口能改。
+   * 所以路由级 `reasoning` 现在**一律不声明**（见 {@link REASONING_EFFORTS} 的末节）。
    *
    * 依据与取舍见[决策记录](../.agents/notes/2026-10-10-hunyuan-chat-omits-reasoning-efforts.md)；
    * 判据 [tests/model-caps.test.ts](../tests/model-caps.test.ts) +
@@ -306,39 +311,21 @@ export function offSpellingOf(channel: string): string {
 }
 
 /**
- * 路由的默认档位 —— 声明它**为了去掉选择器里的「Default」那一行**。
+ * ## ⚠️ 路由级 `reasoning` 是禁区
  *
- * ## 「Default」不是我们给的档位，是宿主补的一行
+ * 这里曾经有一个 `REASONING_DEFAULT = 'high'`，只为去掉选择器里的 `Default` 行 ——
+ * 那是宿主在「路由没声明默认档位」时补的一行。**已删除**，别再往回加。
  *
- * 用户看到的三个选项里，`Off` / `High` 来自 {@link REASONING_EFFORTS}，
- * 而 **`Default` 是宿主自己插的**，判据在实装宿主包里：
+ * 因为路由级字段对**整条路由上每个模型**生效，而档位能力是**逐模型**的：
+ * 被 {@link ModelCaps.reasoningEfforts} 摘掉档位的模型宿主只认 `off`，请求时
+ * 拿不到界面值就退回这个默认值 ⇒ 抛 `UNSUPPORTED_REASONING_EFFORT`，
+ * **每次请求都炸**，界面也没有入口能改（2026-10-27 实机，`zcode/glm-5.3-flash`）。
  *
- * - `dsh-llm-pi-ai` 的 `modelInfo`（`lib/index.js:1816`）组装模型元数据时，
- *   `defaultEffort` **只在路由级 `reasoning` 设了值时才出现**
- *   （`describableReasoningLevel(resolvedModel, profile.reasoning)`）；
- * - `dsh-client-ui-model-selection` 的 `effortChoices`（`lib/client.js:565`）
- *   在 `reasoning.defaultEffort === undefined` 时补一行 `effort.providerDefault`，
- *   文案就是 **`Default`**（同文件 `:1101`）。
- *
- * 所以「去掉 Default」**不能靠删 `off`**：删了 `defaultEffort` 仍是 `undefined`，
- * 那一行照旧在，而且 `Off` 会消失 —— 用户看到的是 `Default | High`，
- * 比现在还少一个真档位（`Default` 不发任何档位 = 旧行为，名字却在暗示「默认值」）。
- *
- * ## 值为什么是 `high` 而不是 `off`
- *
- * 声明它同时**决定了新会话的初始档位**。取 `high` 与面板的默认口径一致
- * （{@link reasoningEffortsOf} 默认开 = 默认想），且**与现状等价**：
- * 现在用户在 `Default` 上拿到的就是不带档位的默认行为，而 `high` 是本仓认定的「开」。
- * 取 `off` 则把默认变成「不思考」，那是**改默认行为**，不是修界面。
- *
- * ## ⚠️ 值必须落在 {@link REASONING_EFFORTS} 里
- *
- * 宿主对**声明**的档位是宽容的：值不在支持列表里就当没设 → `Default` 又回来，
- * 而且**零报错**（`describableReasoningLevel` 的注释明说「描述能力不该因为配置
- * 降级而失败」）。这条约束**没有宿主兜底**，只能我们自己钉 ——
- * 判据见 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts)。
+ * 而档位这事本来就**可以直接依赖上游** —— 它按模型/版本一直在变，硬编码猜不准，
+ * `Default`（= 什么都不发、由上游自己决定）正是那个兜底。
+ * 决策与"别再试"的三条替代方案见
+ * [决策记录](../.agents/notes/2026-10-06-reasoning-default-row-removed.md)。
  */
-export const REASONING_DEFAULT = 'high' as const
 
 /**
  * 按总开关 + 渠道给出宿主要的 `reasoningEfforts` 声明；关掉开关时返回 `undefined`（不声明）。
@@ -377,20 +364,6 @@ export function reasoningEffortsOf(
   return swapped
     ? { [OFF_KEY]: HIGH_SPELLING, [HIGH_KEY]: off }
     : { [OFF_KEY]: off, [HIGH_KEY]: HIGH_SPELLING }
-}
-
-/**
- * 路由级的默认档位；**总开关关掉时返回 `undefined`**（不声明）。
- *
- * 开关关掉必须连着默认一起撤：没有 `reasoningEfforts` 却留着 `reasoning`
- * 是个**半截状态** —— 选择器里没有 Effort 行，而每个请求仍被钉在 `high` 上。
- * 那正是这个开关要逃开的东西（见 `AGENTS.md` 的「上游会对推理档位返硬错误」），
- * 留着它等于逃生通道漏了一半。
- *
- * @param enabled 面板上的总开关（「允许切换思考档位」）。
- */
-export function reasoningDefaultOf(enabled: boolean): string | undefined {
-  return enabled ? REASONING_DEFAULT : undefined
 }
 
 /**

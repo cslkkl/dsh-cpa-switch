@@ -208,10 +208,12 @@ choosing **off** works on all four channels without being rejected over wording.
 ⚠️ If the upstream ever rejects a level value (the whole turn errors out), **switch that setting
 off** to recover.
 
-> **Why there is no `Default` row in the menu**: DSH adds one only when a route declares no
-> default level, and it carries the same "send no level" behaviour as **off** while its name reads
-> like a value. The plugin declares the default level (**on**), so the menu is exactly
-> **off / on**. Mechanism and trade-offs are in the
+> **Why the menu has a `Default` row**: DSH adds it when a route declares no default level, and
+> its meaning is exactly that — **send no level, let the upstream decide**. Levels differ a lot
+> between models and the upstream keeps changing them, so the plugin pins no default: `Default`
+> is the fallback, and the other two rows are the two levels the plugin offers. It once did pin
+> one (`high`) to remove that row, but that crashed every model with the effort row removed, so
+> it was reverted. Mechanism and trade-offs are in the
 > [decision record](.agents/notes/2026-10-06-reasoning-default-row-removed.md).
 
 ## Known limitations

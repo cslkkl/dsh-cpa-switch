@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  REASONING_DEFAULT,
-  REASONING_EFFORTS,
-  offSpellingOf,
-  reasoningDefaultOf,
-  reasoningEffortsOf,
-} from '../src/model-caps.ts'
+import * as capsModule from '../src/model-caps.ts'
+import { REASONING_EFFORTS, offSpellingOf, reasoningEffortsOf } from '../src/model-caps.ts'
 import { CHANNEL_IDS } from '../src/channels/registry.ts'
 
 /**
@@ -54,12 +49,10 @@ describe('REASONING_EFFORTS', () => {
   })
 
   /**
-   * ⚠️ **`off` 不许删** —— 「菜单里只留 Off / High」是**另一件事**（见下面的
-   * `REASONING_DEFAULT`），删 `off` 达不到那个目的，还会踩两条：
-   * ① 宿主硬约束要求「除 `off` 外至少一个档位」，只剩 `high` 会被判非法；
-   * ② 菜单里的 `Default` 来自宿主补行，与 `off` 在不在无关。
+   * ⚠️ **`off` 不许删** —— 删它既达不到任何目的，还会撞上宿主的硬约束
+   * （「除 `off` 外至少一个档位」），整个 provider 一起消失。
    */
-  it('⚠️ 保留 off —— 删它既去不掉 Default，又会撞上宿主的硬约束', () => {
+  it('⚠️ 保留 off —— 删它会撞上宿主的硬约束', () => {
     expect(REASONING_EFFORTS).toHaveProperty('off')
   })
 })
@@ -153,49 +146,21 @@ describe('关的拼写按渠道给', () => {
 })
 
 /**
- * 路由默认档位 —— 它**不是第三个档位**，是「去掉 `Default` 行」的开关。
+ * ⚠️ **路由级默认档位是禁区** —— 这里原先测的是 `REASONING_DEFAULT`（常量 +
+ * `reasoningDefaultOf`），2026-10-27 两者已删除。
  *
- * ## 为什么需要它
+ * 原因：那个字段对**整条路由每个模型**生效，而档位能力是逐模型的 ——
+ * 被摘掉档位的模型宿主只认 `off`，请求时拿不到界面值就退回这个默认值 ⇒
+ * `UNSUPPORTED_REASONING_EFFORT`，**每次请求都炸整轮对话**。
  *
- * 用户看到的菜单是 `Default | Off | High`，而 `Default` **不来自我们**：
- * 宿主 `dsh-client-ui-model-selection` 在 `reasoning.defaultEffort === undefined` 时
- * 补一行 `effort.providerDefault`（文案就是 `Default`）；而 `defaultEffort` 只在
- * **路由级 `reasoning` 有值**时才由 `dsh-llm-pi-ai` 给出。
- *
- * ⚠️ **所以「只留 Off 和 High」不能靠删 `off` 实现** —— 删了 `Default` 照样在
- * （`defaultEffort` 仍是 `undefined`），`Off` 反而没了，只剩 `Default | High`。
- * 那条路还同时撞上宿主的硬约束（除 `off` 外至少一个档位），见上面那组用例。
- *
- * ## 两条没有宿主兜底的约束
- *
- * 值写错时宿主**不报错**（`describableReasoningLevel` 明说「描述能力不该因为配置
- * 降级而失败」）：它只是当作没设 → `Default` 悄悄回来。界面回归而**零信号**，
- * 所以这两条必须由我们钉住。
+ * 不能靠「单测这个常量很合理」来防回归（它本身确实自洽），所以判据放在
+ * 「推出去的 profile 里到底有没有这个字段」那一侧 ——
+ * 见 [tests/route-registry.test.ts](route-registry.test.ts) 的「路由级不许出现 reasoning」。
+ * 决策记录见 [../.agents/notes/2026-10-06-reasoning-default-row-removed.md](../.agents/notes/2026-10-06-reasoning-default-row-removed.md)。
  */
-describe('REASONING_DEFAULT', () => {
-  it('默认档位是 high —— 与「默认开」的口径一致，且等价于改动前的默认行为', () => {
-    expect(REASONING_DEFAULT).toBe('high')
-  })
-
-  it('⚠️ 它必须落在声明的档位里（否则宿主零报错，Default 又回来）', () => {
-    expect(Object.keys(REASONING_EFFORTS)).toContain(REASONING_DEFAULT)
-  })
-})
-
-describe('reasoningDefaultOf', () => {
-  it('开关打开时给出默认档位', () => {
-    expect(reasoningDefaultOf(true)).toBe('high')
-  })
-
-  it('⚠️ 开关关闭时不声明 —— 声明了档位才谈得上默认，否则是「没有 Effort 行却钉在 high」', () => {
-    expect(reasoningDefaultOf(false)).toBeUndefined()
-  })
-
-  it('⚠️ 与档位声明同开同关（半截状态是这里唯一要防的回归）', () => {
-    for (const enabled of [true, false]) {
-      expect(reasoningDefaultOf(enabled) === undefined).toBe(
-        reasoningEffortsOf(enabled) === undefined,
-      )
-    }
+describe('路由级默认档位已删除', () => {
+  it('⚠️ 模块不再导出 REASONING_DEFAULT / reasoningDefaultOf（加回来会让摘了档位的模型整轮崩）', () => {
+    expect(Object.keys(capsModule)).not.toContain('REASONING_DEFAULT')
+    expect(Object.keys(capsModule)).not.toContain('reasoningDefaultOf')
   })
 })

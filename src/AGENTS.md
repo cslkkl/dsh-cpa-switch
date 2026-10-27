@@ -50,9 +50,13 @@ src/ 特有约束：
   ② **形状有宿主兜底，*值*没有** —— 「关」发出去的那个词只由我们给（zcode 只认 `none`
   不认 `off`），宿主**不校验值是不是上游认的词** ⇒ 写错没有任何构建期或测试期信号，
   只到请求时才炸，而且炸的是**整轮对话**（实测 `11150`）；
-  ③ **选择器里的 `Default` 行不是我们给的档位，删档位去不掉它** —— 要动的是
-  **路由级 `reasoning`**（`REASONING_DEFAULT`）；把它理解成「删 `off`」会同时踩两脚：
-  `Default` 照旧在，而且除 `off` 外没了别的档位 ⇒ 宿主判非法、整个 provider 一起消失。
-  判据 `tests/model-reasoning.test.ts` + `tests/model-caps.test.ts`。
+  ③ **路由级 `reasoning` 是禁区，别加回来**（2026-10-27 实机崩溃）—— 它曾是去掉选择器
+  `Default` 行的唯一手段（`REASONING_DEFAULT`），但那个字段对**整条路由每个模型**生效，
+  而档位能力是逐模型的：被摘掉档位的模型宿主只认 `off`，请求时拿不到界面值就退回这个
+  默认值 ⇒ `UNSUPPORTED_REASONING_EFFORT`，**每次请求都炸整轮**，界面无入口可改。
+  档位本来就**可以直接依赖上游**（按模型/版本一直变，硬编猜不准），`Default` 正是兜底。
+  判据 `tests/model-reasoning.test.ts` + `tests/route-registry.test.ts`（「路由级不许出现
+  `reasoning`」）；理由与替代方案见
+  [决策记录](../.agents/notes/2026-10-06-reasoning-default-row-removed.md)。
 
 文件清单与「改哪」见 [README.md](README.md)，不写在这里。
