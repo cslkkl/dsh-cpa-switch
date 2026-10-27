@@ -42,7 +42,7 @@ import {
   providerLabelOf,
 } from './channels/registry.ts'
 import { aliasFor, buildAliasTable, stripChannelPrefixes, type AliasTable } from './model-alias.ts'
-import { capsOf, reasoningDefaultOf, reasoningEffortsOf } from './model-caps.ts'
+import { capsOf, reasoningEffortsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
 import { readCachedRoutes, writeCachedRoutes } from './state.ts'
 import { CPA_API_KEY_REF, type LoggerLike } from './credentials.ts'
@@ -147,13 +147,16 @@ interface RouteProfile {
   readonly baseURL: string
   readonly apiKeyEnv: typeof CPA_API_KEY_REF
   /**
-   * 路由级默认思考档位。
+   * ⚠️ **路由级 `reasoning` 一律不许出现** —— 这个字段曾经在这里（见 git 历史的
+   * `REASONING_DEFAULT`），2026-10-27 因为一次整轮崩溃被删除。
    *
-   * **它的作用不是选档位，是去掉选择器里的 `Default` 那一行** ——
-   * 那行是宿主在「路由没声明默认」时补的。取值与理由见 `REASONING_DEFAULT`。
-   * 总开关关掉时整个省略（连默认一起撤）。
+   * 它作用于**整条路由上的每一个模型**，而档位能力是**逐模型**的：被
+   * `model-caps.ts` 摘掉档位的模型宿主只认 `off`，请求时拿不到界面值就退回
+   * 这个默认值 ⇒ 抛 `UNSUPPORTED_REASONING_EFFORT`、整轮对话失败。
+   * 取舍与「别再试」的三条替代方案见 `model-caps.ts` 里 REASONING_DEFAULT 那段注释。
+   *
+   * 所以这个类型里**故意不声明该字段**：写上去编译就报错，比注释可靠。
    */
-  readonly reasoning?: string
   readonly models: readonly RouteModel[]
 }
 
@@ -807,12 +810,16 @@ function buildCpaRouteProfile(
    */
   const effortsEnabled = deps.reasoningEffortsEnabled?.() ?? false
   /**
-   * 路由默认档位：**与档位声明同源同开关**。
+   * ⚠️ **这里曾经声明过路由级默认档位（`reasoning: 'high'`），已删除。**
    *
-   * ⚠️ 它留在**路由级**（不分渠道）：它承担的是「去掉选择器里的 `Default` 行」
-   * 这件界面事，而选择器是路由级的。取值理由见 `model-caps.ts` 的 `REASONING_DEFAULT`。
+   * 它当初只为去掉选择器里的 `Default` 行，但那个字段作用于**整条路由**，
+   * 而档位能力是**逐模型**的 ⇒ 被摘掉档位的模型（宿主只认 `off`）会在请求路径上
+   * 退回这个默认值并抛 `UNSUPPORTED_REASONING_EFFORT`，**整轮对话失败**。
+   * 2026-10-27 实机事故。取舍与替代方案见 `model-caps.ts` 的同名注释段。
+   *
+   * 别再加回来 —— 判据钉住「路由级不许出现 reasoning」，
+   * 而 `RouteProfile` 类型里也没有这个字段（写上去编译就报错）。
    */
-  const reasoning = reasoningDefaultOf(effortsEnabled)
   /**
    * 输出上限的**路由级默认**：逐行落成该行的 `maxTokens`（模型级例外见
    * `model-caps.ts` 的 `ModelCaps.maxOutputTokens`）。
@@ -912,12 +919,14 @@ function buildCpaRouteProfile(
   /**
    * 每个组的公共部分（除 `models` / `displayName` 外全同）：一次算好再展开，
    * 避免四个组各抄一遍 `baseURL` / `apiKeyEnv` 而漂开。
+   *
+   * ⚠️ **这里不许出现任何「按整条路由生效」的档位字段**（`reasoning`）——
+   * 见上面的注释与 `RouteProfile` 类型的说明。
    */
   const shared: Omit<RouteProfile, 'displayName' | 'models'> = {
     api: 'openai-completions',
     baseURL: `http://127.0.0.1:${String(deps.gateway.port)}/v1`,
     apiKeyEnv: CPA_API_KEY_REF,
-    ...(reasoning === undefined ? {} : { reasoning }),
   }
   return {
     groups: [...groups.values()].map((group) => ({

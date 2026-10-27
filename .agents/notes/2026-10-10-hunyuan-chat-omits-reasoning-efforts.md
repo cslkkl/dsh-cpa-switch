@@ -22,7 +22,13 @@
 
 宿主对省略该字段的模型条目落 `reasoning: false`
 （`resolveModelReasoning` 的 `efforts === void 0` 分支），界面不给该模型 Effort 行。
-路由级默认档位（`REASONING_DEFAULT`）不动，同清单其余模型照常带两档。
+同清单其余模型照常带两档。
+
+⚠️ **2026-10-27 修正**：本文原先写「路由级默认档位（`REASONING_DEFAULT`）不动」——
+那个默认档位已经**删掉**了。它正是被这条省略打崩的：路由级字段对整条路由生效，
+而摘了档位的模型宿主只认 `off`，请求时退回默认的 `high` ⇒
+`UNSUPPORTED_REASONING_EFFORT`、每次请求都炸。见
+[默认档位决策的「后续」一节](2026-10-06-reasoning-default-row-removed.md)。
 
 ### 边界
 

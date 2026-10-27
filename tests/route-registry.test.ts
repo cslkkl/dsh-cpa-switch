@@ -1721,27 +1721,27 @@ describe('思考档位声明', () => {
   })
 
   /**
-   * ⚠️ **这条钉的是「选择器里不再出现 `Default` 行」**，也就是用户实际看到的界面。
+   * ⚠️ **这条钉的是「路由级不许出现 `reasoning`」** —— 2026-10-27 实机崩溃的回归判据。
    *
-   * 宿主只在**路由级 `reasoning` 有值**时才给出 `defaultEffort`，而
-   * `dsh-client-ui-model-selection` 恰恰在 `defaultEffort === undefined` 时补一行
-   * `Default`（见 `model-caps.ts` 的 `REASONING_DEFAULT`）。所以「声明了几个档位」
-   * 与「菜单里有几行」是两件事：删 `off` 改不了行数，声明默认才能。
+   * 那个字段曾经存在（`REASONING_DEFAULT = 'high'`，为去掉选择器里的 `Default` 行），
+   * 但它对**整条路由每个模型**生效，而档位能力是逐模型的：被摘掉档位的模型
+   * （宿主落 `reasoning: false`，只认 `off`）在请求路径上拿不到界面值就退回这个默认值
+   * ⇒ `UNSUPPORTED_REASONING_EFFORT`，**每次请求都炸**，而界面没有入口能改。
+   *
+   * 所以整份清单里**任何一组**都不许带这个字段。判据直接看推出去的 profile ——
+   * 单测常量本身没意义（它原本就是自洽的）。
    */
-  it('⚠️ 路由带上默认档位 —— 否则选择器会多出一行 Default', async () => {
-    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
-    const { entry, pushed } = fakeEntry(BASELINE)
-
-    await attachRouteRegistry(
-      fakeHost(entry).host,
-      withReasoning(cpa, () => true),
-    )('boot')
-
-    expect(pushed.at(-1)?.reasoning).toBe('high')
-  })
-
-  it('⚠️ 默认档位必须落在声明的档位里（写错值时宿主零报错，只是 Default 又回来）', async () => {
-    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: CATALOG })
+  it('⚠️ 路由级不许出现 reasoning —— 否则摘了档位的模型每次都炸', async () => {
+    const cpa = fakeCpa({
+      files: [
+        { name: 'w1', provider: 'workbuddy' },
+        // zcode 的 glm-5.3 在校准表里带 `reasoningEfforts: false`（摘掉档位），
+        // 正是宿主只认 `off` 的那一类 —— 路由级默认档位一出现它就会崩。
+        { name: 'z1', provider: 'zcode' },
+      ],
+      models: { w1: ['deepseek-v4.1-flash'], z1: ['glm-5.3'] },
+      catalog: ['deepseek-v4.1-flash', 'glm-5.3'],
+    })
     const { entry, pushed } = fakeEntry(BASELINE)
 
     await attachRouteRegistry(
@@ -1750,12 +1750,14 @@ describe('思考档位声明', () => {
     )('boot')
 
     const record = pushed.at(-1)
-    expect(record?.reasoning).toBeDefined()
-    for (const row of record?.rows ?? []) {
-      expect(Object.keys((row.reasoningEfforts ?? {}) as object)).toContain(
-        String(record?.reasoning),
-      )
-    }
+    expect(record?.rows.length).toBeGreaterThan(0)
+    expect(record?.reasoning).toBeUndefined()
+    // 「摘了档位的模型」与「带档位的模型」在同一份清单里，才谈得上这条判据有意义。
+    const effortsOf = new Map(
+      (record?.rows ?? []).map((row) => [String(row.id), row.reasoningEfforts]),
+    )
+    expect(effortsOf.get('glm-5.3')).toBeUndefined()
+    expect(effortsOf.get('deepseek-v4.1-flash')).toEqual({ off: 'off', high: 'high' })
   })
 
   it('⚠️ 开关关闭时一个都不带（回到「没有 Effort 行」的原状）', async () => {
