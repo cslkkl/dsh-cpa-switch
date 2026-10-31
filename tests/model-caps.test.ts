@@ -144,9 +144,18 @@ describe('supportsImages', () => {
     expect(capsOf('trae', 'custom_model_gemini')).toBeUndefined()
   })
 
+  it('⚠️ WorkBuddy 侧 glm-5.3 / glm-5.3-flash 实测带真视觉 → 标 ✅（2026-10-30 反证）', () => {
+    // 官方文档曾记「GLM-5.3 仅文本」，但 CPA 直连差分实测推翻：
+    // 真图（白底黑字 2831）读出 2831、空白图答 NONE、不发图时自述「没收到图片」
+    // —— 这是真视觉，不是文本补全。workbuddy 侧补标；zcode/trae 侧各自有据才动。
+    for (const model of ['glm-5.3', 'glm-5.3-flash']) {
+      expect(capsOf('workbuddy', model)?.supportsImages).toBe(true)
+    }
+  })
+
   it('⚠️ 官方说「仅文本」的模型不标', () => {
-    // glm-5.3 三处供给，官方明确仅文本
-    for (const ch of ['workbuddy', 'trae', 'zcode']) {
+    // glm-5.3：zcode / trae 侧仍按官方文档保持不标 —— 渠道侧各自有据才动
+    for (const ch of ['trae', 'zcode']) {
       expect(capsOf(ch, 'glm-5.3')?.supportsImages).toBeUndefined()
     }
   })

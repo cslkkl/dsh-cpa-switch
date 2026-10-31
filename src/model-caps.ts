@@ -394,8 +394,10 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     'deepseek-v4-flash': { contextWindow: 1_000_000, supportsImages: true },
     'deepseek-v3-2-volc': { contextWindow: 1_000_000 },
     'glm-5.2': { contextWindow: 1_000_000, supportsImages: true },
-    'glm-5.3': { contextWindow: 1_000_000 },
-    'glm-5.3-flash': { contextWindow: 1_000_000 },
+    // 2026-10-30 实测：真图读出 2831、空白图答 NONE —— 真视觉，官方「仅文本」的反证
+    //（CPA 直连 /v1/chat/completions 差分对照）。改判据见 tests/model-caps.test.ts。
+    'glm-5.3': { contextWindow: 1_000_000, supportsImages: true },
+    'glm-5.3-flash': { contextWindow: 1_000_000, supportsImages: true },
     'glm-5.1': { contextWindow: 200_000, supportsImages: true },
     'glm-5.0': { contextWindow: 1_000_000, supportsImages: true },
     'glm-5v-turbo': { contextWindow: 200_000, supportsImages: true },
