@@ -17,16 +17,18 @@
  * @module dsh-cpa-switch/client/use-model-visibility
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { cacheKeys } from './cache-keys.ts'
-import { paths, setModelVisibility } from './endpoints.ts'
+import { paths, probeModelHealth, setModelVisibility } from './endpoints.ts'
 import {
   hiddenInChannelOf,
   hiddenNamesOf,
+  modelHealthOf,
   modelRowsOf,
   candidateRowsOf,
   sectionStateOf,
+  type ModelHealthView,
   type ModelRow,
   type ModelSectionState,
 } from './model-visibility.ts'
@@ -51,7 +53,23 @@ export interface ModelVisibilityState {
   readonly toggle: (bare: string, shown: boolean) => void
   readonly toggleAll: (shown: boolean) => void
   readonly save: () => void
+  /**
+   * 最近一次健康探测的结果（按裸名索引）；没探过就是 `undefined`。
+   *
+   * ⚠️ **不缓存、不落盘**：这是「这一轮看到了什么」，不是模型常性 ——
+   * 上游恢复得比任何记录都快（见 `src/ops/model-health.ts` 头注）。
+   */
+  readonly health: ModelHealthView | undefined
+  /** 探测进行中。 */
+  readonly probing: boolean
+  /** 探测失败的说明。 */
+  readonly probeError: string | undefined
+  /** 跑一轮探测。**会消耗额度**，只能由用户显式点。 */
+  readonly probe: () => void
 }
+
+/** 一次探测在界面上要的东西 —— 形状的唯一来源在 `model-visibility.ts`。 */
+export type { ModelHealthView }
 
 /**
  * 读一个渠道的模型可见性。
@@ -107,10 +125,56 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | undefined>(undefined)
 
+  /**
+   * 健康探测的三个状态。
+   *
+   * ⚠️ **切渠道就清空**：结论属于某个渠道的那批模型，跨渠道留着会让
+   * 「上一个渠道全绿」显示在下一个渠道上 —— 而那是**看起来最坏的一种撒谎**。
+   */
+  const [health, setHealth] = useState<ModelHealthView | undefined>(undefined)
+  const [probing, setProbing] = useState(false)
+  const [probeError, setProbeError] = useState<string | undefined>(undefined)
+
+  /**
+   * 探测在飞的标记。用 ref 而不是只靠 `probing`：`probing` 是异步的，
+   * 连点两次会在同一帧里都读到 `false`，于是放两轮请求出去（**两轮就是两份额度**）。
+   */
+  const probingRef = useRef(false)
+
   useEffect(() => {
     setDraft(undefined)
     setSaveError(undefined)
     setIsOpen(false)
+    setHealth(undefined)
+    setProbeError(undefined)
+    setProbing(false)
+    probingRef.current = false
+  }, [plugin])
+
+  /**
+   * 跑一轮探测。
+   *
+   * ⚠️ **它花钱**（每个模型一次真实推理请求），所以只有用户点才跑、
+   * 而且**同一时刻只允许一轮**（`probingRef`）。
+   */
+  const probe = useCallback(() => {
+    if (probingRef.current) return
+    probingRef.current = true
+    setProbing(true)
+    setProbeError(undefined)
+    setHealth(undefined)
+    void probeModelHealth(plugin)
+      .then((result) => {
+        if (!result.ok) {
+          setProbeError(result.error ?? 'probe-failed')
+          return
+        }
+        setHealth(modelHealthOf(result))
+      })
+      .finally(() => {
+        probingRef.current = false
+        setProbing(false)
+      })
   }, [plugin])
 
   /** 以草稿为准的行：有未保存的改动时按草稿覆盖勾选态。 */
@@ -204,6 +268,10 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
     toggle,
     toggleAll,
     save,
+    health,
+    probing,
+    probeError,
+    probe,
   }
 }
 

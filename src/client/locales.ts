@@ -302,6 +302,19 @@ export const zh = {
   modelsEmpty: '这个渠道还没有模型，先在 CPA 里加一个号。',
   modelsSelectAll: '全选',
   modelsSelectNone: '全不选',
+  /**
+   * 模型健康探测（`/api/v1/cpa/model-health`）。
+   *
+   * ⚠️ **必须说清它花钱**：它会给每个模型真发一句 `hi`。文案里点明「会消耗少量额度」，
+   * 而按钮本身也做成 `ghost` + 放在弹窗底部 —— 不给它和「保存」同等的份量。
+   * ⚠️ 结果三类要能一眼分开：`healthy` / `empty`（200 但没产出）/ `failed`（请求就失败）。
+   */
+  modelsHealth: '探测一下',
+  modelsHealthHint: '给每个模型真发一句「hi」，看回的是不是空壳。会消耗少量额度。',
+  modelsHealthRunning: '正在探测…',
+  modelsHealthSummary: '正常 {healthy} · 空回复 {empty} · 失败 {failed}',
+  modelsHealthEmpty: '回了 200，但正文和思考都是空的 —— 用户选它只会得到一片空白',
+  modelsHealthFailed: '请求失败',
   save: '保存',
   failedWith: '{action}失败：{reason}',
   checkedIn: '已签到',
@@ -538,6 +551,15 @@ export const en: Record<LocaleKey, string> = {
   modelsEmpty: 'This channel has no models yet — add an account in CPA first.',
   modelsSelectAll: 'Select all',
   modelsSelectNone: 'Select none',
+  /** See the Chinese table: say plainly that probing costs credits. */
+  modelsHealth: 'Probe models',
+  modelsHealthHint:
+    'Sends one "hi" to every model to see whether it answers with an empty shell. Uses a little credit.',
+  modelsHealthRunning: 'Probing…',
+  modelsHealthSummary: '{healthy} healthy · {empty} empty · {failed} failed',
+  modelsHealthEmpty:
+    'Returned 200 with empty content and empty reasoning — picking it gets you a blank answer',
+  modelsHealthFailed: 'Request failed',
   save: 'Save',
   failedWith: '{action} failed: {reason}',
   checkedIn: 'Checked in',

@@ -51,6 +51,13 @@ export const paths = {
   /** 模型可见性：哪些模型进**选择器**（`GET` 读、`POST` 改某渠道的隐藏列表）。 */
   modelVisibility: '/api/v1/cpa/model-visibility',
   /**
+   * 模型健康探测（`POST {plugin}`）。
+   *
+   * ⚠️ **会发真实推理请求、消耗额度** —— 这是本插件唯一一个花钱的读。
+   * 所以它只能由用户显式点一次触发，绝不许挂进任何刷新链。
+   */
+  modelHealth: '/api/v1/cpa/model-health',
+  /**
    * 显示偏好（`GET` 读、`POST` 写）：侧栏那一行显示不显示。
    *
    * ⚠️ 唯一**不碰 CPA** 的写：它不改账号、不发请求，所以宿主侧那条路由
@@ -293,6 +300,17 @@ export function setModelVisibility(
     }
     return result
   })
+}
+
+/**
+ * 模型健康探测：给这个渠道的每个模型真发一句 `hi`，看回的是不是空壳。
+ *
+ * ⚠️ **它花钱**（每个模型一次真实推理请求）。所以：
+ * - 只能由用户显式点一次触发，**不许**挂进任何刷新链或轮询；
+ * - **失败不作废任何读**：它不改任何状态，只是去问了一圈。
+ */
+export function probeModelHealth(channel: string): Promise<ApiResult> {
+  return post(paths.modelHealth, { plugin: channel })
 }
 
 /**

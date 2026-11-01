@@ -444,6 +444,31 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
     },
     {
       /**
+       * 模型健康探测：**用户点这个模型，会不会白跑一次**。
+       *
+       * - `GET ?plugin=` —— 只回「这个渠道能探哪些模型」，**不发任何请求**；
+       * - `POST {plugin}` —— 真跑一轮，逐个模型发一句 `hi`，看回的是不是空壳。
+       *
+       * ⚠️ **它会发真实推理请求、消耗额度**，所以必须是显式 `POST`：
+       * 把探测挂在 `GET` 上（或挂到某次刷新里）等于每次打开面板都烧一遍额度。
+       *
+       * ⚠️ 判据是「**什么都没有产出**」而不是「正文为空」：带思考链的模型
+       * （`wb/step-5-preview`）正经回复也可能正文为空，那种必须算健康。
+       * 判定只有一处：`src/health-probe.ts` 的 `emptyCompletionOf`（有判据）。
+       */
+      path: '/api/v1/cpa/model-health',
+      methods: ['GET', 'POST'],
+      handle: async (request) => {
+        if (request.method === 'GET') {
+          const url = new URL(request.url)
+          return json(ops.modelHealth.candidates(url.searchParams.get('plugin')))
+        }
+        const body = await readBody(request)
+        return json(await ops.modelHealth.probe(body.plugin))
+      },
+    },
+    {
+      /**
        * 显示偏好：侧栏入口显示不显示。
        *
        * body: `{sidebarEntry: boolean}`；`GET` 读、`POST` 写。

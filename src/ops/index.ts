@@ -20,6 +20,7 @@ import type { InstallDeps, SetupSession } from '../setup/index.ts'
 import { createAccountsOps, type AccountsOps } from './accounts.ts'
 import { createActionsOps, type ActionsOps } from './actions.ts'
 import { createEnableOps, type EnableOps } from './enable.ts'
+import { createModelHealthOps, type ModelHealthOps } from './model-health.ts'
 import { createModelVisibilityOps, type ModelVisibilityOps } from './model-visibility.ts'
 import { createPrefsOps, type PrefsOps } from './prefs.ts'
 import type { CandidateRow as CandidateModelRow } from './model-visibility.ts'
@@ -114,6 +115,15 @@ export interface Operations {
    * ⚠️ 与上面所有域的区别：它**不碰 CPA、不发请求**，只决定本插件自己的界面。
    */
   readonly prefs: PrefsOps
+  /**
+   * 模型健康探测：**用户点这个模型，会不会白跑一次**。
+   *
+   * ⚠️ 唯一一个**主动发真实推理请求**的域（会烧额度）：所以必须先点名才跑，
+   * 而且并发有上限。它回答的是「上游那个 200 是不是空壳」——
+   * 面板上的 `status=active` 与 `/v1/models` 都答不了这个问题（2026-11-01 实测
+   * ZCode 整渠道空回复，两处都显示一切正常）。
+   */
+  readonly modelHealth: ModelHealthOps
 }
 
 /** 按域组装业务层。 */
@@ -139,6 +149,19 @@ export function createOperations(deps: OpsDeps): Operations {
        */
       ...(deps.candidateModelRows === undefined ? {} : { candidateRows: deps.candidateModelRows }),
       ...(deps.logger === undefined ? {} : { logger: deps.logger }),
+    }),
+    modelHealth: createModelHealthOps({
+      /**
+       * 发包走唯一通道 `gateway.fetch`（连接参数现取）—— 与其余各域同一口径。
+       * 探测要的是「它到底答不答」，所以用 `POST /v1/chat/completions`，
+       * 而不是只读一个目录。
+       */
+      send: (path, init) => deps.gateway.fetch(path, init),
+      /**
+       * 候选行**复用**勾选清单那一份（`candidateModelRows`）：
+       * 探的就是用户能选到的那些，两份清单漂开会让「探测说好的、选到却是坏的」。
+       */
+      ...(deps.candidateModelRows === undefined ? {} : { candidateRows: deps.candidateModelRows }),
     }),
     prefs: createPrefsOps(),
   }

@@ -30,6 +30,7 @@ import type { ReactNode } from 'react'
 import { Button, Modal, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import type { Translate } from './locales.ts'
+import { healthHintOf } from './model-visibility.ts'
 import css from './panel.module.css'
 import { useModelVisibility } from './use-model-visibility.ts'
 
@@ -104,7 +105,41 @@ export function ModelVisibility(props: ModelVisibilityProps): ReactNode {
               <Button variant="ghost" size="sm" onClick={() => models.toggleAll(false)}>
                 {t('modelsSelectNone')}
               </Button>
+              {/*
+               * 探测按钮：**会花钱**（每个模型一次真实请求），所以是 ghost 而不是 primary，
+               * 且探测在飞时禁用 —— 连点两次就是两份额度。
+               * `title` 挂 `modelsHealthHint`，把「会消耗少量额度」这件事讲在触发之前。
+               */}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={models.probing}
+                title={t('modelsHealthHint')}
+                onClick={models.probe}
+              >
+                {models.probing ? t('modelsHealthRunning') : t('modelsHealth')}
+              </Button>
             </div>
+
+            {/*
+             * 探测结论一句话汇总。判据在 `modelHealthOf`（把计数算在纯函数里），
+             * 这里只负责画 —— 三类的措辞在 locales 里，不在这里拼。
+             */}
+            {models.health !== undefined && (
+              <div className={css.hint}>
+                {t('modelsHealthSummary', {
+                  healthy: String(models.health.counts.healthy),
+                  empty: String(models.health.counts.empty),
+                  failed: String(models.health.counts.failed),
+                })}
+              </div>
+            )}
+
+            {models.probeError !== undefined && (
+              <div className={css.error}>
+                {t('failedWith', { action: t('modelsHealth'), reason: models.probeError })}
+              </div>
+            )}
 
             <div className={css.modelList}>
               {models.rows.map((row) => (
@@ -121,6 +156,21 @@ export function ModelVisibility(props: ModelVisibilityProps): ReactNode {
                   <span className={css.modelRowLabel} title={row.bare}>
                     {row.label}
                   </span>
+                  {/*
+                   * 探测结论贴在行尾。
+                   *
+                   * ⚠️ 只有 `empty` 与 `failed` 才画一个字 —— 健康的不画：
+                   * 一张清单上每行都挂个绿点，等于没有信息（而这里真正要看的是
+                   * 「哪几个是坏的」）。
+                   */}
+                  {healthHintOf(models.health, row.bare) !== undefined && (
+                    <span
+                      className={css.hint}
+                      title={healthHintOf(models.health, row.bare)?.detail}
+                    >
+                      {t(healthHintOf(models.health, row.bare)?.hint ?? 'modelsHealthFailed')}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
