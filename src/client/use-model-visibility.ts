@@ -91,7 +91,7 @@ export function useModelVisibility(plugin: string): ModelVisibilityState {
     [visibility.data, plugin],
   )
   const choices = useMemo(() => candidateRowsOf(modelRows.data), [modelRows.data])
-  const rows = useMemo(() => modelRowsOf(choices, hidden), [choices, hidden])
+  const rows = useMemo(() => modelRowsOf(choices, hidden, plugin), [choices, hidden, plugin])
 
   /**
    * 草稿：用户勾了但**还没保存**的那份（存的是「要隐藏的裸名」）。

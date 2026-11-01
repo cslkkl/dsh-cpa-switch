@@ -3,13 +3,16 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import {
+  CHANNEL_MODEL_OUTAGE,
   hiddenInChannelOf,
   hiddenNamesOf,
+  isKnownOutage,
   modelRowsOf,
   candidateRowsOf,
   sectionStateOf,
   type ModelChoice,
 } from '../src/client/model-visibility.ts'
+import { CHANNEL_IDS } from '../src/channels/registry.ts'
 
 /**
  * ⚠️ 这两份**源码文本**（不是 import）：钩子引了 React 与 UI 包，Node 侧 import 不到
@@ -173,5 +176,107 @@ describe('模型可见性 · 真机事故回归', () => {
     expect(sectionStateOf({ loading: false, error: 'boom', count: 0 })).toBe('error')
     // ⚠️ 读失败**同时** count 也是 0 —— 顺序判反就会说成「这个渠道还没有模型」
     expect(sectionStateOf({ loading: false, error: 'boom', count: 5 })).toBe('error')
+  })
+})
+
+/**
+ * 「已知整体不可用的模型」那张表（`CHANNEL_MODEL_OUTAGE`）的判据。
+ *
+ * ## 为什么这张表需要判据
+ *
+ * 它是一张**人工维护的硬编码表**，天然会腐烂：模型恢复了大半年还挂在里面，
+ * 或者表里写了个渠道名根本不存在、导致永远不命中。两种腐烂都是**静默的** ——
+ * 界面照旧、没有报错，只是选择器里少多一个模型。
+ *
+ * 所以这里钉三件事：**命中**、**不外溢**（别的渠道同名模型不受影响）、
+ * **表本身不腐烂**（渠道名合法、条目非空）。
+ *
+ * 为什么不能自动探测：那要给每个模型发一次请求，几十次往返还烧额度 ——
+ * 口径与 `model-caps.ts` 的人工表一致，先手记、等渠道侧给真信号再撤。
+ */
+
+/** 造一批模型行；`bare` 与 `id` 同名，够用。 */
+const rowsOf = (...names: string[]) => names.map((name) => ({ id: name, bare: name, name }))
+
+const shownOf = (rows: ReturnType<typeof modelRowsOf>, bare: string): boolean | undefined =>
+  rows.find((row) => row.bare === bare)?.shown
+
+describe('已知故障：命中的模型不进选择器', () => {
+  it('自证：表里确实有一批条目（否则下面几条在证明空气）', () => {
+    const total = Object.values(CHANNEL_MODEL_OUTAGE).reduce((n, list) => n + list.length, 0)
+    expect(total).toBeGreaterThan(0)
+  })
+
+  it('⚠️ 表里每个（渠道, 裸名）都被算成「不显示」', () => {
+    for (const [channel, list] of Object.entries(CHANNEL_MODEL_OUTAGE)) {
+      for (const bare of list) {
+        const rows = modelRowsOf(rowsOf(bare, 'other-model'), [], channel)
+        expect(shownOf(rows, bare), `${channel}/${bare} 应当被摘掉`).toBe(false)
+        // 同渠道的其它模型不受影响
+        expect(shownOf(rows, 'other-model')).toBe(true)
+      }
+    }
+  })
+
+  /**
+   * ⚠️ **不外溢**：表里的键是（渠道, 裸名），不是裸名。
+   * 写反了的话，别的渠道里的同名模型会跟着消失 —— 而那个模型可能正好是好的。
+   */
+  it('⚠️ 只影响该渠道：别的渠道里的同名模型照旧显示', () => {
+    const [channel, list] = Object.entries(CHANNEL_MODEL_OUTAGE)[0] ?? ['', []]
+    const bare = list[0]
+    expect(bare).toBeDefined()
+    if (bare === undefined) return
+
+    const others = CHANNEL_IDS.filter((id) => id !== channel)
+    expect(others.length, '渠道数至少要 2 个才谈得上「不外溢」').toBeGreaterThan(0)
+    for (const other of others) {
+      const rows = modelRowsOf(rowsOf(bare), [], other)
+      expect(shownOf(rows, bare), `${other}/${bare} 不该被这张表影响`).toBe(true)
+    }
+  })
+
+  it('省略渠道参数时按「没有已知故障」处理（既有调用方的行为不变）', () => {
+    const bare = Object.values(CHANNEL_MODEL_OUTAGE)[0]?.[0]
+    expect(bare).toBeDefined()
+    if (bare === undefined) return
+    expect(shownOf(modelRowsOf(rowsOf(bare), []), bare)).toBe(true)
+  })
+
+  /** 用户自己勾掉的那条仍然优先（两者是「或」的关系，不是覆盖）。 */
+  it('与用户隐藏叠加：隐藏的仍然隐藏，恢复不出来的仍然不显示', () => {
+    const [channel, list] = Object.entries(CHANNEL_MODEL_OUTAGE)[0] ?? ['', []]
+    const bare = list[0]
+    if (bare === undefined) return
+    const rows = modelRowsOf(rowsOf(bare, 'user-hidden'), ['user-hidden'], channel)
+    expect(shownOf(rows, bare)).toBe(false)
+    expect(shownOf(rows, 'user-hidden')).toBe(false)
+  })
+})
+
+describe('表本身不腐烂', () => {
+  it('渠道名都是真渠道（写错了就永远不命中，而且零报错）', () => {
+    // `CHANNEL_IDS` 是字面量联合，`Object.keys` 给的是 `string` —— 转成 string 集合再比，
+    // 这条判据要的正是「有没有写错成不存在的渠道」，类型层面本来就该允许非法值。
+    const known = new Set<string>(CHANNEL_IDS)
+    const unknown = Object.keys(CHANNEL_MODEL_OUTAGE).filter((channel) => !known.has(channel))
+    expect(unknown).toEqual([])
+  })
+
+  it('条目都是非空裸名，且同一渠道里不重复', () => {
+    for (const [channel, list] of Object.entries(CHANNEL_MODEL_OUTAGE)) {
+      expect(
+        list.every((bare) => bare.trim() !== ''),
+        `${channel} 里有空条目`,
+      ).toBe(true)
+      expect(new Set(list).size, `${channel} 里有重复条目`).toBe(list.length)
+    }
+  })
+
+  it('`isKnownOutage` 与模型行判定同源（换个入口问，答案一样）', () => {
+    for (const [channel, list] of Object.entries(CHANNEL_MODEL_OUTAGE)) {
+      for (const bare of list) expect(isKnownOutage(channel, bare)).toBe(true)
+      expect(isKnownOutage(channel, '一个肯定不在表里的模型')).toBe(false)
+    }
   })
 })
