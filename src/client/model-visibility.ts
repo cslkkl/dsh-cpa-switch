@@ -129,6 +129,90 @@ export function hiddenNamesOf(rows: readonly ModelRow[]): string[] {
   return rows.filter((row) => !row.shown).map((row) => row.bare)
 }
 
+/** 一次健康探测在界面上要的形状。 */
+export interface ModelHealthView {
+  readonly rows: readonly {
+    readonly id: string
+    readonly bare: string
+    readonly verdict: 'healthy' | 'empty' | 'failed'
+    readonly detail?: string
+  }[]
+  readonly counts: { readonly healthy: number; readonly empty: number; readonly failed: number }
+}
+
+/**
+ * 从哨兵响应里取健康探测结果。
+ *
+ * ⚠️ **读的是摊平在结果对象上的字段**（`result.rows` / `result.counts`），
+ * 不是 `result.data` —— 传输层把响应体摊平了，`result.data` 能编译、恒为 `undefined`
+ * （2026-10-13 因此让整个勾选功能静默消失过一次）。
+ *
+ * 形状不合法时返回 `undefined` 而不是空结果：**「没探过」与「探了但全是坏的」
+ * 是两件事**，界面要能分开说。
+ */
+export function modelHealthOf(result: unknown): ModelHealthView | undefined {
+  const payload = result as { rows?: unknown; counts?: unknown } | undefined
+  if (!Array.isArray(payload?.rows)) return undefined
+
+  const rows: {
+    id: string
+    bare: string
+    verdict: 'healthy' | 'empty' | 'failed'
+    detail?: string
+  }[] = []
+  for (const item of payload.rows) {
+    const row = item as { id?: unknown; bare?: unknown; verdict?: unknown; detail?: unknown }
+    if (typeof row.id !== 'string' || typeof row.bare !== 'string') continue
+    if (row.verdict !== 'healthy' && row.verdict !== 'empty' && row.verdict !== 'failed') continue
+    rows.push({
+      id: row.id,
+      bare: row.bare,
+      verdict: row.verdict,
+      ...(typeof row.detail === 'string' ? { detail: row.detail } : {}),
+    })
+  }
+  if (rows.length === 0) return undefined
+
+  return {
+    rows,
+    counts: {
+      healthy: rows.filter((row) => row.verdict === 'healthy').length,
+      empty: rows.filter((row) => row.verdict === 'empty').length,
+      failed: rows.filter((row) => row.verdict === 'failed').length,
+    },
+  }
+}
+
+/**
+ * 一行探测结论在界面上要的一句话（`undefined` = 健康，不画）。
+ *
+ * ⚠️ 属性名**不能叫 `key`**：`tests/client-cache-keys.test.ts` 用
+ * `/key:\s*'…'/` 找「手写的资源键」，同名字段会被误判成 `cacheKeys` 的副本
+ * （判据本身是对的，它防的是真的会漂的那种字面量）。这里说的是文案键，改叫 `hint`。
+ */
+export interface HealthHint {
+  readonly hint: 'modelsHealthEmpty' | 'modelsHealthFailed'
+  readonly detail: string | undefined
+}
+
+/**
+ * 从探测结果里取某个裸名的那句话。
+ *
+ * ⚠️ **只有非健康才返回**：健康的不画任何东西 —— 一张清单每行都挂个绿点，
+ * 等于没有信息，而这里真正要看的是「哪几个是坏的」。
+ */
+export function healthHintOf(
+  health: ModelHealthView | undefined,
+  bare: string,
+): HealthHint | undefined {
+  const row = health?.rows.find((item) => item.bare === bare)
+  if (row === undefined || row.verdict === 'healthy') return undefined
+  return {
+    hint: row.verdict === 'empty' ? 'modelsHealthEmpty' : 'modelsHealthFailed',
+    detail: row.detail,
+  }
+}
+
 /**
  * 从宿主的可见性表里取**某个渠道**被隐藏的裸名。
  *
