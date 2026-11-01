@@ -88,17 +88,17 @@
     "@deepseek-ai/dsh-credentials": ">=0.1.7-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
-    "eslint": "^10.12.0",
+    "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.13.0",
     "lightningcss": "^1.33.0",
-    "prettier": "^3.9.9",
-    "react": "^19.3.0",
+    "prettier": "^3.9.10",
+    "react": "^19.3.1",
     "tsdown": "^0.22.14",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.71.0",
+    "typescript-eslint": "^8.72.0",
     "vitest": "^4.1.11"
   }
 }
