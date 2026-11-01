@@ -416,6 +416,15 @@ const HOST_MODULES = {
     useRef: () => ({ current: null }),
     useMemo: (f) => f(),
     /**
+     * ⚠️ 必须在这里：`AccountCard` 是 `memo(...)` 的。shim 少一个的话，产物在工厂
+     * 执行阶段就抛 `memo is not a function` —— 好消息是会响，坏消息是**整条门禁
+     * 崩在加载期**、看不出是哪一处形状坏了。宿主 React 18/19 都有这个 API。
+     *
+     * 做成恒等：这里只验「产物能加载、槽位能注册」，不做渲染；身份比较是
+     * `tests/card-memo.test.ts` 的事（那一侧读源码，不依赖 React 实现）。
+     */
+    memo: (component) => component,
+    /**
      * ⚠️ 必须在这里：`use-resource.ts` 靠 `useSyncExternalStore` 订阅读缓存，
      * 而产物里的 hook 是从 `require('react')` 上取的属性 —— shim 少一个不会
      * 当场抛，但「产物与宿主形状一致」这道门禁就名存实亡了（宿主 React 18/19 都有）。

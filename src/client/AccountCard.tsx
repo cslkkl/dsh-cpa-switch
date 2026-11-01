@@ -5,7 +5,7 @@
  */
 
 import type { ReactNode } from 'react'
-import { useCallback, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { creditViewOf } from './credit-text.ts'
 import { act, selectCpaAccount, setAccountEnabled } from './endpoints.ts'
@@ -93,8 +93,26 @@ export interface AccountCardProps {
   readonly locked: boolean
 }
 
-/** 单张账号卡。 */
-export function AccountCard(props: AccountCardProps): ReactNode {
+/**
+ * 单张账号卡 —— **`memo` 包过的**。
+ *
+ * ## 为什么要 memo
+ *
+ * 面板不随渠道重挂载（见 `Panel` 去掉 `key` 的决策），所以一次点击会让 `PluginPanel`
+ * 整个重渲染，`accounts.map` 随之重建**每一张**卡的 element。没有 `memo` 时这些
+ * element 会被**全部重算**：一个渠道 20 多个号，点一次开关就是 20 多次
+ * `creditViewOf`（额度文案组装）+ 20 多棵 JSX 树 —— 而实际变的只有一张卡。
+ *
+ * ⚠️ **代价是 props 身份必须诚实**：`memo` 只做浅比较，任何一个 prop 引用变了
+ * 就等于没包。父级那四个回调因此都是 `useCallback` 的（见 `PluginPanel` 里
+ * 「交给每张卡的四个回调，身份必须是恒定的」那段），判据 `tests/card-memo.test.ts`。
+ * 想加新 prop 的话：**先想清楚它在父级是不是每次都新造** —— 是的话要么固定它，
+ * 要么接受这一层白做。
+ *
+ * 内部状态（`busy`）与 `useCallback` 照旧工作：`memo` 只影响「父级重渲染时要不要
+ * 重算这一张」，不改变组件自己的 setState 触发。
+ */
+function AccountCardView(props: AccountCardProps): ReactNode {
   const {
     account,
     unit,
@@ -575,3 +593,13 @@ export function AccountCard(props: AccountCardProps): ReactNode {
     </div>
   )
 }
+
+/**
+ * 导出的是 `memo` 之后的那个组件。
+ *
+ * ⚠️ **名字没变**（仍然叫 `AccountCard`）：`PluginPanel` 直接 `<AccountCard …>`
+ * 用它，改名会让那处 import 与 `Skeleton.tsx` 里的对照注释一起漂。为什么分开写
+ * 而不是 `export const AccountCard = memo(AccountCard)` 那种自引用 —— 函数声明
+ * 有个名字，`devtools` 里才认得出是哪张卡。
+ */
+export const AccountCard = memo(AccountCardView)
