@@ -376,6 +376,41 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     }
   }, [pendingRemove, plugin, actions, t, reload])
 
+  /**
+   * ## 交给每张卡的四个回调，身份必须是恒定的
+   *
+   * 卡片是 `React.memo` 的，**唯一**挡在「整张网格重算」前面的就是 props 身份。
+   * 原先这四个是**内联箭头**：每次渲染都是新函数 ⇒ 任何一次渲染（点开关、
+   * 悬停、toast 重播、选中的卡自己 setState）都会让同渠道**每张**卡重算一遍。
+   * 一个渠道 20 多个号时，那是一次点击 = 20 多张卡各自重跑额度文案组装。
+   *
+   * ⚠️ 依赖里写的是**方法本身**，不是 `overrides` / `actions` 整个对象：那两个
+   * 每次渲染都是新对象，拿它们当依赖等于没加 `useCallback`。它们内部的方法是真
+   * `useCallback`（见 `use-disabled-overrides.ts` / `use-channel-actions.ts`），
+   * 所以这层包一层之后身份才真的稳。
+   *
+   * ⚠️ 别为了「少写几个」把它们合并成一个转发函数 —— 那会把 `overrides` 整个
+   * 对象重新拉进闭包里，身份又回到每次渲染都变。判据 `tests/card-memo.test.ts`
+   * 逐个钉住这四个名字。
+   */
+  const { applyDisabled, applySelectState } = overrides
+  const cardOnDisabled = useCallback(
+    (authIndex: string, disabled: boolean): void => applyDisabled(authIndex, disabled),
+    [applyDisabled],
+  )
+  const cardOnSelectState = useCallback(
+    (authId: string, disabled: boolean): void => applySelectState(authId, disabled),
+    [applySelectState],
+  )
+
+  /**
+   * 「重新登录」与卡片自己的「重取列表」。
+   *
+   * 后者原本也是内联的 `() => void reload({ force: true })` —— `reload` 自己的
+   * 依赖是 `[key, path]`（切渠道才换），所以这里照抄同一个形状，身份只在切渠道时变。
+   */
+  const cardReload = useCallback((): void => void reload({ force: true }), [reload])
+
   return (
     <>
       {/*
@@ -621,10 +656,8 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
               capabilities={capabilities}
               t={t}
               onReport={actions.report}
-              onAccountDisabled={(id, disabled) => overrides.applyDisabled(id, disabled)}
-              onAccountSelectState={(authId, disabled) =>
-                overrides.applySelectState(authId, disabled)
-              }
+              onAccountDisabled={cardOnDisabled}
+              onAccountSelectState={cardOnSelectState}
               onBusyChange={actions.setCardBusy}
               /*
                * 「重新登录」走渠道级登录会话（与「添加账号」同一条）：
@@ -645,7 +678,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
                * 多开时每张都有」能成立的前提。
                */
               enabledCount={enabledCount}
-              onReload={() => reload({ force: true })}
+              onReload={cardReload}
             />
           ))
         )}
