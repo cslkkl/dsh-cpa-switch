@@ -126,57 +126,23 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 > 这里只放**跨模块、照做即可**的短条目。成轮工作与未立项方向在
 > [docs/PLAN.md](docs/PLAN.md)；做完的立即删（历史去 `git log` 与 note）。
 
-- [ ] **待真机复验：侧栏入口默认关（2026-10-20）** —— 装好不点开关时侧栏**没有**本插件
-      那一行；在面板底部打开后出现、关掉后消失；两种状态各自跨重启保持。
-      顺带补一次 `Back` 的真机点击（高 DPI 缩放下鼠标没命中过；它只有一条路径
-      `selectPanel(null)`，产物断言里已真调一次）。
-      ⚠️ 先 `pnpm build` **并重启 DSH**。判据与取舍见
-      [决策记录](.agents/notes/2026-10-20-sidebar-entry-default-off.md)。
-- [ ] **待真机复验：加载态与漂移看门狗（2026-10-19）** —— 摁「全部签到」不再闪骨架；
-      上游撤销禁用后 90 秒内自己禁回去且开关全程不跳；后台标签页不发探针。
-      ⚠️ 先 `pnpm build` **并重启 DSH**。判据与取舍见
-      [决策记录](.agents/notes/2026-10-19-panel-loading-and-drift-ux.md)。
-- [ ] **待真机复验：`icon.svg`（实心蓝盘）** —— 只看**宿主 30px** 那一档（卡片 36px），
-      亮暗主题都要读得清；是否定稿由维护者拍板 → [决策记录](.agents/notes/2026-10-13-plugin-icon-redesign.md)。
 - [ ] **上游把同一个模型注册成三种 id 形态** —— 我们这半已按（渠道, 裸名）去重；
       剩下 CPA 自己的 `/v1/models` 仍列重复项。要不要跟上游报，等维护者定 →
       [决策记录](.agents/notes/2026-10-13-model-visibility-in-panel.md)。
-- [ ] **待真机复验：0.14.0 那批** —— 四个分组 / 每会话重选一次 / 无 Effort 行的模型 /
-      对调档位 / 「未签到」灰底 → 清单与判据见[验收记录](.agents/notes/2026-10-19-acceptance-history.md)。
-- [ ] **待真机复验：0.20.0 那批** ——
-      ①「设为唯一」：同渠道**开两个号** → 两张卡上都有；点其中一个 → 只留它启用，此时
-      **只有被禁用的那张**还有按钮；全部禁用 → 每张都有（口径在 `src/client/select-visibility.ts`，
-      判据 `tests/select-visibility.test.ts`）；
-      ② 百万档缩写：ZCode 账号显示 `508M token`、汇总三格同样带 `M`、对话界面选择器左侧读数带 `M`；
-      WorkBuddy 那种几千的积分**不变**（`4,939 积分`）；`0` 仍不带单位（口径 `src/client/format.ts`）。
-      ⚠️ 先 `pnpm build`；只改了浏览器半端 → **刷新页面**即可，不必重启 DSH。
 - [ ] **`model-caps.ts` 硬编码不可持续** —— 通路已存在，缺的是渠道插件没填值（实测 72 条 0 条带值）。
       删表判据是「**实测响应体带上字段**」，不是上游源码里有 →
       [决策记录](.agents/notes/2026-10-06-why-manual-table-remains.md)。
-- [ ] **上游 v0.8.84 适配结论：不需要改代码，面板可直接「更新」（2026-10-25，装完即删本条）** ——
-      四类耦合面（管理路由路径 / 响应字段名 / 配置键名 / dll 与 tag）逐条核过 `v0.8.84`
-      （workbuddy 0.9.70、trae 0.12.80、qoder 0.8.67、zcode 0.2.4）**全未漂移**：
-      `stream_head_timeout` 字段健在、四条 spec 的每条路径都还在（zcode 仍是 `/models`）、
-      余额结构无变化。装完按三条判据核对：已装 tag 记为 `v0.8.84`、
-      `plugins/workbuddy.dll` 不再是补丁件、更新日志无 `override` 步；
-      判据与证据见[决策记录](.agents/notes/2026-10-25-upstream-v084-audit.md)。
-- [ ] **workbuddy 11-128 本地补丁退役（已可执行）** —— 上游 [PR #46](https://github.com/mmqz/cpa-multi-plugins/pull/46) /
-      [#49](https://github.com/mmqz/cpa-multi-plugins/pull/49) 已随 workbuddy **0.9.63** 发布（全角色清洗），
-      不需要再等。**三步**：① 确认端口上的 CPA 是本插件启的（外部实例会被拒）；
-      ② 面板点一次「更新」（内部先停 CPA —— Windows 上被加载的 dll 改不了名 —— 再清空
-      `plugins/` 解压，**不自动重启**，之后自己点「启动」）；③ 起来后核对三件事：
-      已装 tag = 上游最新、`plugins/workbuddy.dll` 的 sha256 不再是补丁件、更新日志里**没有**
-      `override` 步。`stream_head_timeout: 5` **保留不动**（退役只去掉补丁 dll，这个值防的是
-      未来一切请求级风控的级联）。⚠️ 本机实测：托管 `overrides/` 已空，补丁件是**直接压在
-      `plugins/` 里**的那个 —— 所以「删 override 文件」这一步本机无事可做，更新会顺手冲掉它；
-      补丁件与官方件的 sha256 判据见[决策记录](.agents/notes/2026-10-25-upstream-v084-audit.md)。
-      背景：`E:\新下载\workbuddy-11-128-fix\README.md`（补丁包自述）。
 - [ ] **Trae 侧 12 条既无窗口也无图像能力** —— 按「渠道侧证据不足」留空走兜底；
       别搬 WorkBuddy/ZCode 的值 → [channels 手册](src/channels/README.md)。
-- [ ] **待真机复验：对话界面两个座位 + 裸名** —— 组内只有裸名、选择器左侧余额读数
-      （读不到空着、trae 显示「不限」）→ [验收记录](.agents/notes/2026-10-19-acceptance-history.md)。
 - [ ] **研究方向**（额度显示位置、每代理独立用号、调度维护界面…）→ [docs/PLAN.md](docs/PLAN.md)；
       结构类改动先在 §2.9 立项：**先补判据再动结构**。
+
+> **「待真机复验」的条目一律不写在这里** —— 它们不是「写代码就能做」的活，而是
+> 「代码已落地、等人上手点一遍」。全部收在[验收记录](.agents/notes/2026-10-19-acceptance-history.md)
+> 顶部的「真机待验清单」：一张表，每条带判据、动手前置（刷新页面 / 重启 DSH）与出处。
+> 判完就**从表里删掉**、往下面「结论」补一节当时的证据。
+> 曾经挂在待办区的 0.14.0 / 0.19.0 / 0.20.0 三批、`icon.svg`、对话界面两个座位、
+> 侧栏入口默认关、加载态看门狗、`Back` 的真机点击，2026-11-01 已全部搬过去。
 
 ## 活跃坑
 
