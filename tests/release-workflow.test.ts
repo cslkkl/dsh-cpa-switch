@@ -690,3 +690,103 @@ describe('⚠️ 反向控制：把要素删掉，对应判据必须红', () => 
     })
   }
 })
+
+/**
+ * 草稿的**分类顺序**：有没有哪种标签永远轮不到自己那一节。
+ *
+ * ## 为什么值得一条判据
+ *
+ * 分类是「**首次匹配获胜**」+ `exclusive: true`，而最后一条「其它改动」**省略了
+ * `when`**（那是 Release Drafter 里唯一允许省略的写法，语义是「收下其余全部」）。
+ * 两条合起来的后果是：**排在兜底之后**的分类永远拿不到任何条目，而配置本身
+ * 完全合法 —— 不报错、不告警，只是那一节在每份草稿里都是空的。
+ *
+ * 2026-11-01 实踩的形态是**反过来的**：`perf` 标签有，但**根本没有分类**，
+ * 于是 #90 掉进「其它改动」。这跟「想加一节但写在兜底之后」是同一种病的两面，
+ * 所以两条一起钉：**兜底必须是最后一条**，且**现有标签都至少被一条分类认领**。
+ */
+
+/** 分类段里每条的标题与它 `when.labels` 里的标签（兜底那条没有 `when`）。 */
+interface Category {
+  readonly title: string
+  readonly labels: readonly string[]
+}
+
+function drafterCategories(text: string): Category[] {
+  const body = blockOf(text, 'categories')
+  if (body === null) return []
+
+  const out: Category[] = []
+  let current: { title: string; labels: string[] } | undefined
+
+  for (const line of body.split(/\r?\n/u)) {
+    if (line.trim() === '' || isComment(line)) continue
+    const title = /^\s*-\s+title:\s*'?([^']+)'?\s*$/u.exec(line)
+    if (title !== null) {
+      if (current !== undefined) out.push(current)
+      current = { title: title[1] ?? '', labels: [] }
+      continue
+    }
+    const label = /^\s*-\s+'([^']+)'\s*$/u.exec(line)
+    if (label !== null && current !== undefined) current.labels.push(label[1] ?? '')
+  }
+  if (current !== undefined) out.push(current)
+  return out
+}
+
+/** 标签清单的唯一事实源是 GitHub，不抄一份进测试 —— 这里只钉**映射**，不钉标签全量。 */
+const RELEASE_LABELS = new Set([
+  'bug',
+  'feat',
+  'refactor',
+  'boundary-refactor',
+  'perf',
+  'skip-changelog',
+  'docs',
+  'chore',
+  'test',
+])
+
+describe('草稿的分类：兜底在后、标签都有家', () => {
+  const categories = drafterCategories(drafterRaw)
+
+  it('自证：真的解析到了分类，且带 labels 的那些标签非空', () => {
+    expect(categories.length).toBeGreaterThanOrEqual(4)
+    expect(categories.map((item) => item.title)).toContain('修复')
+    expect(categories.find((item) => item.title === '修复')?.labels).toEqual(['bug'])
+    expect(categories.filter((item) => item.labels.length > 0).length).toBeGreaterThanOrEqual(3)
+  })
+
+  /**
+   * ⚠️ 兜底那条**没有** `when` —— 一旦它前面还有别的分类，那些分类就永远拿不到条目。
+   * 这条同时挡住「想加一节但随手写在最后」。
+   */
+  it('⚠️ 省略 `when` 的兜底只能是最后一条', () => {
+    const fallbackAt = categories.findIndex((item) => item.labels.length === 0)
+    expect(fallbackAt).toBeGreaterThan(0)
+    expect(fallbackAt).toBe(categories.length - 1)
+  })
+
+  it('`perf` 有分类（曾经没有，掉进了「其它改动」）', () => {
+    const owner = categories.find((item) => item.labels.includes('perf'))
+    expect(owner?.title).toBe('重构与内部改动')
+  })
+
+  /** 每个「进正文」的标签都得有家；不带类型的子标签是 `skip-changelog` 的责任。 */
+  it('每个类型标签都至少被一条分类认领', () => {
+    const claimed = new Set(categories.flatMap((item) => item.labels))
+    const orphans = [...RELEASE_LABELS].filter(
+      (label) =>
+        !claimed.has(label) && !['skip-changelog', 'docs', 'chore', 'test'].includes(label),
+    )
+    expect(orphans).toEqual([])
+  })
+
+  /** 反向控制：把 `perf` 从配置里删掉，上面那条必须变红（否则它只是在读自己的常量）。 */
+  it('⚠️ 反向控制：去掉 `perf` 标签后「有家」那条变红', () => {
+    const withoutPerf = drafterRaw.replace(/^\s*-\s+'perf'\s*$\r?\n/mu, '')
+    expect(withoutPerf).not.toBe(drafterRaw)
+    const claimed = new Set(drafterCategories(withoutPerf).flatMap((item) => item.labels))
+    expect(claimed.has('perf')).toBe(false)
+  })
+})
