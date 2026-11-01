@@ -518,13 +518,16 @@ function invertByChannel(
   return out
 }
 
-/** 剥掉开头的已知渠道前缀（`wb/glm-4.6` → `glm-4.6`）；认不出前缀就原样返回。 */
 /**
  * 剥掉 id 的渠道前缀（**反复剥**，见 `stripChannelPrefixes`）。
  *
  * ⚠️ 转调 `model-alias.ts` 的那一份，**不要在这里自己写一遍**：
  * 目录护栏的键（`guardKeyOf`）与「隐藏模型」的键都走它 —— 两处口径漂开就会出现
  * 「用户隐藏的模型被护栏当成缩水拦回」（2026-10-13 实踩）。
+ *
+ * ⚠️ 曾经它上面还压着一句「剥掉**开头**的已知渠道前缀」—— 那是只剥一层的年代留下的。
+ * 现在剥到认不出为止（`Trae/trae/glm-5.2` → `glm-5.2`），只剥一层会让第三种形态
+ * 藏不掉、在选择器里占三个条目。两句话说同一件事，读的人只会信上一次改完的那句。
  */
 function stripChannelPrefix(id: string): string {
   return stripChannelPrefixes(id)
