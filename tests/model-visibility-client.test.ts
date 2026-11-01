@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CHANNEL_MODEL_OUTAGE,
+  healthHintOf,
   hiddenInChannelOf,
   hiddenNamesOf,
   isKnownOutage,
+  modelHealthOf,
   modelRowsOf,
   candidateRowsOf,
   sectionStateOf,
@@ -278,5 +280,55 @@ describe('表本身不腐烂', () => {
       for (const bare of list) expect(isKnownOutage(channel, bare)).toBe(true)
       expect(isKnownOutage(channel, '一个肯定不在表里的模型')).toBe(false)
     }
+  })
+})
+
+describe('健康探测结果 → 界面（只有坏的那几个才说话）', () => {
+  const payload = {
+    ok: true,
+    channel: 'trae',
+    rows: [
+      { id: 'trae/glm-5.3-flash', bare: 'glm-5.3-flash', verdict: 'healthy' },
+      {
+        id: 'trae/kimi-k3.1-pro',
+        bare: 'kimi-k3.1-pro',
+        verdict: 'empty',
+        detail: '正文与推理都是空的，finish_reason=null',
+      },
+      { id: 'trae/step-5-preview', bare: 'step-5-preview', verdict: 'failed', detail: '超时' },
+    ],
+    counts: { healthy: 1, empty: 1, failed: 1 },
+  }
+
+  it('⚠️ 读的是摊平在结果对象上的 rows（不是 result.data）', () => {
+    const view = modelHealthOf(payload)
+    expect(view?.rows).toHaveLength(3)
+    // 反面自证：把同一份数据包进 `data` 里就该读不到 —— 那正是 2026-10-13 的踩法
+    expect(modelHealthOf({ data: payload })).toBeUndefined()
+  })
+
+  it('计数由行算出来（不信任上游给的 counts）', () => {
+    const view = modelHealthOf({ ...payload, counts: { healthy: 99, empty: 0, failed: 0 } })
+    expect(view?.counts).toEqual({ healthy: 1, empty: 1, failed: 1 })
+  })
+
+  it('形状不合法时返回 undefined（「没探过」与「全是坏的」要能分开）', () => {
+    expect(modelHealthOf(undefined)).toBeUndefined()
+    expect(modelHealthOf({ ok: true })).toBeUndefined()
+    expect(modelHealthOf({ rows: [] })).toBeUndefined()
+    expect(modelHealthOf({ rows: [{ id: 1 }] })).toBeUndefined()
+  })
+
+  it('⚠️ 只有非健康才给一句话：健康的不画任何东西', () => {
+    const view = modelHealthOf(payload)
+    expect(healthHintOf(view, 'glm-5.3-flash')).toBeUndefined()
+    expect(healthHintOf(view, 'kimi-k3.1-pro')?.hint).toBe('modelsHealthEmpty')
+    expect(healthHintOf(view, 'step-5-preview')?.hint).toBe('modelsHealthFailed')
+    expect(healthHintOf(undefined, 'kimi-k3.1-pro')).toBeUndefined()
+  })
+
+  it('detail 原样带出去（界面上挂在 title 里）', () => {
+    const view = modelHealthOf(payload)
+    expect(healthHintOf(view, 'step-5-preview')?.detail).toBe('超时')
   })
 })
