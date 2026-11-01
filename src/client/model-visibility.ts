@@ -62,21 +62,60 @@ export function candidateRowsOf(result: unknown): ModelChoice[] {
 }
 
 /**
+ * 已知**整体不可用**的（渠道, 裸名）—— 从勾选清单里摘掉。
+ *
+ * ## 为什么要有这张表
+ *
+ * 2026-11-01 实测：`trae/kimi-k3.1-pro` 在这个渠道上**三个号分别回 503 / 401 / 402**，
+ * 全部失败，而同渠道的 `trae/glm-5.3-flash` 正常。也就是说**不是某个号坏了，
+ * 是这个模型在 trae 侧整体不可用** —— 重登哪一个号都修不好。
+ *
+ * 它当时正躺在面板的勾选清单里、也躺在推给宿主的 19 行里，用户点它必然拿到 503。
+ * 而「模型在渠道侧整体不可用」这件事，**我们这半没有任何信号能自动发现**：
+ * CPA 的 `/v1/models` 照样列着它，账号状态照样 `active`。
+ *
+ * ## 为什么是硬编码而不是自动探测
+ *
+ * 自动探测 = 每次刷新对每个模型发一次请求，那是几十次往返、还会烧额度。
+ * 所以口径与 `model-caps.ts` 的人工表一致：**先手记，等渠道侧给了真信号再撤**。
+ * 撤表条件：该模型在本渠道实测能正常返回。
+ *
+ * ⚠️ **只影响勾选清单，不碰推送逻辑**：它和「用户隐藏」走同一个出口
+ * （`modelRowsOf` 的 `shown`），所以效果与用户自己勾掉完全一致 ——
+ * 面板上仍能看到它（能看到 = 知道自己少了什么），只是不进选择器。
+ * 想让它回来：删掉这里那一行，或者让用户手动勾上。
+ */
+export const CHANNEL_MODEL_OUTAGE: Readonly<Record<string, readonly string[]>> = {
+  // 2026-11-01：三个号分别 503 / 401 / 402，同渠道其它模型正常。
+  trae: ['kimi-k3.1-pro'],
+}
+
+/** 某个（渠道, 裸名）是否已知整体不可用。 */
+export function isKnownOutage(channel: string, bare: string): boolean {
+  return (CHANNEL_MODEL_OUTAGE[channel] ?? []).includes(bare)
+}
+
+/**
  * 把「宿主的模型清单」与「被隐藏的表」合成界面要的行。
  *
  * @param models - 宿主 `/models` 给的那些模型（已带 `bare`）。
  * @param hiddenInChannel - **这个渠道**被隐藏的裸名。
+ * @param channel - 当前渠道；给了就把 {@link CHANNEL_MODEL_OUTAGE} 也一起算上。
+ *   省略时按「没有已知故障」处理（既有判据走的就是这条，行为不变）。
  */
 export function modelRowsOf(
   models: readonly ModelChoice[],
   hiddenInChannel: readonly string[],
+  channel?: string,
 ): ModelRow[] {
   return models.map((model) => ({
     id: model.id,
     bare: model.bare,
     // 展示优先用上游给的名字；缺了退回渠道 id（那是用户在 CPA 里能看到的形态）
     label: model.name === undefined || model.name === '' ? model.id : model.name,
-    shown: !hiddenInChannel.includes(model.bare),
+    shown:
+      !hiddenInChannel.includes(model.bare) &&
+      !(channel !== undefined && isKnownOutage(channel, model.bare)),
   }))
 }
 
