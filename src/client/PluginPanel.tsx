@@ -27,6 +27,7 @@ import { SkeletonCards, SkeletonStatus, SkeletonSummary } from './Skeleton.tsx'
 import { summaryViewOf } from './summary-hint.ts'
 import { useAccountLogin } from './use-account-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
+import { useDateTick } from './use-date-tick.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
 import { useDriftWatch } from './use-drift-watch.ts'
 import { useIntentDrift } from './use-intent-drift.ts'
@@ -241,7 +242,23 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     error: accountsResource.error,
     accounts,
   })
-  const cycles = useMemo(() => upcomingCycles(accounts, Date.now()), [accounts])
+  /**
+   * ## 下一次更新倒计时 —— 依赖里必须有 `dayTick`
+   *
+   * `upcomingCycles(accounts, now)` 的 `now` 决定「哪些日期算 7 天内」与
+   * 「过了午夜的还算不算未来」。原先依赖只有 `accounts`：`Date.now()` 只在
+   * **那一次**计算里被读一次，之后账号数据不变就不再读 —— 于是常开过夜的面板
+   * 一直显示**昨天算出来**的那批（昨天到期的仍在列、今天新进窗口的不出现），
+   * 零报错，只是慢慢变假。
+   *
+   * `dayTick` 每跨过一个本地零点换一个值（见 `use-date-tick.ts`：只排「下一个
+   * 零点」这一个点，不是按分钟轮询）。它进依赖才让 `useMemo` 用上**新的**
+   * `Date.now()`。
+   *
+   * ⚠️ 别把 `Date.now()` 直接写进依赖数组：那样每轮渲染都变，等于每轮白算。
+   */
+  const dayTick = useDateTick()
+  const cycles = useMemo(() => upcomingCycles(accounts, Date.now()), [accounts, dayTick])
 
   /**
    * 记下本渠道读到几个账号 —— 供**下一次首屏**决定摆几张占位卡。
