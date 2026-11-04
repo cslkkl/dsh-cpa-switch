@@ -2,17 +2,17 @@
 
 ## 文件
 
-| 脚本                    | 作用                                                                                                                   | 何时跑                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `verify-artifacts.cjs`  | 用宿主加载器协议加载 `lib/` 产物，断言关键契约                                                                         | `pnpm build` 之后；`pnpm check` 与 CI 都会跑        |
-| `check-layering.cjs`    | 按分层矩阵检查 `src/` 的 import 方向                                                                                   | 改动跨模块依赖后；`pnpm check` 与 CI 都会跑         |
-| `check-doc-paths.cjs`   | 文档里提到的 `src/**` / `tests/**` / `scripts/**` 路径必须存在                                                         | 搬文件 / 改名 / 删模块后；`pnpm check` 与 CI 都会跑 |
-| `check-release.mjs`     | **发布态不变量**：`files` / `locale` / `icon` / `engines.dsh` 与各 peer 下限、发布流不许改版本号                       | 改声明面 / 发布流后；`pnpm check` 与发布流都会跑    |
-| `release-guard.mjs`     | **发布噪音守卫**：自上一个标签以来的改动会不会改变 npm 上的产物（stdin 读路径）                                        | 推标签发布时由 `publish.yml` 跑；本机复核发布时     |
-| `verify-alias-yaml.mts` | 核对 `oauth.model-alias` 段的 YAML 形状                                                                                | 改了别名渲染之后                                    |
-| `snapshot-catalog.mjs`  | **只读观测探针**：把宿主侧模型目录打成快照（切语言前后对比用）；不进门禁，由 agent 在本机跑                            | 排查模型路由 / 选择器问题时                         |
-| `audit-model-caps.mjs`  | **校准表体检**：渠道目录里有、`model-caps.ts` 里没有的模型；给可粘贴的补丁行。不发模型请求、不烧额度                   | 新模型出现时 / 更新渠道插件之后                     |
-| `probe-cpa-stream.mjs`  | **输出链路探针**：对本地 CPA 直发 chat 请求，原样抓 SSE / 原始响应并做帧级判读；**发真实请求、消耗渠道额度**，不进门禁 | 排查「思考去了哪 / DSML 泄漏 / 回放 400」类问题时   |
+| 脚本                    | 作用                                                                                                                        | 何时跑                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `verify-artifacts.cjs`  | 用宿主加载器协议加载 `lib/` 产物，断言关键契约                                                                              | `pnpm build` 之后；`pnpm check` 与 CI 都会跑        |
+| `check-layering.cjs`    | 按分层矩阵检查 `src/` 的 import 方向                                                                                        | 改动跨模块依赖后；`pnpm check` 与 CI 都会跑         |
+| `check-doc-paths.cjs`   | 文档里提到的 `src/**` / `tests/**` / `scripts/**` 路径必须存在                                                              | 搬文件 / 改名 / 删模块后；`pnpm check` 与 CI 都会跑 |
+| `check-release.mjs`     | **发布态不变量**：`files` / `locale` / `icon` / `engines.dsh` 与各 peer 下限、发布流不许改版本号                            | 改声明面 / 发布流后；`pnpm check` 与发布流都会跑    |
+| `release-guard.mjs`     | **发布噪音守卫**：自上一个标签以来的改动会不会改变 npm 上的产物（stdin 读路径）                                             | 推标签发布时由 `publish.yml` 跑；本机复核发布时     |
+| `verify-alias-yaml.mts` | 核对 `oauth.model-alias` 段的 YAML 形状                                                                                     | 改了别名渲染之后                                    |
+| `snapshot-catalog.mjs`  | **只读观测探针**：把宿主侧模型目录打成快照（切语言前后对比用）；不进门禁，由 agent 在本机跑                                 | 排查模型路由 / 选择器问题时                         |
+| `audit-model-caps.mjs`  | **校准表体检**：渠道目录里有、`model-caps.ts` 里没有的模型（**窗口 + 看图能力**）；给可粘贴的补丁行。不发模型请求、不烧额度 | 新模型出现时 / 更新渠道插件之后                     |
+| `probe-cpa-stream.mjs`  | **输出链路探针**：对本地 CPA 直发 chat 请求，原样抓 SSE / 原始响应并做帧级判读；**发真实请求、消耗渠道额度**，不进门禁      | 排查「思考去了哪 / DSML 泄漏 / 回放 400」类问题时   |
 
 ### check-layering.cjs
 

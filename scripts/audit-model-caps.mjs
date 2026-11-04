@@ -38,7 +38,12 @@ import { pathToFileURL } from 'node:url'
 
 import { CHANNELS } from '../src/channels/registry.ts'
 import { calibratedTable } from '../src/model-caps.ts'
-import { capsAuditIsClean, capsSuggestionOf, diffModelCaps } from '../src/model-caps-audit.ts'
+import {
+  capsAuditIsClean,
+  capsSuggestionOf,
+  diffModelCaps,
+  imagesSuggestionOf,
+} from '../src/model-caps-audit.ts'
 import { workbuddySourcesFrom } from '../src/caps-overrides.ts'
 
 const HELP = `用法：node scripts/audit-model-caps.mjs [选项]
@@ -54,11 +59,12 @@ const HELP = `用法：node scripts/audit-model-caps.mjs [选项]
   --help              本帮助
 
 判读口径：
-  actionable  表里没有、渠道侧**有**窗口出处 ⇒ 照抄即可补（**退出码 1**）
-  noSource    表里没有、渠道侧也没出处      ⇒ 按口径走兜底，**不算待办**
-  mismatch    两边都有但窗口不一致          ⇒ 复核后改表（**退出码 1**）
-  stale       表里有、目录里没有            ⇒ 可能已下线；**别急着删**
-  flagged     表里有条目但只有档位标记      ⇒ 按渠道口径走兜底，属正常
+  actionable    表里没有、渠道侧**有**窗口出处 ⇒ 照抄即可补（**退出码 1**）
+  noSource      表里没有、渠道侧也没出处      ⇒ 按口径走兜底，**不算待办**
+  mismatch      两边都有但窗口不一致          ⇒ 复核后改表（**退出码 1**）
+  imagesMissing 表里有、渠道侧说支持看图却没标 ⇒ 补 supportsImages（**退出码 1**）
+  stale         表里有、目录里没有            ⇒ 可能已下线；**别急着删**
+  flagged       表里有条目但只有档位标记      ⇒ 按渠道口径走兜底，属正常
 
 ⚠️ stale 不自动删：条目存在可能只是因为该号此刻没供给这个模型（渠道目录随账号变）。
    channels/README.md 记的正是「端点声明 ≠ 实际可调用」，反向也成立。`
@@ -308,6 +314,15 @@ async function main(argv) {
       }
     }
 
+    if (report.imagesMissing.length > 0) {
+      console.log(
+        `\n⚠️ 看图能力漏标 ${report.imagesMissing.length} 条` +
+          '（渠道侧声明支持、表里没标 ⇒ 用户附加图片时会在发出前被拒）：',
+      )
+      console.log('   （⚠️ 这条**不能**由运行时自动补：图像标错会让会话卡死，必须人过一眼）')
+      for (const row of report.imagesMissing) console.log(`  ${imagesSuggestionOf(row)}`)
+    }
+
     if (report.flagged.length > 0) {
       console.log(
         `\nℹ️ 只有档位标记、没有窗口 ${report.flagged.length} 条（按渠道口径走兜底，属正常）：`,
@@ -323,10 +338,10 @@ async function main(argv) {
     }
 
     console.log(
-      '\n下一步：未登记的模型要**两样都查** —— ' +
+      '\n下一步：新模型要**两样都查** —— ' +
         '① 上下文窗口（有出处就照抄，没有就留兜底）；' +
-        '② 思考档位（`node scripts/probe-cpa-stream.mjs --case think --model <id> --repeat 3`，' +
-        '三次都测得出差别才写标记）。清单见 docs/MODEL-CAPS.md。',
+        '② 看图能力（渠道声明支持就补 `supportsImages: true`，' +
+        '**官方说纯文本的保持不标**）。清单见 docs/MODEL-CAPS.md。',
     )
     if (!capsAuditIsClean(report)) console.log('\n（有可执行项：按上面照抄即可）')
   }

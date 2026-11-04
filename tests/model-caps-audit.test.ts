@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { capsAuditIsClean, capsSuggestionOf, diffModelCaps } from '../src/model-caps-audit.ts'
+import {
+  capsAuditIsClean,
+  capsSuggestionOf,
+  diffModelCaps,
+  imagesSuggestionOf,
+} from '../src/model-caps-audit.ts'
 import {
   capsOverrideOf,
   readCapsOverrides,
@@ -113,6 +118,67 @@ describe('diffModelCaps', () => {
       }),
     ).toBe("'y': { contextWindow: 256_000, supportsImages: true },")
     expect(capsSuggestionOf({ channel: 'trae', model: 'z' })).toContain('缺出处')
+  })
+})
+
+/**
+ * **第二条证据轴：看图能力**。
+ *
+ * 它与窗口独立，方向还相反：窗口写小了只是压缩早点触发，而图像漏标是
+ * 用户附加图片时**在发出前就被拒** —— 用户以为模型不行，其实是我们没标。
+ */
+describe('diffModelCaps · 看图能力', () => {
+  const calibrated = {
+    workbuddy: {
+      'glm-5.3': { contextWindow: 1_000_000, supportsImages: true },
+      // 表里有、没标图：可能是漏了，也可能是查过确实不支持
+      'glm-4.6': { contextWindow: 200_000 },
+    },
+  }
+
+  it('⚠️ 表里没标、渠道侧说支持 → 进 imagesMissing（该补）', () => {
+    const report = diffModelCaps({
+      catalogs: { workbuddy: ['glm-4.6'] },
+      calibrated,
+      sources: { workbuddy: { 'glm-4.6': { contextWindow: 200_000, supportsImages: true } } },
+    })
+    expect(report.imagesMissing).toEqual([{ channel: 'workbuddy', model: 'glm-4.6' }])
+    expect(capsAuditIsClean(report)).toBe(false)
+  })
+
+  it('⚠️ 渠道侧没说支持 → **不进报告**（「没标」可能是「确认不支持」）', () => {
+    const report = diffModelCaps({
+      catalogs: { workbuddy: ['glm-4.6'] },
+      calibrated,
+      sources: { workbuddy: { 'glm-4.6': { contextWindow: 200_000 } } },
+    })
+    expect(report.imagesMissing).toEqual([])
+    expect(capsAuditIsClean(report)).toBe(true)
+  })
+
+  it('表里已经标了 → 不进报告（不重复催）', () => {
+    const report = diffModelCaps({
+      catalogs: { workbuddy: ['glm-5.3'] },
+      calibrated,
+      sources: { workbuddy: { 'glm-5.3': { contextWindow: 1_000_000, supportsImages: true } } },
+    })
+    expect(report.imagesMissing).toEqual([])
+  })
+
+  it('⚠️ 反方向不管：表里标了、渠道没报 → 以表为准（可能有实测支撑）', () => {
+    const report = diffModelCaps({
+      catalogs: { workbuddy: ['glm-5.3'] },
+      calibrated,
+      sources: { workbuddy: { 'glm-5.3': { contextWindow: 1_000_000 } } },
+    })
+    expect(report.imagesMissing).toEqual([])
+    expect(capsAuditIsClean(report)).toBe(true)
+  })
+
+  it('给已有条目补图像的建议不回写窗口值（那是另一条轴）', () => {
+    expect(imagesSuggestionOf({ channel: 'workbuddy', model: 'glm-4.6' })).toContain(
+      'supportsImages: true',
+    )
   })
 })
 

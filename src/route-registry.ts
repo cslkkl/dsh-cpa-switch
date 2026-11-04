@@ -1996,6 +1996,17 @@ export function attachRouteRegistry(
               .join(', '),
           )
         }
+        /**
+         * 看图能力漏标：**只报，不自动补**（`input: ['text','image']` 标错会让
+         * 会话卡死，且不可逆）。这条日志就是给人的。
+         */
+        if (outcome.imagesToFill.length > 0) {
+          deps.logger?.info?.(
+            'cpa-panel: %d 个模型渠道侧支持看图、表里没标（可补 supportsImages: true）：%s',
+            outcome.imagesToFill.length,
+            outcome.imagesToFill.map((row) => `${row.channel}/${row.model}`).join(', '),
+          )
+        }
       } catch (error) {
         deps.logger?.warn?.('cpa-panel: 校准表体检失败（不影响清单）: %o', error)
       }

@@ -168,8 +168,17 @@ export function readWindowSources(): Record<string, Record<string, WindowSource>
 /** 体检结果 + 这一轮补了什么。 */
 export interface CapsSyncOutcome {
   readonly report: CapsAuditReport
-  /** 这一轮**新补进**补丁表的条目。 */
+  /** 这一轮**新补进**补丁表的条目（窗口 + 看图能力）。 */
   readonly applied: readonly { readonly channel: string; readonly model: string }[]
+  /**
+   * 表里已有条目、但**漏标看图能力**的那些。
+   *
+   * ⚠️ **运行时故意不补**：`input: ['text','image']` 标错的代价是**会话卡死**
+   * （图片发出去、消息已落库、provider 中途拒绝 ⇒ 反复重试一个不可能成功的请求），
+   * 而且不可逆。所以这一类只报告，由人过一眼再写进表 —— 代价是「用户附加图片时
+   * 在发出前被拒」，那个是**可逆**的，比卡死好得多。
+   */
+  readonly imagesToFill: readonly { readonly channel: string; readonly model: string }[]
 }
 
 /**
@@ -215,5 +224,5 @@ export function syncCapsFromCatalog(
     if (applied.length > 0) writeCapsOverrides(merged)
   }
 
-  return { report, applied }
+  return { report, applied, imagesToFill: report.imagesMissing }
 }

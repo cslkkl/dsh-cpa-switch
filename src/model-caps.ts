@@ -390,7 +390,7 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
       supportedContextWindows: [300_000, 1_000_000],
       supportsImages: true,
     },
-    'deepseek-v4-pro': { contextWindow: 1_000_000 },
+    'deepseek-v4-pro': { contextWindow: 1_000_000, supportsImages: true },
     'deepseek-v4-flash': { contextWindow: 1_000_000, supportsImages: true },
     'deepseek-v3-2-volc': { contextWindow: 1_000_000 },
     'glm-5.2': { contextWindow: 1_000_000, supportsImages: true },
@@ -408,13 +408,13 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     'kimi-k2.7': { contextWindow: 256_000, supportsImages: true },
     'kimi-k2.5': { contextWindow: 262_144, supportsImages: true },
     'kimi-k2-thinking': { contextWindow: 256_000, supportsImages: true },
-    'kimi-k2.8-preview': { contextWindow: 1_000_000 },
+    'kimi-k2.8-preview': { contextWindow: 1_000_000, supportsImages: true },
     // ⚠️ `kimi-k3-1` 与 `kimi-k3.1-pro` 是**两条不同的模型**（渠道目录里 name 分别是
     // `Kimi-K3` 与 `Kimi-K3.1-Pro`），不能互相顶替 —— 曾只登记前者，后者落宿主兜底
     // 262144，界面上看起来「K3.1-Pro 只有 262K」，其实是**没校准条目**。
     // 出处：WorkBuddy 渠道目录（`.workbuddy-catalog.json` 的 `workbuddy:cli` 快照，
     // `contextWindow: 1000000` / `supportsImages: true`）。
-    'kimi-k3-1': { contextWindow: 1_000_000 },
+    'kimi-k3-1': { contextWindow: 1_000_000, supportsImages: true },
     /**
      * ⚠️ **档位摘掉（2026-11-05）**：这是「关不掉」那一类，不是「测不准」。
      *
@@ -465,7 +465,7 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     // 档位摘掉（2026-10-12 三重复测）：关不掉 —— off=[135,122,139]、high=[180,184,207]。
     // ⚠️ 只带档位标记、**不填窗口**：这条模型的窗口没有渠道侧出处，按渠道口径走兜底
     //（与 Trae 那 11 条裸名同一条口径），别为了挂标记去编一个窗口。
-    'step-5-preview': { reasoningEfforts: false },
+    'step-5-preview': { supportsImages: true, reasoningEfforts: false },
     'space-bunny': { contextWindow: 1_000_000, supportsImages: true },
   },
   zcode: {

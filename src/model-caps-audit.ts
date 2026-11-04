@@ -60,6 +60,25 @@ export interface CapsAuditReport {
   readonly stale: readonly StaleModel[]
   /** 只有档位标记、没有窗口的条目（按渠道口径走兜底，属正常）。 */
   readonly flagged: readonly { readonly channel: string; readonly model: string }[]
+  /**
+   * **表里有条目，但没标「支持看图」，而渠道侧明确说支持**。
+   *
+   * 这是**第二条证据轴**，与窗口独立：窗口写小了只是压缩早点触发，
+   * 而图像漏标是**用户附加图片时在发出前就被拒**（宿主点名说这个模型不支持图），
+   * 双向都难受 —— 用户以为模型不行，其实是我们没标。
+   *
+   * ⚠️ **只在渠道侧明确说 `supportsImages: true` 时才进这一类**：
+   * 「表里没写」也可能是「查过、确实不支持」，那是**有反证的保持不标**
+   * （见 `model-caps.ts` 的 `supportsImages` 头注）。不区分两者就会逼着人去
+   * 把「确认不支持」的模型也标上，代价是会话卡死。
+   */
+  readonly imagesMissing: readonly MissingImages[]
+}
+
+/** 表里有、但漏标了看图能力的一处。 */
+export interface MissingImages {
+  readonly channel: string
+  readonly model: string
 }
 
 /** 表里某个模型的最小形状（只读我们关心的两个字段）。 */
@@ -105,6 +124,7 @@ export function diffModelCaps(input: CapsAuditInput): CapsAuditReport {
   const mismatch: WindowMismatch[] = []
   const stale: StaleModel[] = []
   const flagged: { channel: string; model: string }[] = []
+  const imagesMissing: MissingImages[] = []
 
   for (const [channel, ids] of Object.entries(input.catalogs)) {
     const table = input.calibrated[channel] ?? {}
@@ -114,8 +134,8 @@ export function diffModelCaps(input: CapsAuditInput): CapsAuditReport {
     for (const model of ids) {
       seen.add(model)
       const caps = table[model]
+      const source = sources[model]
       if (caps === undefined) {
-        const source = sources[model]
         missing.push({
           channel,
           model,
@@ -125,11 +145,20 @@ export function diffModelCaps(input: CapsAuditInput): CapsAuditReport {
         })
         continue
       }
+      /**
+       * 看图能力：**只在渠道侧明确说支持、而表里没标**时才算漏。
+       *
+       * ⚠️ 反方向（表里标了、渠道说没有）**不进报告**：表是人写的，
+       * 可能有官方文档或实测支撑（本仓就有「官方说纯文本、实测带真视觉」的先例）。
+       * 自动把人的结论改回去，比漏标危险得多。
+       */
+      if (source?.supportsImages === true && caps.supportsImages !== true) {
+        imagesMissing.push({ channel, model })
+      }
       if (caps.contextWindow === undefined) {
         flagged.push({ channel, model })
         continue
       }
-      const source = sources[model]
       if (source !== undefined && source.contextWindow !== caps.contextWindow) {
         mismatch.push({ channel, model, table: caps.contextWindow, source: source.contextWindow })
       }
@@ -149,18 +178,24 @@ export function diffModelCaps(input: CapsAuditInput): CapsAuditReport {
     mismatch: sorted(mismatch),
     stale: sorted(stale),
     flagged: sorted(flagged),
+    imagesMissing: sorted(imagesMissing),
   }
 }
 
 /**
  * 体检是不是**干净**的。
  *
- * 口径：只有 `actionable` 与 `mismatch` 算问题 —— 它们都能立刻行动（补一条 / 改一条）。
+ * 口径：只看**能立刻行动**的那些 —— `actionable`（补一条）、`mismatch`（改一条）、
+ * `imagesMissing`（补一个 `supportsImages: true`）。
  * `noSource` 是**已知的兜底**，`stale` 是供给面波动，`flagged` 是设计如此。
  * 把它们算成红，等于让判据天天红、然后被无视。
  */
 export function capsAuditIsClean(report: CapsAuditReport): boolean {
-  return report.actionable.length === 0 && report.mismatch.length === 0
+  return (
+    report.actionable.length === 0 &&
+    report.mismatch.length === 0 &&
+    report.imagesMissing.length === 0
+  )
 }
 
 /**
@@ -175,4 +210,15 @@ export function capsSuggestionOf(row: MissingModel): string {
   const images = row.suggestedImages === true ? ', supportsImages: true' : ''
   const window = String(row.suggestedWindow).replace(/\B(?=(\d{3})+(?!\d))/g, '_')
   return `'${row.model}': { contextWindow: ${window}${images} },`
+}
+
+/**
+ * 一行「给已有条目补看图能力」的建议。
+ *
+ * ⚠️ **这个不能由运行时自动补**：`input: ['text','image']` 标错的代价是
+ * **会话卡死**（图片已发出去、消息已落库、provider 中途拒绝 ⇒ 反复重试一个
+ * 不可能成功的请求）。所以它必须人过一眼再写。
+ */
+export function imagesSuggestionOf(row: MissingImages): string {
+  return `'${row.model}': { …现有字段, supportsImages: true },  // ${row.channel}：渠道侧声明支持看图`
 }
