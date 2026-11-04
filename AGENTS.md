@@ -15,6 +15,7 @@
 | 真机验过什么、还差什么             | [验收记录](.agents/notes/2026-10-19-acceptance-history.md)（依据）                                                                                                                         |
 | 坏过什么                           | [docs/postmortem/](docs/postmortem/)                                                                                                                                                       |
 | 怎么发版                           | [docs/PUBLISHING.md](docs/PUBLISHING.md)                                                                                                                                                   |
+| 新模型的窗口 / 思考档位怎么查      | [docs/MODEL-CAPS.md](docs/MODEL-CAPS.md)（`node scripts/audit-model-caps.mjs` 体检；运行时自动补窗口）                                                                                     |
 | 想参与贡献                         | [CONTRIBUTING.md](CONTRIBUTING.md)                                                                                                                                                         |
 
 ## 全局规则
