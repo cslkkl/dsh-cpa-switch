@@ -36,6 +36,25 @@ describe('capsOf', () => {
     expect(capsOf('workbuddy', 'some-new-model')).toBeUndefined()
   })
 
+  /**
+   * ⚠️ **「同一个模型的不同写法」与「两个不同模型」必须分开**（2026-11-05 实机）。
+   *
+   * `kimi-k3-1`（渠道 name = `Kimi-K3`）与 `kimi-k3.1-pro`（`Kimi-K3.1-Pro`）
+   * 在渠道目录里是**两条独立条目**。表里原先只有前者，后者查不到 ⇒ 推清单时
+   * 不写 `contextWindow` ⇒ 宿主落兜底 **262144**，界面上看起来就是
+   * 「K3.1-Pro 只有 262K」，而它其实在渠道目录里写着 1M。
+   *
+   * 这条判据钉的是**症状本身**（不是某个数值）：K3.1-Pro 必须有出处、
+   * 且与 K3 各自独立 —— 别再拿一条去顶另一条。
+   */
+  it('⚠️ kimi-k3.1-pro 与 kimi-k3-1 是两条模型，各自都要有窗口', () => {
+    const k31 = capsOf('workbuddy', 'kimi-k3.1-pro')?.contextWindow
+    const k3 = capsOf('workbuddy', 'kimi-k3-1')?.contextWindow
+    expect(k31, 'kimi-k3.1-pro 没有窗口出处 ⇒ 界面会显示宿主兜底 262144').toBeDefined()
+    expect(k3).toBeDefined()
+    expect(k31).toBeGreaterThan(262_144)
+  })
+
   it('同名模型在不同渠道可以有不同的窗口', () => {
     const wb = capsOf('workbuddy', 'glm-5.1')?.contextWindow
     const zc = capsOf('zcode', 'glm-5.1')?.contextWindow

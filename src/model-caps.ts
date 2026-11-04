@@ -409,8 +409,21 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     'kimi-k2.5': { contextWindow: 262_144, supportsImages: true },
     'kimi-k2-thinking': { contextWindow: 256_000, supportsImages: true },
     'kimi-k2.8-preview': { contextWindow: 1_000_000 },
+    // ⚠️ `kimi-k3-1` 与 `kimi-k3.1-pro` 是**两条不同的模型**（渠道目录里 name 分别是
+    // `Kimi-K3` 与 `Kimi-K3.1-Pro`），不能互相顶替 —— 曾只登记前者，后者落宿主兜底
+    // 262144，界面上看起来「K3.1-Pro 只有 262K」，其实是**没校准条目**。
+    // 出处：WorkBuddy 渠道目录（`.workbuddy-catalog.json` 的 `workbuddy:cli` 快照，
+    // `contextWindow: 1000000` / `supportsImages: true`）。
     'kimi-k3-1': { contextWindow: 1_000_000 },
+    'kimi-k3.1-pro': { contextWindow: 1_000_000, supportsImages: true },
     'minimax-m3': { contextWindow: 512_000, supportsImages: true },
+    // 同一份 WorkBuddy 渠道目录（`contextWindow: 1000000` / `supportsImages: true`）——
+    // 与 `kimi-k3.1-pro` 是**同一类漏登记**：目录里有、表里没有 ⇒ 界面显示兜底 262144。
+    'minimax-m3.1-flash': { contextWindow: 1_000_000, supportsImages: true },
+    // 同上（`Xiaomi MiMo-V2.6-Pro`，目录给 1M/128K/带图）。
+    // ⚠️ 这条是 2026-11-05 由 `scripts/audit-model-caps.mjs` 体检出来的
+    // —— 它上线后一直落兜底，而没有任何报错。
+    'mimo-v2.6-pro': { contextWindow: 1_000_000, supportsImages: true },
     'minimax-m2.7': { contextWindow: 200_000 },
     'minimax-m2.5': { contextWindow: 204_800 },
     // ⚠️ 混元 2.0 的 Thinking 变体可能有差异 —— 官方文档给的是混元 2.0，
