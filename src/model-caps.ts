@@ -415,7 +415,22 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     // 出处：WorkBuddy 渠道目录（`.workbuddy-catalog.json` 的 `workbuddy:cli` 快照，
     // `contextWindow: 1000000` / `supportsImages: true`）。
     'kimi-k3-1': { contextWindow: 1_000_000 },
-    'kimi-k3.1-pro': { contextWindow: 1_000_000, supportsImages: true },
+    /**
+     * ⚠️ **档位摘掉（2026-11-05）**：这是「关不掉」那一类，不是「测不准」。
+     *
+     * 两条独立证据：
+     * - 渠道目录自己写着 `canDisableThinking: false`、
+     *   `supportedEfforts: [low, high, max]` —— **`off` 根本不在合法值里**；
+     * - 实测（同一提示词，`reasoning_content` 字符数）：
+     *   `off` = 200 / 274 / 415、`high` = 358 / 493 / 497 / 540。
+     *   **「关」那一档照样思考 200–415 字**，只是略少 —— 那是假旋钮。
+     *
+     * 留着它的实际后果：用户为「多想点」去选「关」以外的档，得到的差别远小于预期；
+     * 而选了「关」的以为自己在省 token，其实一样在思考。摘掉之后界面只留宿主那行
+     * `Default`（= 什么都不发、由上游按 `defaultEffort: high` 自己决定），
+     * 这才是这个模型的真实行为。
+     */
+    'kimi-k3.1-pro': { contextWindow: 1_000_000, supportsImages: true, reasoningEfforts: false },
     'minimax-m3': { contextWindow: 512_000, supportsImages: true },
     // 同一份 WorkBuddy 渠道目录（`contextWindow: 1000000` / `supportsImages: true`）——
     // 与 `kimi-k3.1-pro` 是**同一类漏登记**：目录里有、表里没有 ⇒ 界面显示兜底 262144。

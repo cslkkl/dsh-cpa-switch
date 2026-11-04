@@ -55,6 +55,20 @@ describe('capsOf', () => {
     expect(k31).toBeGreaterThan(262_144)
   })
 
+  /**
+   * ⚠️ **「关不掉」与「测不准」是两回事**（2026-11-05）。
+   *
+   * `kimi-k3.1-pro` 属于前者：渠道目录写着 `canDisableThinking: false`，
+   * 实测「关」那一档照样思考 200/274/415 字（`high` 是 358/493/497/540）——
+   * 那不是「测不出差别」，是**这个开关根本关不掉**，留着就是骗用户。
+   *
+   * 与它相邻的 `kimi-k3-1` 不摘：那条没有同样的证据。
+   */
+  it('⚠️ 关不掉的模型摘掉档位（kimi-k3.1-pro），相邻的 kimi-k3-1 不跟着摘', () => {
+    expect(capsOf('workbuddy', 'kimi-k3.1-pro')?.reasoningEfforts).toBe(false)
+    expect(capsOf('workbuddy', 'kimi-k3-1')?.reasoningEfforts).toBeUndefined()
+  })
+
   it('同名模型在不同渠道可以有不同的窗口', () => {
     const wb = capsOf('workbuddy', 'glm-5.1')?.contextWindow
     const zc = capsOf('zcode', 'glm-5.1')?.contextWindow
