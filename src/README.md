@@ -370,6 +370,24 @@
     路由侧的行身份（`row.bare`）与「隐藏模型」的键都从它派生 —— 两边口径漂开是
     **静默的**（用户勾了隐藏，清单里那一行照样在）
   - 改后必测：`tests/model-alias.test.ts`、`tests/route-registry.test.ts`
+- **`model-caps-audit.ts`** —— 校准表体检的**纯判据**：渠道目录 vs 表差在哪。
+  - 导出：`diffModelCaps` / `capsAuditIsClean` / `capsSuggestionOf` / 类型 `CapsAuditReport` / `MissingModel` / `WindowMismatch` / `StaleModel`
+  - 四类差异：`actionable`（表里没有、渠道侧**有**出处）/ `noSource`（没出处，走兜底，**不算待办**）/
+    `mismatch`（数值不同）/ `stale`（表里有、目录里没有，**不自动删**）
+  - ⚠️ **零 IO**：读渠道与落盘在 `caps-overrides.ts`，报告排版在 `scripts/audit-model-caps.mjs`
+    —— 判据要能被单独测，同一份逻辑抄两遍必然漂开
+  - 判据 `tests/model-caps-audit.test.ts`
+- **`caps-overrides.ts`** —— 校准表的**运行时修正**：新模型出现时自动补上窗口。
+  - 导出：`readCapsOverrides` / `capsOverrideOf` / `capsWithOverrides` / `workbuddySourcesFrom` /
+    `readWindowSources` / `syncCapsFromCatalog` / 类型 `CapsOverride` / `CapsSyncOutcome`
+  - 落地文件 `storages/cpa-model-caps-overrides.json`；由 `route-registry` 在**读全**目录那一轮
+    调用（与写路由缓存同一个判据 —— 渠道读不全时比不上）
+  - ⚠️ **三条硬口径**：① 只在代码表**没有该模型**时补（表是人写的有出处值，不许被运行时覆盖）；
+    ② **没有出处就什么都不写**（不编数字，宁可走明确的兜底 262144）；③ 补过的值落盘
+    （下次目录读不全时它自己就是出处）
+  - ⚠️ 窗口出处今天只有 WorkBuddy 一个（桥的 `.workbuddy-catalog.json`）；Trae / Qoder 的
+    `models/groups` 只给 `id`/`name`，所以**只报告、不补**——渠道侧证据不足
+  - 判据 `tests/model-caps-audit.test.ts`；流程见 [../docs/MODEL-CAPS.md](../docs/MODEL-CAPS.md)
 - **`model-caps.ts`** —— 模型能力（上下文窗口 + 图像输入）校准表。
   - 导出：`capsOf` / `calibratedChannels` / `calibratedTable` / `capSources` /
     `reasoningEffortsOf` / `offSpellingOf` / 类型 `ModelCaps` / `CapSources`
@@ -514,7 +532,8 @@
 | [ids.ts](ids.ts) / [paths.ts](paths.ts)                     | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                                                                                                                                                                                                                                                            |
 | [state.ts](state.ts) 状态写入                               | **只有读改写单入口**（`updateXxx(改法)`，传函数不传值）：整段同步、没有 `await`。⚠️ 加「整份覆盖」的写函数、或把读提前到 `await` 之前，都会**无声**吞掉中间别人的写入（[决策记录](../.agents/notes/2026-10-06-state-single-entry.md)、`tests/state-lost-update.test.ts`）                                                                                                                                                                          |
 | [checkin-ledger.ts](checkin-ledger.ts)                      | 今日签到账本：**只补上游没说的那一格，不覆盖上游的 `false`**；判定看「**任一键是今天**」而非「优先哪个键」；同步[决策记录](../.agents/notes/2026-10-05-checkin-ledger.md) + `tests/checkin-ledger.test.ts`                                                                                                                                                                                                                                         |
-| [model-caps.ts](model-caps.ts)                              | 能力校准表 + 思考档位契约（三条不报错的坑见 [AGENTS.md](AGENTS.md)）；⚠️ **路由级 `reasoning` 是禁区**（曾用来去掉 `Default` 行，会让摘掉档位的模型整轮崩，已删）；⚠️ 声明形状写错是**整个 provider 注册失败、所有模型一起消失**。判据 `tests/model-reasoning.test.ts` + `tests/model-caps.test.ts`                                                                                                                                                |
+| [model-caps.ts](model-caps.ts)                              | 能力校准表 + 思考档位契约（三条不报错的坑见 [AGENTS.md](AGENTS.md)）；⚠️ **路由级 `reasoning` 是禁区**（曾用来去掉 `Default` 行，会让摘掉档位的模型整轮崩，已删）；⚠️ 声明形状写错是**整个 provider 注册失败、所有模型一起消失**。判据 `tests/model-reasoning.test.ts` + `tests/model-caps.test.ts`；**新模型怎么查窗口与档位** → [../docs/MODEL-CAPS.md](../docs/MODEL-CAPS.md)                                                                   |
+| 新增模型（渠道目录里多了一条）                              | **两样都要查**：① 上下文窗口 ② 思考档位 —— 少一样就是给用户一个假数字/假旋钮，而且**零报错**。运行时自动补的是窗口（[caps-overrides.ts](caps-overrides.ts)），档位只能人工实测。步骤 → [../docs/MODEL-CAPS.md](../docs/MODEL-CAPS.md)                                                                                                                                                                                                              |
 | [tsdown.config.ts](../tsdown.config.ts) 的 externals        | 漏一项会把 React 内联进浏览器产物                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 改对外契约                                                  | 同步 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 与 `package.json` 版本                                                                                                                                                                                                                                                                                                                                                                     |
 | 改渠道差异 / 配置项                                         | 同步根 [../README.md](../README.md) 的渠道能力矩阵 / 配置表                                                                                                                                                                                                                                                                                                                                                                                        |

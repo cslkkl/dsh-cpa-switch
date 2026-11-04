@@ -11,6 +11,7 @@
 | `release-guard.mjs`     | **发布噪音守卫**：自上一个标签以来的改动会不会改变 npm 上的产物（stdin 读路径）                                        | 推标签发布时由 `publish.yml` 跑；本机复核发布时     |
 | `verify-alias-yaml.mts` | 核对 `oauth.model-alias` 段的 YAML 形状                                                                                | 改了别名渲染之后                                    |
 | `snapshot-catalog.mjs`  | **只读观测探针**：把宿主侧模型目录打成快照（切语言前后对比用）；不进门禁，由 agent 在本机跑                            | 排查模型路由 / 选择器问题时                         |
+| `audit-model-caps.mjs`  | **校准表体检**：渠道目录里有、`model-caps.ts` 里没有的模型；给可粘贴的补丁行。不发模型请求、不烧额度                   | 新模型出现时 / 更新渠道插件之后                     |
 | `probe-cpa-stream.mjs`  | **输出链路探针**：对本地 CPA 直发 chat 请求，原样抓 SSE / 原始响应并做帧级判读；**发真实请求、消耗渠道额度**，不进门禁 | 排查「思考去了哪 / DSML 泄漏 / 回放 400」类问题时   |
 
 ### check-layering.cjs
@@ -169,6 +170,37 @@ node --experimental-strip-types scripts/verify-alias-yaml.mts   # 退出码 0 = 
 ```
 
 它会把渲染结果落到 `%TEMP%\alias-shape-check.yaml`，可直接拿 YAML 解析器复核。
+
+### audit-model-caps.mjs
+
+**校准表体检**（不是门禁）：渠道目录里出现的模型，`model-caps.ts` 有没有登记过。
+
+**为什么需要它**：模型随渠道上游随时变，而表是编译进产物的。新模型一出现，表里没有它 ⇒
+推送时不写 `contextWindow` ⇒ 宿主落兜底 **262144** ⇒ 界面显示「这模型只有 262K」，
+而渠道目录里可能白纸黑字写着 1M。**全程零报错** —— 这跟「它真的只有 262K」长得一模一样
+（2026-11-05 的 `kimi-k3.1-pro` 就是这么藏了几天）。
+
+判据本身在 [src/model-caps-audit.ts](../src/model-caps-audit.ts)（纯函数，可单测），
+本脚本**只负责读渠道、排版输出** —— 同一份逻辑抄两遍必然漂开。
+
+退出码**只看能行动的**：`actionable`（表里没有、渠道侧有出处）与 `mismatch` 算红；
+`noSource`（渠道侧也没出处，按口径走兜底）与 `stale`（供给面波动）**不算** ——
+把它们算成红，等于让判据天天红、然后被无视。
+
+⚠️ **CPA 没在跑时以退出码 2 明确失败**，不会因为「读不到」而假装通过。
+
+```powershell
+node scripts/audit-model-caps.mjs            # 0 = 没有可执行项 / 1 = 有 / 2 = 前提不成立
+node scripts/audit-model-caps.mjs --json     # 机器读
+node scripts/audit-model-caps.mjs --channel trae
+```
+
+维护流程（查窗口 + 查思考档位、出处分档、四类差异怎么处置）→
+[docs/MODEL-CAPS.md](../docs/MODEL-CAPS.md)。
+
+**运行时还有一道**：[src/caps-overrides.ts](../src/caps-overrides.ts) 在每次**读全**渠道目录后
+自动把有出处的窗口补进 `storages/cpa-model-caps-overrides.json`，下一次推送就生效 ——
+所以「更新渠道插件 → 重启 CPA」之后，新模型的窗口已经是对的，不必等发版。
 
 ### probe-cpa-stream.mjs
 
