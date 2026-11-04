@@ -38,8 +38,14 @@ export function localDay(): string {
   return `${String(d.getFullYear())}-${m}-${day}`
 }
 
-/** 读 JSON 文件；不存在、损坏、或结构不对时返回 `undefined`。 */
-function readJson<T>(path: string): T | undefined {
+/**
+ * 读 JSON 文件；不存在、损坏、或结构不对时返回 `undefined`。
+ *
+ * 导出给 [caps-overrides.ts](caps-overrides.ts) 用：那份文件与这里的六个同族
+ * （都在 `storages/`、都遵守「坏格子只丢那一格」），**别再抄一份**
+ * —— 两份 JSON 读法漂开会一边静默返回空表、一边照常读。
+ */
+export function readJson<T>(path: string): T | undefined {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
     return typeof parsed === 'object' && parsed !== null ? (parsed as T) : undefined
@@ -48,8 +54,8 @@ function readJson<T>(path: string): T | undefined {
   }
 }
 
-/** 写 JSON 文件，自动建父目录；失败静默。 */
-function writeJson(path: string, value: unknown): void {
+/** 写 JSON 文件，自动建父目录；失败静默。（导出理由同 {@link readJson}。） */
+export function writeJson(path: string, value: unknown): void {
   try {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, JSON.stringify(value, null, 2), 'utf8')

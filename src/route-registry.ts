@@ -42,6 +42,7 @@ import {
   providerLabelOf,
 } from './channels/registry.ts'
 import { aliasFor, buildAliasTable, stripChannelPrefixes, type AliasTable } from './model-alias.ts'
+import { capsOverrideOf, syncCapsFromCatalog } from './caps-overrides.ts'
 import { capsOf, reasoningEffortsOf } from './model-caps.ts'
 import { patchModelAlias } from './setup/config.ts'
 import { readCachedRoutes, writeCachedRoutes } from './state.ts'
@@ -841,6 +842,21 @@ function buildCpaRouteProfile(
   }): RouteModel => {
     // 校准表里有该渠道的条目才写 contextWindow；查不到就省略 → 落宿主兜底 262k。
     const caps = capsOf(row.channel, row.bare)
+    /**
+     * ## 运行时补丁：表里**完全没有**这条模型时才用（2026-11-05）
+     *
+     * `model-caps.ts` 是编译进产物的表，模型却随上游随时变 —— 新模型一出现，
+     * 表里没有它 ⇒ 不写 `contextWindow` ⇒ 界面显示兜底 **262144**，
+     * 而渠道目录里可能写着 1M。`kimi-k3.1-pro` 就是这么藏了几天的。
+     *
+     * ⚠️ **只在 `caps === undefined` 时取补丁**：表是人写的有出处值，
+     * 运行时数据不许覆盖它 —— 哪怕表里那条**故意不填窗口**（走兜底是有意的选择），
+     * 也不许被一次上游读数改掉。补丁的来源与三条口径见
+     * [caps-overrides.ts](caps-overrides.ts)。
+     */
+    const patch = caps === undefined ? capsOverrideOf(row.channel, row.bare) : undefined
+    const contextWindow = caps?.contextWindow ?? patch?.contextWindow
+    const images = caps?.supportsImages === true || patch?.supportsImages === true
     // 逐模型省略：校准表标了 `reasoningEfforts: false`（实测反证：两档都无思考）
     // 的模型不发档位声明 —— 宿主落 `reasoning: false`，界面不给 Effort 行。
     // 标了 `reasoningEffortsSwapped`（实测方向相反）的模型**照常声明两个档位、把值对调**，
@@ -860,7 +876,7 @@ function buildCpaRouteProfile(
        * （两条证据轴独立）—— 那时**一个字段都不写**，让宿主落自己的兜底
        * 262144，与「压根没有校准条目」逐字相同。判据见「只带档位标记的条目…」。
        */
-      ...(caps?.contextWindow === undefined ? {} : { contextWindow: caps.contextWindow }),
+      ...(contextWindow === undefined ? {} : { contextWindow }),
       /**
        * 输出上限：**只在正整数时写**（`0` = 用户关掉了声明）。
        *
@@ -879,7 +895,7 @@ function buildCpaRouteProfile(
        * 少标＝附加图片前就被拒；多标＝图片已发出去、消息已落库，
        * provider 中途拒绝，会话卡在反复重试。所以不写才是保守。
        */
-      ...(caps?.supportsImages === true ? { input: ['text', 'image'] } : {}),
+      ...(images ? { input: ['text', 'image'] } : {}),
       /**
        * 思考档位：**逐模型带上、值按该行的渠道给**（开关打开时）。
        *
@@ -1947,6 +1963,42 @@ export function attachRouteRegistry(
      */
     if (ready.snapshot.skipped.length === 0) {
       writeCachedRoutes(built.groups, deps.gateway.port, built.channelOf)
+      /**
+       * ## 顺手体检校准表（2026-11-05）
+       *
+       * 位置就是「读全 + 算得出清单 + 过了护栏」这一处 —— 与写盘同一个判据，
+       * 因为**只有完整快照**能当体检的输入：渠道读不全时，目录里少掉的模型
+       * 会被误判成「表里有、目录里没有」，而那种误判没有任何报错。
+       *
+       * 查出「表里没有、渠道侧有出处」的模型就**自动补进运行时补丁表**
+       * （`caps-overrides.ts`），**下一次推送**起窗口就对了 ——
+       * 不必等发版。当前这一轮仍用旧值（表在 `buildProfileFrom` 里已经读过），
+       * 这是有意的：本轮不为了一个刚刚才知道的数字去重算整份清单。
+       *
+       * ⚠️ 整段 `try` 包住：体检失败绝不能影响推清单 ——
+       * 它是**附加**能力，坏了最多「新模型继续走兜底」。
+       */
+      try {
+        const outcome = syncCapsFromCatalog(ready.snapshot.channels)
+        if (outcome.applied.length > 0) {
+          deps.logger?.info?.(
+            'cpa-panel: 校准表补了 %d 条窗口（下次推送生效）：%s',
+            outcome.applied.length,
+            outcome.applied.map((row) => `${row.channel}/${row.model}`).join(', '),
+          )
+        }
+        if (outcome.report.mismatch.length > 0) {
+          deps.logger?.warn?.(
+            'cpa-panel: 校准表与渠道出处不一致 %d 条：%s',
+            outcome.report.mismatch.length,
+            outcome.report.mismatch
+              .map((row) => `${row.channel}/${row.model} 表=${row.table} 出处=${row.source}`)
+              .join(', '),
+          )
+        }
+      } catch (error) {
+        deps.logger?.warn?.('cpa-panel: 校准表体检失败（不影响清单）: %o', error)
+      }
     }
 
     return { result: await pushProfile(built, seq, trigger), verdict: 'accepted' }

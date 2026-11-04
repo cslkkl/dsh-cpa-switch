@@ -29,6 +29,7 @@ const JUDGEMENT_FILES = new Set([
   'src/checkin-ledger.ts',
   'src/model-alias.ts',
   'src/model-caps.ts',
+  'src/model-caps-audit.ts',
   'src/action-outcome.ts',
   'src/intent-drift.ts',
   'src/relogin.ts',

@@ -3243,3 +3243,88 @@ describe('骨架与推送的分组一致', () => {
     }
   })
 })
+
+/**
+ * 运行时补丁：表里没有的模型，渠道侧给了窗口就该自动用上（2026-11-05）。
+ *
+ * 治的是**零报错**的那类缺陷：`model-caps.ts` 是编译进产物的表，模型却随上游变。
+ * 新模型一出现，表里没有它 ⇒ 不写 `contextWindow` ⇒ 宿主落兜底 262144 ⇒
+ * 界面显示「这模型只有 262K」，而渠道目录里可能写着 1M。
+ */
+describe('运行时补丁：新模型的窗口自动补', () => {
+  let home = ''
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-caps-patch-'))
+    process.env.DSH_HOME = home
+    mkdirSync(join(home, 'cpa-panel', 'runtime', 'cpa'), { recursive: true })
+    writeFileSync(
+      join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml'),
+      'config-version: 8\noauth:\n    auth-dir: "auth"\n',
+      'utf8',
+    )
+  })
+
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 桥写的目录快照：给 `brand-new-model` 一个明确的 1M。 */
+  function writeCatalogSnapshot(): void {
+    writeFileSync(
+      join(home, '.workbuddy-catalog.json'),
+      JSON.stringify({
+        entries: { a: { models: [{ id: 'brand-new-model', contextWindow: 1_000_000 }] } },
+      }),
+      'utf8',
+    )
+  }
+
+  it('⚠️ 表里没有、渠道侧有出处 → 下一轮推送就带上窗口', async () => {
+    writeCatalogSnapshot()
+    const cpa = fakeCpa({
+      files: [{ name: 'w1', provider: 'workbuddy' }],
+      models: { w1: ['brand-new-model'] },
+      catalog: ['brand-new-model'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))
+
+    // 第一轮：读全目录 → 体检 → 落补丁（这一轮清单仍按旧表算，不写窗口）
+    await refresh('boot')
+    expect(
+      (pushed.at(-1)?.rows ?? []).find((row) => row.id === 'brand-new-model')?.contextWindow,
+    ).toBeUndefined()
+
+    // 第二轮：补丁已落盘 → 窗口用上
+    await refresh('setup')
+    expect(
+      (pushed.at(-1)?.rows ?? []).find((row) => row.id === 'brand-new-model')?.contextWindow,
+    ).toBe(1_000_000)
+  })
+
+  it('⚠️ 表里**已有**条目时补丁不覆盖它（表是人写的有出处值）', async () => {
+    writeFileSync(
+      join(home, '.workbuddy-catalog.json'),
+      JSON.stringify({
+        entries: { a: { models: [{ id: 'glm-5.3', contextWindow: 200_000 }] } },
+      }),
+      'utf8',
+    )
+    const cpa = fakeCpa({
+      files: [{ name: 'w1', provider: 'workbuddy' }],
+      models: { w1: ['glm-5.3'] },
+      catalog: ['glm-5.3'],
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))
+
+    await refresh('boot')
+    await refresh('setup')
+    // 表里写的是 1M，渠道侧报 200K —— 以表为准
+    expect((pushed.at(-1)?.rows ?? []).find((row) => row.id === 'glm-5.3')?.contextWindow).toBe(
+      1_000_000,
+    )
+  })
+})
