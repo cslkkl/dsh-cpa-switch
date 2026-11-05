@@ -447,6 +447,25 @@ const CALIBRATED: Readonly<Record<string, Readonly<Record<string, ModelCaps>>>> 
     hy3: { contextWindow: 192_000, supportsImages: true },
     'hy3-x': { contextWindow: 192_000, supportsImages: true },
     'hy4-preview': { contextWindow: 1_000_000 },
+    /**
+     * 2026-11-05 新出现的两条（渠道目录里 name 都叫 `Hy4`，差别只在计费：
+     * `hy4free` 有限时免费徽标、`hy4std` 是 `x0.29 credits`）。
+     *
+     * 出处：WorkBuddy 渠道目录 —— `contextWindow: 960000`、`maxTokens: 64000`、
+     * `supportsImages: true`。
+     *
+     * ⚠️ **先由运行时补丁自动接住、再补到这里**：它们上线当天就被
+     * `caps-overrides.ts` 补上了（`storages/cpa-model-caps-overrides.json`），
+     * 所以用户没看到过「262K」。这正是那条机制存在的理由 —— 补表只是让它
+     * 从「运行时推测」变成「有出处的永久值」。
+     *
+     * 档位不标：渠道声明 `onlyReasoning: true` / `canDisableThinking: false` /
+     * `supportedEfforts: [high]` —— 只有一个挡位且关不掉，与 `hy4-preview-f`
+     * 同类；但要落 `reasoningEfforts: false` 须先三次实测（本仓口径），
+     * 目前**没有实测**，所以先按默认走，别凭渠道声明就摘。
+     */
+    hy4free: { contextWindow: 960_000, supportsImages: true },
+    hy4std: { contextWindow: 960_000, supportsImages: true },
     // 国际端点清单（`FALLBACK_WORKBUDDY_AI_MODELS`）的值：默认 300K、可开到 1M。
     // ⚠️ 档位摘掉：三次重复实测「关」那一档照样思考（178/176/0 字）—— 关不掉的假旋钮。
     'hy4-preview-f': {
