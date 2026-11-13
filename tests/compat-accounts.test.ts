@@ -261,3 +261,36 @@ describe('compat 渠道的模型清单', () => {
     expect((result as unknown as { groups: { models: unknown[] }[] }).groups[0]?.models).toEqual([])
   })
 })
+
+/**
+ * ⚠️ **`capabilities.login` 必须为假**（2026-11-13 真机）。
+ *
+ * 面板用这一个能力位决定渲不渲染「+ 添加账号」。为假时那张卡不出现，
+ * 用户就不会走到 `/v8/management/oauth/auth-url?provider=doubaowork` 上
+ * 被 CPA 回一句 `provider_not_found`。
+ *
+ * 这一条与「其余能力位全 false」分开写，因为它**不是**「做不到」而是
+ * 「这条路根本不存在」—— 前者是降级，后者是画错门。
+ */
+describe('compat 渠道的 login 能力位', () => {
+  it('doubaowork 不能自己发起登录（CPA 没有它的 OAuth provider）', async () => {
+    const { channelOf } = await import('../src/channels/registry.ts')
+    expect(channelOf('doubaowork')?.capabilities.login).toBe(false)
+  })
+
+  it('四个插件渠道都能（它们的 OAuth 由 CPA 的那条路由提供）', async () => {
+    const { PLUGIN_CHANNEL_IDS, channelOf } = await import('../src/channels/registry.ts')
+    for (const id of PLUGIN_CHANNEL_IDS) {
+      expect(channelOf(id)?.capabilities.login, `${id} 应能登录`).toBe(true)
+    }
+  })
+
+  it('面板读到的 capabilities 里 login 是 false', async () => {
+    const cpa = makeCpa({ [COMPAT]: COMPAT_PAYLOAD })
+    const result = await opsFor(cpa).accounts.list('doubaowork', true)
+    if (result.ok !== true) throw new Error('list failed')
+    const capabilities = (result.data as { capabilities: { login: boolean } }).capabilities
+
+    expect(capabilities.login).toBe(false)
+  })
+})

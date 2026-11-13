@@ -68,6 +68,7 @@ export const DOUBAOWORK = {
     autoCheckin: false,
     school: false,
     import: false,
+    login: false,
   },
   /**
    * ⚠️ 与 `setup/config.ts` 生成 `openai-compatibility[].models[].alias` 时用的前缀

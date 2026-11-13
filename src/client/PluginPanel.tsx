@@ -284,6 +284,17 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     loading: accountsResource.loading,
     error: accountsResource.error,
     count: accounts.length,
+    /**
+     * ⚠️ 这个渠道能不能在面板里发起登录。compat 渠道（豆包工作）不能 ——
+     * 它的账号在那边的网关里用浏览器登录，CPA 这边根本没有它的 OAuth provider
+     * （拿它的 id 去要授权地址，CPA 会回 `provider_not_found`）。
+     * 不把这条传下去，空渠道那句引导语就会指着一个**不该存在**的按钮说「点它」。
+     *
+     * ⚠️ 注释里也**不许写那个管理接口的路径字面量**：浏览器产物断言会扫它
+     * （`verify-artifacts.cjs` 的「浏览器产物不含 CPA 管理接口路径」），
+     * 而那条规定存在的意义是「密钥与后台只走宿主那一侧」。
+     */
+    canLogin: capabilities.login,
   })
 
   /**
@@ -682,10 +693,20 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
             />
           ))
         )}
-        <button type="button" className={css.addCard} onClick={openAddLogin}>
-          <span className={css.addPlus}>+</span>
-          <span>{t('addAccount')}</span>
-        </button>
+        {/*
+         * ⚠️ **只有能自己发起登录的渠道才渲染这张卡**（2026-11-13 真机）。
+         *
+         * 原先它是无条件渲染的，于是 compat 渠道（豆包工作）也有一个「+ 添加账号」，
+         * 点下去打的是 CPA 那条「按 provider 要授权地址」的路由 ——
+         * CPA 不认识这个 provider，界面弹出「开始登录失败：provider_not_found」。
+         * 一个必然失败的按钮比没有按钮更糟：用户会以为是自己配错了。
+         */}
+        {capabilities.login && (
+          <button type="button" className={css.addCard} onClick={openAddLogin}>
+            <span className={css.addPlus}>+</span>
+            <span>{t('addAccount')}</span>
+          </button>
+        )}
       </div>
 
       {accountsResource.error !== undefined && (

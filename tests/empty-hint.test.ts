@@ -134,3 +134,42 @@ describe('空渠道说明 · 落在哪儿（结构，错了不报错）', () => 
     expect(panel).toContain('emptyHintOf(')
   })
 })
+
+/**
+ * **不许指着一个不存在的按钮说话**（2026-11-13 真机截图）。
+ *
+ * compat 渠道（豆包工作）不在 CPA 里登录 —— 账号是在它自己的网关里用浏览器登的，
+ * 所以面板上**没有**「+ 添加账号」那张卡。而原引导句是「点下面的『添加账号』」，
+ * 于是那一页会指着一个根本没有的按钮，还配上一条必然失败的登录路径
+ * （点下去 CPA 回 `provider_not_found`）。
+ */
+describe('空渠道：不能自己登录的渠道换一句话', () => {
+  it('canLogin: false → 不提「添加账号」，改指真实的那条路', () => {
+    const hint = emptyHintOf({ t: tzh, ...empty, canLogin: false })
+    expect(hint).toBeDefined()
+    // 主句（这是一个事实）不变
+    expect(hint?.title).toBe('这个渠道还没有账号')
+    // 但引导句不能再出现那个按钮名
+    expect(hint?.hint).not.toContain('添加账号')
+    expect(hint?.hint).toContain('豆包工作网关')
+  })
+
+  it('英文表同样换（不是只改中文）', () => {
+    const hint = emptyHintOf({ t: ten, ...empty, canLogin: false })
+    expect(hint?.hint).not.toContain('Add account')
+    expect(hint?.hint).toContain('Doubao Work gateway')
+  })
+
+  /** 省略 / true 时逐字不变 —— 四个插件渠道的行为一个字都不该动。 */
+  it('省略或 true → 与原来那句逐字相同', () => {
+    const base = emptyHintOf({ t: tzh, ...empty })
+    expect(emptyHintOf({ t: tzh, ...empty, canLogin: true })).toEqual(base)
+    expect(base?.hint).toContain('添加账号')
+  })
+
+  it('读失败时仍然什么都不说（新参数不许绕过那条口径）', () => {
+    expect(
+      emptyHintOf({ t: tzh, loading: false, error: 'cpa-unavailable', count: 0, canLogin: false }),
+    ).toBeUndefined()
+  })
+})
