@@ -29,7 +29,15 @@ import { join } from 'node:path'
 import { rememberInstall } from '../state.ts'
 import { SOURCES, managedCpaDir, managedExePath, managedOverridesDir } from './paths.ts'
 import type { SourceKey } from './paths.ts'
-import { download, extract, findAsset, removeDir, sourcePresent, verify } from './download.ts'
+import {
+  download,
+  extract,
+  findAsset,
+  readOfflineArchive,
+  removeDir,
+  sourcePresent,
+  verify,
+} from './download.ts'
 import type { Asset, Downloaded } from './download.ts'
 
 /** 一个安装步骤（宿主 `onStep` 回传它给面板）。 */
@@ -56,6 +64,12 @@ export interface InstallOutcome {
   readonly verified?: boolean
   /** 渠道安装后从 `overrides/` 叠回 `plugins/` 的本地补丁件（文件名）。 */
   readonly overrides?: string[]
+  /**
+   * 这次装的是**离线归档**（上游不可达）。
+   *
+   * ⚠️ 界面必须据此说明「这不是新版」—— 把它当普通更新报，用户会以为上游还活着。
+   */
+  readonly offline?: boolean
   /** 失败时的阶段。 */
   readonly phase?: string
   readonly error?: string
@@ -202,16 +216,43 @@ export async function installSource(
 
   step('query')
   let asset: Asset
+  /**
+   * 网络侧全失败时回退到**离线归档**（`runtime/offline/`）。
+   *
+   * 为什么回退放在这里而不是 `findAsset` 里：回退需要 `key`（每个来源各有自己的
+   * 归档），而 `findAsset` 的签名只有 `source`。放在这一层还顺便保住了
+   * 「`findAsset` 只回答网络问题」这条分工。
+   *
+   * ⚠️ 回退成功必须**如实标记 `offline`**：装上去的是**已知的旧版本**，
+   * 界面要说明「这不是新版」。把它报成一次普通更新，就是让用户以为上游还活着。
+   */
+  let offline = false
   try {
     asset = await query(source)
   } catch (error) {
-    return { ok: false, phase: 'query', error: (error as Error).message }
+    /**
+     * ⚠️ 回退**不受注入点影响**：`readOfflineArchive` 读的是磁盘上的真实归档，
+     * 而注入点（`options.findAsset`）换的只是「怎么问网络」。判据里归档目录
+     * 默认是空的（`DSH_HOME` 指临时目录），所以这条回退在测试中自然为空转。
+     */
+    const archived = readOfflineArchive(source)
+    if (archived === undefined) {
+      return { ok: false, phase: 'query', error: (error as Error).message }
+    }
+    step('offline', { name: archived.name, size: archived.size })
+    asset = archived
+    offline = true
   }
   step('download', { name: asset.name, size: asset.size })
 
   let downloaded: Downloaded
+  /**
+   * ⚠️ 离线那条**必须用真的 `download`**：它会读 `asset.localPath` 做本地拷贝，
+   * 而任何注入的假实现都只会盯着 `url`（离线包根本没有可用的 url）。
+   */
+  const fetcher = offline ? download : fetchTo
   try {
-    downloaded = await fetchTo(asset, (received, total) => {
+    downloaded = await fetcher(asset, (received, total) => {
       step('progress', { name: asset.name, size: asset.size, received, total })
     })
   } catch (error) {
@@ -270,5 +311,6 @@ export async function installSource(
     name: asset.name,
     verified: check.skipped !== true,
     ...(overrides.length > 0 ? { overrides } : {}),
+    ...(offline ? { offline: true } : {}),
   }
 }

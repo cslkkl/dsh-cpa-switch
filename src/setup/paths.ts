@@ -11,6 +11,21 @@ import { join } from 'node:path'
 import { pluginRuntimeDir } from '../paths.ts'
 
 /**
+ * 一个**镜像**候选：主源查不到时依次再问它。
+ *
+ * 只要求给 `latestApi` —— 它必须返回 **GitHub Release 形状**的 JSON
+ * （`tag_name` + `assets[].browser_download_url` + 可选 `digest`）。
+ *
+ * ⚠️ 判据是「它真的给二进制」，不是「它有这个仓库」：
+ * codeberg 那个镜像站有 tag、有源码 zipball，但 `releases` 端点是 404，
+ * 填进 `mirrors` 会让 `plugins/` 落一堆 `.go`，而 `verify()` / `extract()`
+ * **都不报错**（2026-11-13 实测）。见 {@link SOURCES} 的 `plugins.mirrors` 注释。
+ */
+export interface SourceMirror {
+  readonly latestApi: string
+}
+
+/**
  * 各平台的下载源。
  *
  * `assetPattern` 里的 `{version}` 语义由 `findAsset` 处理。
@@ -27,11 +42,26 @@ import { pluginRuntimeDir } from '../paths.ts'
  */
 const CPA_OWNER = 'cslkkl'
 
+/** 空镜像表 —— 两处 `mirrors` 共用这一个常量，让「都是空的」成为**显式事实**。 */
+const NO_MIRRORS: readonly SourceMirror[] = []
+
 export const SOURCES = {
   cpa: {
     repo: `${CPA_OWNER}/CLIProxyAPI`,
     latestApi: `https://api.github.com/repos/${CPA_OWNER}/CLIProxyAPI/releases/latest`,
     assetPattern: /^CLIProxyAPI_[\d.]+_windows_amd64\.zip$/u,
+    /**
+     * 版本查询失败时依次再问的**同一个 Release 的镜像**。
+     *
+     * 每一项只需给 `latestApi`：它返回 GitHub Release 形状的 JSON
+     * （`tag_name` + `assets[].browser_download_url`）。没有镜像就空着 ——
+     * 那时回退到 {@link managedOfflineDir} 的离线归档。
+     *
+     * ⚠️ **加之前先验过它真的给二进制**：codeberg 那个镜像站给的是源码
+     * tag 归档（`.go` 文件），填进这里只会让 `plugins/` 落一堆源码，
+     * 而 `extract()` 与 `verify()` 都不会报错（2026-11-13 实测）。
+     */
+    mirrors: NO_MIRRORS,
     /** 解压后要找的可执行文件名。 */
     exeName: 'cli-proxy-api.exe',
     label: 'CLIProxyAPI 本体',
@@ -48,6 +78,19 @@ export const SOURCES = {
     repo: 'mmqz/cpa-multi-plugins',
     latestApi: 'https://api.github.com/repos/mmqz/cpa-multi-plugins/releases/latest',
     assetPattern: /^cpa-multi-plugins-windows-amd64\.zip$/u,
+    /**
+     * 镜像候选 —— **目前是空的，且有实测依据**。
+     *
+     * 2026-11-13：上游 GitHub 账号 `mmqz` 已被封（codeberg 镜像仓的提交说明
+     * 写着 "GitHub account mmqz was suspended on 2026-11-09"），仓库 404；
+     * 唯一已知镜像 `https://codeberg.org/mingjiu/cpa-multi-plugins` **只有源码**：
+     * `releases` 端点 404、tag 无 assets、`dist/` 只有 `linux-amd64/*.h`。
+     *
+     * 填进来的判据是「它返回 GitHub Release 形状且 assets 里真有
+     * `cpa-multi-plugins-windows-amd64.zip`」—— 只给 tag 的不算。
+     * 有存活镜像时加一项即可，无需改流程。
+     */
+    mirrors: NO_MIRRORS,
     label: '渠道插件（workbuddy / trae / qoder / zcode / mimo）',
     /** 解压落点。 */
     targetDir: managedPluginsDir,
@@ -95,6 +138,26 @@ export function managedConfigPath(): string {
 /** 渠道插件目录（与 exe 同层，对应配置里的 `plugins.dir: "plugins"`）。 */
 export function managedPluginsDir(): string {
   return join(managedCpaDir(), 'plugins')
+}
+
+/**
+ * **离线归档**目录：上游彻底不可达时，用这里保存的最后一份已验证产物重装。
+ *
+ * 为什么需要它（2026-11-13 实况）：渠道插件上游 `mmqz/cpa-multi-plugins`
+ * 的 GitHub 账号于 2026-11-09 被封，仓库 404；codeberg 镜像（`mingjiu/…`）
+ * **只有源码 tag，没有任何 release 资产** —— `dist/` 下只有 `linux-amd64/*.h`
+ * 五个头文件。于是「把下载源换成镜像」这条路根本走不通：改过去之后
+ * `extract()` 会「成功」，落进 `plugins/` 的却是 `.go` 源码，`listPluginIds()`
+ * 随之返回空数组 —— 比现在的报错更糟（静默清空五个 dll）。
+ *
+ * 所以兜底只能落在本地：把最后一次成功下载的包连同它的 sha256 一起留在这里，
+ * 网络侧全部失败时用它重装**同版本**，并由界面如实说明「这不是新版」。
+ *
+ * 形状：`<asset 文件名>` + `MANIFEST.txt`（`k=v` 逐行，见 [download.ts](download.ts)
+ * 的 `readOfflineArchive`）。目录为空 = 没有归档，一切照旧。
+ */
+export function managedOfflineDir(): string {
+  return join(managedCpaDir(), 'offline')
 }
 
 /**
