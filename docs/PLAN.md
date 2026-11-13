@@ -255,12 +255,12 @@ than a blank）仍见上面的 `reference/dsh-workbuddy-bridge`（**不入库**�
 
 **0.17.0–0.20.0 期间这块又长了几层**（只留指针，细节各自归决策记录）：
 
-| 能力                                                     | 落在哪                                                                                           |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| 模型名在四个落点分层显示、渠道名只在分组标题里出现一次   | [名字根修](../.agents/notes/2026-10-17-model-name-root-fix.md)                                   |
-| 额度到百万级换 `M` 一档（四处共用同一格式化函数）        | `src/client/format.ts`，判据 `tests/format.test.ts`                                              |
-| 「设为唯一」按**本渠道启用数**决定出不出现（0 / 1 / 多） | `src/client/select-visibility.ts`，判据 `tests/select-visibility.test.ts`                        |
-| 侧栏入口：默认关、开了之后收在「更多」里                 | [更多里](2026-10-26-sidebar-entry-in-more.md)、[默认关](2026-10-20-sidebar-entry-default-off.md) |
+| 能力                                                     | 落在哪                                                                                                                                    |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 模型名在四个落点分层显示、渠道名只在分组标题里出现一次   | [名字根修](../.agents/notes/2026-10-17-model-name-root-fix.md)                                                                            |
+| 额度到百万级换 `M` 一档（四处共用同一格式化函数）        | `src/client/format.ts`，判据 `tests/format.test.ts`                                                                                       |
+| 「设为唯一」按**本渠道启用数**决定出不出现（0 / 1 / 多） | `src/client/select-visibility.ts`，判据 `tests/select-visibility.test.ts`                                                                 |
+| 侧栏入口：默认关，开了就占栏上那一行                     | [回到栏上](../.agents/notes/2026-11-13-sidebar-entry-back-to-rail.md)、[默认关](../.agents/notes/2026-10-20-sidebar-entry-default-off.md) |
 
 ⚠️ 这四件的**真机复验**不在本节 —— 在[验收记录](https://github.com/cslkkl/dsh-cpa-switch/blob/main/.agents/notes/2026-10-19-acceptance-history.md)
 顶部的「真机待验清单」。本节只回答「做成什么样了」。

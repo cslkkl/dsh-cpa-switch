@@ -20,7 +20,6 @@ import {
 import { ModelLabel, type ModelLabelSeat } from './ModelLabel.tsx'
 import { PanelPage } from './PanelPage.tsx'
 import { PanelGlyph } from './PanelGlyph.tsx'
-import { MoreMenuEntry, type MoreMenuSeat } from './MoreMenuEntry.tsx'
 import { fetchPanelPrefs, sidebarEntryOf } from './endpoints.ts'
 import {
   setSidebarEntryVisible,
@@ -75,13 +74,6 @@ interface SlotSeat extends ModelLabelSeat {
   readonly size?: number
   /** 中央面板页（{@link MAIN_SEAT}）由注册处 `inject` 塞进来的返回动作。 */
   readonly goBack?: () => void
-  /**
-   * 「更多」菜单那一行（{@link MORE_SEAT}）的 owner props：关菜单的动作。
-   *
-   * 宿主对这一行的**其余** owner props（`entries` / `onOpen` / `onPinnedChange`）
-   * 我们不用 —— 见 [MoreMenuEntry.tsx](MoreMenuEntry.tsx) 里为什么。
-   */
-  readonly onDismiss?: () => void
 }
 
 /** `ctx.slots` 的最小面。 */
@@ -179,36 +171,16 @@ const READOUT_SEAT = 'conversation.input.right'
 /**
  * 侧栏那一行的落点（宿主 `dsh-client-ui-sidebar` 声明：`list`，全局面板图标）。
  *
- * 它的 owner props 只有 `size`（展开 18 / 折叠轨 16）与 `active`；按钮本体、
- * 标签、选中态都是宿主的，我们只交字形。
+ * 注册面是**一个对象的四格**：`name` + `id` + `order` + `label`/`locale`；组件只
+ * 收到 `size`（展开 18 / 折叠轨 16）与 `active`。**行本体、标签、选中态都是宿主
+ * 画的**，我们只交字形（{@link PanelGlyph} 正好吃 `size`）。
+ *
+ * ⚠️ **宿主 0.2.2-rc.2 换了渲染路径、没换契约**：图标改由宿主的工厂槽
+ * `sidebar.panel.icon` 渲染，行上右侧还多了宿主的「取消固定」按钮（pin 是宿主
+ * 自己的内存态）。三条都不需要我们改：注册对象形状不变、组件签名不变（仍是
+ * `size` + `active`）、pin 也不该由插件替用户拨 —— 所以这里不留任何 pin 相关代码。
  */
 const PANELLIST_SEAT = 'sidebar.panellist'
-
-/**
- * 「更多」菜单的落点（宿主 `dsh-client-ui-sidebar` 声明：`list`）。
- *
- * 侧栏栏上放不下时入口改挂这里 —— 菜单里的行**完全由注册者决定**，
- * 宿主不会替哪个插件往菜单里加一行。反过来，没人在这个座里注册时，
- * 侧栏连「更多」那个按钮都不会画。
- */
-const MORE_SEAT = 'sidebar.panellist.actions'
-
-/**
- * 我们在「更多」菜单里的条目 id。
- *
- * ⚠️ **不重用 {@link PANEL_ID}**：栏上那个 id 要能被 `layout.selectPanel`
- * 按同名找回中央面板，而菜单这个只是 `list` 座里的格子键。两个座位各管一摊，
- * 共用一个字符串只会在将来宿主把两张表并起来看时生出歧义。
- */
-const MORE_SEAT_ID = 'cpa-panel-more'
-
-/**
- * 在「更多」菜单里的次序（越小越靠前）。
- *
- * 取负值：官方那两行（浏览更多插件 / 创建你的插件）是默认 0，而我们排在它们
- * **之上** —— 用户点开「更多」是想找自己的面板，不是想装插件。
- */
-const MORE_ORDER = -10
 
 /**
  * 侧栏行点开后的中央面板落点（宿主 `dsh-client-ui-layout` 声明：`keyed`）。
@@ -399,102 +371,47 @@ export function apply(ctx: ClientContext): void {
      * `void | (() => void)`，**赌错的表现是「关掉后那一行还在」，且零报错**。
      */
     let stopSidebarEntry: (() => void) | undefined
-    /** 「更多」那个座有没有被声明过（旧宿主兜底的判据，见 `mountSidebarEntry` 末尾）。 */
-    let moreDeclared = false
-    /** 兜底那次注册的 disposer（槽位后来声明了就要摘掉它，免得两个入口）。 */
-    let fallbackStop: (() => void) | undefined
-    /** 等「更多」声明的宽限时长；只是兜底，正常路径用不到。 */
-    const MORE_SEAT_GRACE_MS = 2000
-    let moreFallback: ReturnType<typeof setTimeout> | undefined
-
-    /** 栏上那一行（只在旧宿主兜底时用到）。 */
-    const registerRailRow = (): void | (() => void) =>
-      scope.slots.register(
-        {
-          name: PANELLIST_SEAT,
-          id: PANEL_ID,
-          order: PANEL_ORDER,
-          label,
-          locale: NS,
-        },
-        PanelGlyph,
-      )
 
     /**
-     * 入口注册在哪里 —— **固定是侧栏「更多」菜单那一档**（2026-10-26 维护者定案）。
+     * 入口注册在哪 —— **栏上那一行**（`sidebar.panellist`）。
      *
-     * 栏上那一行是宿主与所有插件共用的一列，插件默认不占；收起之后仍然点得到
-     * （菜单里那一行是我们自己画的）。
+     * ## 为什么放栏上（2026-11-13 维护者定案，撤回了「收进更多」那一版）
      *
-     * ## 为什么不做「钉在栏上」这一档
+     * 「侧栏入口」这句话的字面意思就是**栏上多一行**。收进「更多」之后，开关
+     * 打开时栏上什么都不变 —— 用户要验证它生效，还得多点一次去翻菜单；而那一行
+     * 恰恰是他按开关时唯一期待看到变化的地方。所以：开着就在栏上，
+     * 关掉就整条不在。**默认仍然关**（{@link sidebarEntryVisible} 的默认值）：
+     * 占不占那一列由用户按开关决定，不是由我们替他选一个「更省地方的落点」。
      *
-     * 第一版做过位置二选一，被维护者否掉：这一行偏好只该有一个问题
-     * （要不要入口），「放哪」由我们定。宿主侧也没有别的入口能改面板的 pin
-     * （侧栏「更多」当前只由宿主自己的 entry-customization 渲染，它不列面板）。
+     * ## 为什么不再有「放在哪」这一档
      *
-     * ## 为什么「收纳」靠**不注册栏上那个座**，而不是调宿主的 pin 回调
-     *
-     * 宿主的 `onPinnedChange` 只能在这个槽位的组件里拿到，而那个组件**只在
-     * 「更多」被点开时才挂载**（`Menu` 的实现是 `const list = open && …`）——
-     * 靠它做「默认收纳」就只能等用户第一次点开菜单，那不叫默认。
-     * 详见 [MoreMenuEntry.tsx](MoreMenuEntry.tsx)。
+     * 偏好只该回答一个问题 —— 要不要入口。宿主从 `0.2.1-rc.3` 起给了「更多」
+     * 折叠位，本仓 2026-10-26 跟过一次；但那个折叠位是**给用户**的收纳手段：
+     * 宿主 `0.2.2-rc.2` 的栏上那一行右侧自带「取消固定」按钮（pin 是宿主自己的
+     * 内存态），想收的人自己点一下就行。我们再给一条「默认收进更多」的路径，
+     * 等于替用户预先做了那个决定，而代价是「开关打开后看不出任何变化」。
+     * 取舍与代价见[决策记录](../../.agents/notes/2026-11-13-sidebar-entry-back-to-rail.md)。
      */
     const mountSidebarEntry = (): void => {
       if (stopSidebarEntry !== undefined || !sidebarEntryVisible()) return
-      const stop = scope.slots.inject(MORE_SEAT, () => {
-        moreDeclared = true
-        // 兜底已经挂上就摘掉 —— 「更多」到位之后不该再有一条栏上的行。
-        clearTimeout(moreFallback)
-        moreFallback = undefined
-        fallbackStop?.()
-        fallbackStop = undefined
+      const stop = scope.slots.inject(PANELLIST_SEAT, () =>
         scope.slots.register(
           {
-            name: MORE_SEAT,
-            /*
-             * 自己的 id（不抢别人那格）。`order` 取负值：菜单里排在最前 ——
-             * 官方那两行（浏览插件 / 创建插件）在它之下，而用户真正要找的
-             * 是「我自己的面板」。
-             */
-            id: MORE_SEAT_ID,
-            order: MORE_ORDER,
+            name: PANELLIST_SEAT,
+            /** 与 `main` 的 `key` 逐字相同 —— 宿主按它派发中央面板（见 {@link PANEL_ID}）。 */
+            id: PANEL_ID,
+            order: PANEL_ORDER,
+            label,
             locale: NS,
           },
-          (seat: MoreMenuSeat) => (
-            <MoreMenuEntry
-              label={label()}
-              open={() => layout.selectPanel(PANEL_ID)}
-              {...(seat?.onDismiss === undefined ? {} : { onDismiss: seat.onDismiss })}
-            />
-          ),
-        )
-      })
+          PanelGlyph,
+        ),
+      )
       stopSidebarEntry = typeof stop === 'function' ? stop : () => {}
-      /**
-       * ⚠️ **旧宿主兜底**（2026-10-26）：「更多」菜单这个座位是 `0.2.1-rc.3`
-       * 才声明的。`slots.inject` 在槽位**从未被声明**时**永远不会跑回调** ——
-       * 于是默认档在旧宿主上等于「侧栏里什么都没有」，而用户明明把开关打开了。
-       * 这是典型的**静默消失**，不能留着。
-       *
-       * 做法：等一小会儿，如果「更多」那个座一次都没被声明过，就退回栏上那一行。
-       * 槽位后来才声明（页面加载顺序不同）时，回调里会摘掉兜底。
-       *
-       * 代价：旧宿主上用户看到的是栏上那一行 —— 但那是**能看见**的降级，
-       * 而不是「开关开了却找不到入口」。
-       */
-      moreFallback = setTimeout(() => {
-        if (moreDeclared || !sidebarEntryVisible()) return
-        const stopFallback = scope.slots.inject(PANELLIST_SEAT, registerRailRow)
-        fallbackStop = typeof stopFallback === 'function' ? stopFallback : () => {}
-      }, MORE_SEAT_GRACE_MS)
     }
     const unmountSidebarEntry = (): void => {
       stopSidebarEntry?.()
       stopSidebarEntry = undefined
-      clearTimeout(moreFallback)
-      moreFallback = undefined
-      fallbackStop?.()
-      fallbackStop = undefined
     }
 
     // 先按当前值挂一次（默认关 => 首屏没有这一行），再订阅后续变化。

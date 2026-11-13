@@ -117,6 +117,25 @@ describe('浏览器半边 · 侧栏入口', () => {
     expect(coded).toMatch(/label,/u)
   })
 
+  /**
+   * ⚠️ **只注册栏上那一个座**（2026-11-13，撤回 #83）。
+   *
+   * #83 那版打开开关只注册 `sidebar.panellist.actions`（侧栏「更多」里一行）。
+   * 现在反过来：栏上那一行是**唯一**入口，菜单那个座**一个字符都不许出现** ——
+   * 两边都挂就是同一面板的两个入口，而用户拿菜单验证不了开关生效。
+   *
+   * 判据在源码层（`code()` 已剥注释，所以解释「曾经收进更多」的那段散文不算数），
+   * 真实注册面的同一件事由 `scripts/verify-artifacts.cjs` 的
+   * 「未注册 sidebar.panellist.actions」钉住。
+   */
+  it('⚠️ 开关打开后只注册 `sidebar.panellist`，不再碰「更多」那个座', () => {
+    expect(coded).not.toContain('sidebar.panellist.actions')
+    // 那一行菜单项整个文件已删除：留着 import 说明还有第二条渲染路径。
+    expect(coded).not.toContain('MoreMenuEntry')
+    // 旧宿主兜底（等 2 秒没见「更多」座就退回栏上）随之删除：声明下限上必存在。
+    expect(coded).not.toMatch(/moreFallback/u)
+  })
+
   it('中间列注册在 `main`，key 与侧栏行同一个常量', () => {
     expect(coded).toMatch(/name: MAIN_SEAT,/u)
     expect(coded).toMatch(/key: PANEL_ID,/u)
