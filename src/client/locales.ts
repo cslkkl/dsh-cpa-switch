@@ -222,6 +222,12 @@ export const zh = {
   /** ⚠️ 不写「已生效」：写 CPA 配置要等它停下来那一轮。 */
   gatewayLoginRestart:
     '还要重启一次 CPA 才生效 —— 上游配置只能在 CPA 未运行时写进去。重启后模型会出现在选择器里。',
+  /** 登录起不来时的三种原因 —— 分开说，因为它们对应三种不同的下一步。 */
+  'gatewayErr_gateway-not-installed':
+    '还没装豆包工作网关。它是独立程序（不是 CPA 插件），装好之后这里就能直接登录。',
+  'gatewayErr_gateway-not-started':
+    '网关已装但没起来。常见原因是端口 43861 / 43862 被占用，去看它自己的日志。',
+  'gatewayErr_gateway-not-running': '连不上豆包工作网关，请重试。',
   loginHint: '已打开授权页。若没自动打开，用这个链接：',
   loginWaiting: '等待授权完成…（完成后会自动刷新）',
   loginFailed: '起登录失败',
@@ -528,6 +534,11 @@ export const en: Record<LocaleKey, string> = {
   gatewayLoginDone: 'Signed in — found {count} model(s).',
   gatewayLoginRestart:
     'Restart CPA once to apply it: the upstream can only be written while CPA is stopped. The models show up in the picker after that.',
+  'gatewayErr_gateway-not-installed':
+    'The Doubao Work gateway is not installed yet. It is a separate program, not a CPA plugin.',
+  'gatewayErr_gateway-not-started':
+    'The gateway is installed but did not start. Ports 43861 / 43862 are usually the cause - check its logs.',
+  'gatewayErr_gateway-not-running': 'Cannot reach the Doubao Work gateway. Try again.',
   loginHint: 'Opened the authorization page. If it did not open, use this link:',
   loginWaiting: 'Waiting for authorization… the list refreshes by itself',
   loginFailed: 'Could not start sign-in',

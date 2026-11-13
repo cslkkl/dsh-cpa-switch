@@ -194,10 +194,18 @@ export function createDoubaoworkGatewayClient(
        * - `/api/key` 给默认 Key（无 Key 时它自己会建一把）；
        * - `/v1/models` 给「这个账号能调哪些模型」。
        *
-       * 用**模型口**读模型清单（不是面板口）：那是客户端真正会打的那个接口，
-       * 连同密钥一起验一遍，能读通就说明「写进 CPA 之后真的调得动」。
+       * ⚠️ **`/api/key` 是 POST，不是 GET**（读它的 `native/panel.mjs` 核实过：
+       * 那个路径在 `switch(path)` 的 **POST 分支**里，GET 分支只认
+       * `snapshot` / `login-status` / `keys` / `nodes`）。用 GET 打只会 404，
+       * 而 404 在这里的表现是「登录成功但读不到密钥」—— 看着像登录没成。
+       *
+       * ⚠️ `/v1/models` **必须带 Bearer**：它自己校验
+       * `/^Bearer ([A-Za-z0-9_-]{16,256})$/`，没有就直接 401。
+       * 用**模型口**读模型清单（不是面板口）是有意的：那是客户端真正会打的那个
+       * 接口，连同密钥一起验一遍，能读通就说明「写进 CPA 之后真的调得动」。
        */
-      const keyData = (await call('/api/key')) as { key?: unknown } | undefined
+      const keyData = (await call('/api/key', { method: 'POST', body: '{}' })) as
+        { key?: unknown } | undefined
       const apiKey = typeof keyData?.key === 'string' ? keyData.key : ''
       if (apiKey === '') throw new Error('gateway returned no api key')
 

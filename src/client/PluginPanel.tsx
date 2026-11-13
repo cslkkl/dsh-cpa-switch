@@ -212,6 +212,7 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
   const gatewayLogin = useGatewayLogin({
     plugin,
     onLoggedIn: () => void reload({ force: true }),
+    t,
   })
 
   /**

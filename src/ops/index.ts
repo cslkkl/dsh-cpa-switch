@@ -27,6 +27,7 @@ import type { CandidateRow as CandidateModelRow } from './model-visibility.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
 import { createDoubaoworkLoginOps, type DoubaoworkLoginOps } from './doubaowork-login.ts'
 import type { DoubaoworkGatewayClient } from '../doubaowork-gateway.ts'
+import { ensureGatewayRunning } from '../doubaowork-process.ts'
 import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
 import { createRemoveOps, type RemoveOps } from './remove.ts'
 import { createSchedulingOps, type SchedulingOps } from './scheduling.ts'
@@ -199,6 +200,15 @@ export function createOperations(deps: OpsDeps): Operations {
           }
         : createDoubaoworkLoginOps({
             client: deps.doubaoworkGateway,
+            /**
+             * 「网关在跑吗」由**托管层**回答，而不是只探活：没跑就把它拉起来
+             * （口径见 `doubaowork-process.ts`）。
+             *
+             * ⚠️ **不在 boot 时就起**：那会让每个装了本插件的人都莫名多一个常驻进程。
+             * 只有用户真的点了「添加账号」才动手。
+             */
+            supervisor: () =>
+              ensureGatewayRunning({ client: deps.doubaoworkGateway as DoubaoworkGatewayClient }),
             ...(deps.onAccountsChanged === undefined ? {} : { onLoggedIn: deps.onAccountsChanged }),
           }),
   }

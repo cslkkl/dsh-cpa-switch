@@ -117,6 +117,30 @@ export const paths = {
   doubaoworkPoll: '/api/v1/cpa/doubaowork-login?poll=1',
 } as const
 
+/**
+ * 起一次 compat 渠道的登录（网关会 spawn 一个独立浏览器）。
+ *
+ * ⚠️ 这不是 CPA 的 OAuth：路径、语义、谁弹浏览器都不一样，所以**不复用** `startAuth`。
+ */
+export function startDoubaoworkLogin(): Promise<ApiResult> {
+  return post(paths.doubaoworkLogin, {})
+}
+
+/** 取消这次登录（用户关弹窗时调，别让网关留一个没人管的浏览器窗口）。 */
+export function cancelDoubaoworkLogin(): Promise<ApiResult> {
+  return post(paths.doubaoworkLogin, { action: 'cancel' })
+}
+
+/**
+ * 查一次进度。
+ *
+ * ⚠️ **成功的那个 tick 有副作用**（宿主读密钥与模型并落盘），所以这是**唯一**
+ * 需要 `poll=1` 的那条路；不带它就是纯读（面板打开时探活用）。
+ */
+export function doubaoworkLoginPoll(): Promise<ApiResult> {
+  return api(paths.doubaoworkPoll)
+}
+
 /** 查环境准备状态。 */
 export function fetchSetup(): Promise<ApiResult> {
   return api(paths.setup)

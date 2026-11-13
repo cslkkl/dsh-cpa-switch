@@ -30,6 +30,7 @@
  * @module dsh-cpa-switch/ops/doubaowork-login
  */
 
+import type { EnsureResult } from '../doubaowork-process.ts'
 import type { DoubaoworkGatewayClient, GatewayLoginStatus } from '../doubaowork-gateway.ts'
 import { writeDoubaoworkCredentials } from '../state.ts'
 import { messageOf, type OpsResult } from './result.ts'
@@ -37,6 +38,12 @@ import { messageOf, type OpsResult } from './result.ts'
 /** 登录域的依赖。 */
 export interface DoubaoworkLoginDeps {
   readonly client: DoubaoworkGatewayClient
+  /**
+   * 确保网关在跑（见 [doubaowork-process.ts](../doubaowork-process.ts)）。
+   *
+   * 省略时退回「只探活、不起进程」的老行为 —— 判据用它测纯协议层。
+   */
+  readonly supervisor?: (() => Promise<EnsureResult>) | undefined
   /** 登录成功后调一次 —— 宿主用它安排「把新上游写进 CPA 配置」。 */
   readonly onLoggedIn?: (() => void) | undefined
   /** 当前时刻（毫秒）；测试注入。 */
@@ -76,10 +83,25 @@ export function createDoubaoworkLoginOps(deps: DoubaoworkLoginDeps): DoubaoworkL
 
   async function start(): Promise<OpsResult> {
     /**
-     * ⚠️ **先探活再起登录**：网关没跑时 `/api/login` 只会给一个 `ECONNREFUSED`，
-     * 那与「网关在跑但登录失败」在界面上长得一样。分开报，用户才知道该去启动它。
+     * ⚠️ **先确保网关在跑，再起登录**。
+     *
+     * 2026-11-13 真机就是这么翻的：网关是我手工在某个 shell 里起的，那个 shell 一结束
+     * 进程就没了，用户点「添加账号」只得到 `gateway-not-running` —— 而其实什么都没配错。
+     * 「该由插件把该起的东西起起来」是这一层能替用户省下的唯一麻烦。
+     *
+     * 三句话分开说，因为它们对应三种完全不同的下一步：
+     * - `gateway-not-installed` → 去装；
+     * - `gateway-not-started` → 装了但起不来（端口被占 / Node 版本），去看它自己的日志；
+     * - `gateway-not-running` → 探活/起进程这条路本身没接通。
      */
-    if (!(await deps.client.alive())) return { ok: false, error: 'gateway-not-running' }
+    const ensured = deps.supervisor === undefined ? undefined : await deps.supervisor()
+    if (ensured !== undefined) {
+      if (!ensured.installed) return { ok: false, error: 'gateway-not-installed' }
+      if (!ensured.running) return { ok: false, error: 'gateway-not-started' }
+    } else if (!(await deps.client.alive())) {
+      return { ok: false, error: 'gateway-not-running' }
+    }
+
     const started = await deps.client.startLogin()
     if (!started.ok) return { ok: false, error: started.error }
     return { ok: true }
@@ -92,9 +114,24 @@ export function createDoubaoworkLoginOps(deps: DoubaoworkLoginDeps): DoubaoworkL
     } catch (error) {
       return { ok: false, error: messageOf(error) }
     }
-    // 还在登录中 / 已结束但没成功 —— 原样回给界面，由它决定说什么
-    if (login.active || login.state !== 'success') {
-      return { ok: true, login }
+    /**
+     * ⚠️ **三个终态都要分开说**（读它的 `browser-login.mjs` 核实过）：
+     *
+     * | state | 在 ACTIVE 里？ | 该怎么显示 |
+     * | --- | --- | --- |
+     * | `starting` / `waiting` / `importing` | 是 | 继续等 |
+     * | `awaiting_confirmation` | 是 | 继续等（只在 `expectedId` 那条路上出现） |
+     * | `success` | 否 | 读产物、落盘 |
+     * | `error` / `expired` / `cancelled` | 否 | **报错**，不能继续显示「等待中」 |
+     *
+     * 早先只判 `state !== 'success'` 就当成「还在等」，于是登录失败时面板会
+     * **一直转圈说等待**、用户永远不知道已经失败了（2026-11-13 读源码时发现）。
+     */
+    if (login.active) return { ok: true, login }
+
+    if (login.state !== 'success') {
+      // 终态失败：把网关那句话原样透出去（它写的是人话，不是错误码）
+      return { ok: true, login, failed: login.state }
     }
 
     try {
