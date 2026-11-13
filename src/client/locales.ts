@@ -213,9 +213,6 @@ export const zh = {
   /** compat 渠道（没有「添加账号」按钮）用的那一句 —— 不许指着不存在的按钮说话。 */
   emptyNoAccountsNoLoginHint:
     '这个渠道不在 CPA 里登录：先在豆包工作网关中登录账号，再到插件设置里填上网关地址、凭据与模型清单',
-  /** compat 渠道（没有「添加账号」按钮）用的那一句 —— 不许指着不存在的按钮说话。 */
-  emptyNoAccountsNoLoginHint:
-    '这个渠道不在 CPA 里登录：先在豆包工作网关中登录账号，再到插件设置里填上网关地址、凭据与模型清单',
   loginIntro: '点「开始登录」会打开授权页，在浏览器里完成登录即可，不用手动复制链接。',
   /** compat 渠道：浏览器是那个网关自己起的独立窗口，不是我们开标签页。 */
   gatewayLoginIntro:
@@ -522,8 +519,6 @@ export const en: Record<LocaleKey, string> = {
   /** See the Chinese table's note: shown only when the read succeeded and there really are zero accounts. */
   emptyNoAccounts: 'No accounts in this channel yet',
   emptyNoAccountsHint: 'Click "{action}" below and finish signing in your browser',
-  emptyNoAccountsNoLoginHint:
-    'This channel does not sign in through CPA: log in on the Doubao Work gateway, then fill in its URL, credential and model list in this plugin’s settings',
   emptyNoAccountsNoLoginHint:
     'This channel does not sign in through CPA: log in on the Doubao Work gateway, then fill in its URL, credential and model list in this plugin’s settings',
   loginIntro: 'Signing in opens the provider page. Finish there — no link copying needed.',
