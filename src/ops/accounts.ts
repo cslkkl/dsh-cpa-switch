@@ -118,10 +118,17 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
 
     try {
       const accountsPath = accountsPathOf(plugin)
+      /**
+       * ⚠️ 余额端点**可能不存在**（compat 渠道没有这个接口）。
+       * 判据是「`capabilities.credits` 为真**且** spec 给了路径」，两条都成立才算有 ——
+       * 只看能力位会 fetch `undefined`，只看路径会漏掉「有端点但界面不该显示」的渠道。
+       */
+      const creditsPath = channel.creditsPath
+      const hasCredits = channel.capabilities.credits && creditsPath !== undefined
       const [base, creditData, authFilesData] = await Promise.all([
         deps.gateway.fetch(accountsPath),
-        channel.capabilities.credits
-          ? deps.gateway.fetch(channel.creditsPath).catch(() => undefined)
+        hasCredits
+          ? deps.gateway.fetch(creditsPath).catch(() => undefined)
           : Promise.resolve(undefined),
         /**
          * ⚠️ **失败就当没读到**（`.catch`）：它只服务界面上一句

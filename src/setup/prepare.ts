@@ -17,6 +17,7 @@ import { inspect, listPluginIds } from './download.ts'
 import { installSource } from './install.ts'
 import type { InstallDeps, SetupStep } from './install.ts'
 import { renderConfig, writeConfig } from './config.ts'
+import type { CompatUpstream } from './config.ts'
 
 /** `prepare` 的入参。 */
 export interface PrepareInput {
@@ -27,6 +28,14 @@ export interface PrepareInput {
    * 空串 / 未给时不写这一段（fail-open，boot 会记 warn）。
    */
   readonly apiKey?: string
+  /**
+   * OpenAI 兼容上游（compat 渠道）。省略 / 空数组 = 不写 `openai-compatibility`。
+   *
+   * ⚠️ **只在全新安装时生效**（下面那个 `!existsSync` 分支）—— 已有配置的机器
+   * 走 `boot.ts` 的 `patchOpenAiCompatibility`，两条路共用
+   * `compat-upstreams.ts` 的解析，所以不会漂。
+   */
+  readonly compat?: readonly CompatUpstream[]
   readonly onStep?: (step: SetupStep) => void
   /** 安装用的注入点（判据用假实现；生产不传）。 */
   readonly install?: InstallDeps | undefined
@@ -101,6 +110,7 @@ export async function prepare(input: PrepareInput): Promise<PrepareResult> {
         port: input.port,
         secretKey: input.secretKey,
         ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+        ...(input.compat === undefined ? {} : { compat: input.compat }),
         pluginIds,
       }),
     )

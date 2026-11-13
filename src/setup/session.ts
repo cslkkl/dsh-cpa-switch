@@ -25,6 +25,7 @@ import { installSource } from './install.ts'
 import type { InstallDeps, InstallOutcome, SetupStep } from './install.ts'
 import { prepare } from './prepare.ts'
 import type { PrepareResult } from './prepare.ts'
+import type { CompatUpstream } from './config.ts'
 
 /** 一键准备的结果：成功给 `PrepareResult`，抛出物收敛成 `{ok:false, error}`。 */
 export type SetupRunResult = PrepareResult | { readonly ok: false; readonly error: string }
@@ -42,6 +43,15 @@ export interface SetupSessionDeps {
    * 配置侧 fail-open 不写鉴权段。
    */
   readonly apiKey: () => Promise<string>
+  /**
+   * OpenAI 兼容上游（compat 渠道）的现读口 —— 全新安装时写进
+   * `openai-compatibility`。
+   *
+   * ⚠️ 省略 / 返回空数组都表示「不接这个渠道」，不是错误：多数机器上它压根没配。
+   * 解析与告警在 `compat-upstreams.ts`，两条写路径（这里与 `boot` 的补丁）
+   * 共用同一份，避免「全新安装能连、升级上来的连不上」这种静默分叉。
+   */
+  readonly compat?: (() => Promise<readonly CompatUpstream[]>) | undefined
   readonly logger?: LoggerLike | undefined
   /** 安装用的注入点（判据用假实现；生产不传）。 */
   readonly install?: InstallDeps | undefined
@@ -193,10 +203,16 @@ export class SetupSession {
      * 拿不到就空着 —— 配置侧 fail-open，boot 的补丁路径会再试一次并留 warn。
      */
     const apiKey = await this.#deps.apiKey().catch(() => '')
+    /**
+     * compat 上游清单现读一次。**失败不阻断准备**：这一段只影响「豆包模型出不出现在
+     * 选择器里」，准备环境本身（下载 / 解压 / 配置骨架）必须照常完成。
+     */
+    const compat = await (this.#deps.compat?.().catch(() => []) ?? Promise.resolve([]))
     const result = await prepare({
       port: config.port,
       secretKey,
       apiKey,
+      compat,
       ...(onStep === undefined ? {} : { onStep }),
     })
 

@@ -219,6 +219,17 @@
 
 ## 渠道与网络
 
+- **`compat-upstreams.ts`** —— 把「插件配置 + 凭据库」解析成 `CompatUpstream[]`（compat 渠道用）。
+  - 导出：`resolveCompatUpstreams` / `parseModelList` / 类型 `CompatDeps`
+  - **两个使用点必须给出同一份结果**：`setup/prepare.ts`（全新安装写 `config.yaml`）与
+    `boot.ts`（已有安装每次启动对齐）。各拼一遍的话漂开是**静默的** ——
+    「全新安装能连、升级上来的连不上」，或者别名前缀对不上导致模型进了目录却算不出归属
+  - ⚠️ **三件东西少一件就不写**，但日志要分得开：`doubaoworkUrl` 空 = 用户没打算接（常态）；
+    密钥解析不到 = 想接但没配（要 warn，否则症状是「模型在列表里、一发就 401」）；
+    `doubaoworkModels` 空 = 没告诉我们要哪些模型（**必须 warn**，因为 CPA 不探测上游，
+    「什么都没配」与「配了没生效」在界面上完全一样）
+  - ⚠️ `parseModelList` 三种分隔符（逗号 / 分号 / 换行）都认，且**不过滤「看起来像不像模型名」**
+    —— 上游 id 形态极杂（实测 `dfmodel` / `qmodel_38max` / `hy3`），过滤规则一定误杀
 - **`channels/`** —— 渠道知识的**唯一来源**（每个渠道一个 spec + 注册表）。
   - 上层只看统一形状；新增渠道 = 加一个 spec + 在注册表挂上，别处（面板 / 路由 / 别名 / 生成配置）全部派生
   - 模块手册 → [channels/README.md](channels/README.md)；越界由 `pnpm check:layering` 的 `channels-pure` 拦
