@@ -6,7 +6,7 @@
 
 | 想知道                             | 去哪                                                                                                                                                                                       |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 怎么用、怎么装、配什么             | [README.md](README.md)（英文 [README_en.md](README_en.md)）                                                                                                                                |
+| 怎么用、怎么装、配什么             | [README.md](README.md)（门面）→ [docs/USAGE.md](docs/USAGE.md)（配置字段 / 渠道差异 / 思考档位）；英文 [README_en.md](README_en.md)                                                        |
 | 规则层（各子树约束，进目录即注入） | [src/](src/AGENTS.md)、[src/client/](src/client/AGENTS.md)、[tests/](tests/AGENTS.md)、[docs/](docs/AGENTS.md)、[scripts/](scripts/AGENTS.md)、[.agents/notes/](.agents/notes/AGENTS.md)   |
 | 文档层（文件清单 / 改哪）          | [src/README.md](src/README.md)、[src/client/README.md](src/client/README.md)、[docs/README.md](docs/README.md)、[tests/README.md](tests/README.md)、[scripts/README.md](scripts/README.md) |
 | 为什么这样设计、防错清单           | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                                                                                                                                               |
