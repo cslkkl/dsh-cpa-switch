@@ -61,14 +61,15 @@ export const DOUBAOWORK = {
   unit: 'credits',
   backing: 'compat',
   capabilities: {
-    // 六个能力全部为假 —— 理由见模块头「能力：全部为假」。
+    // 六个能力位：只有 `login` 为真 —— 它有登录入口（走那个网关的独立浏览器），
+    // 但那条路上拿不到余额与签到，所以其余五个如实为假。
     credits: false,
     checkin: false,
     tasks: false,
     autoCheckin: false,
     school: false,
     import: false,
-    login: false,
+    login: true,
   },
   /**
    * ⚠️ 与 `setup/config.ts` 生成 `openai-compatibility[].models[].alias` 时用的前缀

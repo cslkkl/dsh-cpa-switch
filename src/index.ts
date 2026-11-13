@@ -31,6 +31,7 @@ import { CpaGateway } from './gateway.ts'
 import { createOperations } from './ops/index.ts'
 import { SetupSession } from './setup/index.ts'
 import { resolveCompatUpstreams } from './compat-upstreams.ts'
+import { createDoubaoworkGatewayClient } from './doubaowork-gateway.ts'
 import { DOUBAOWORK_ID } from './channels/doubaowork.ts'
 import { registerRoutes } from './routes.ts'
 import { buildRoutes } from './route-table.ts'
@@ -187,6 +188,13 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
   const ops = createOperations({
     gateway,
     logger: ctx.logger,
+    /**
+     * 豆包工作网关的客户端 —— 登录域用它起独立浏览器。
+     *
+     * ⚠️ 无条件注入（哪怕用户没配这个渠道）：面板要能回答「网关在不在」，
+     * 那条读只做一次 1.5 秒的探活，不启动任何进程、不碰 CPA。
+     */
+    doubaoworkGateway: createDoubaoworkGatewayClient(),
     /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */
     onAccountsChanged: () => void ensureRoutesFresh('oauth').catch(() => {}),
     /**

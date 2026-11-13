@@ -7,7 +7,7 @@
  * @module dsh-cpa-switch/ops/accounts
  */
 
-import { accountsPathOf, channelOf } from '../channels/registry.ts'
+import { accountsPathOf, channelOf, loginViaOf } from '../channels/registry.ts'
 import { disabledDriftOf } from '../intent-drift.ts'
 import { bareModelNameOf } from '../model-alias.ts'
 import { normalizeAccounts } from '../channels/normalize.ts'
@@ -192,6 +192,13 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
           label: channel.label,
           unit: channel.unit,
           capabilities: channel.capabilities,
+          /**
+           * 登录走哪条路（`cpa` / `gateway` / `none`）—— 面板据此选流程。
+           *
+           * ⚠️ 从**注册表**派生（`loginViaOf`），不在浏览器半边按渠道名分叉：
+           * 猜错的两种症状都是静默的（`provider_not_found` / `ECONNREFUSED`）。
+           */
+          loginVia: loginViaOf(channel.id),
           serverTime: baseRecord?.server_time,
           schedule: baseRecord?.schedule,
           autoCheckin: baseRecord?.checkin_auto,

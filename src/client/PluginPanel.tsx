@@ -26,6 +26,7 @@ import { rememberAccountCount } from './skeleton-hint.ts'
 import { SkeletonCards, SkeletonStatus, SkeletonSummary } from './Skeleton.tsx'
 import { summaryViewOf } from './summary-hint.ts'
 import { useAccountLogin } from './use-account-login.ts'
+import { useGatewayLogin } from './use-gateway-login.ts'
 import { useChannelActions } from './use-channel-actions.ts'
 import { useDateTick } from './use-date-tick.ts'
 import { useDisabledOverrides } from './use-disabled-overrides.ts'
@@ -60,6 +61,13 @@ interface AccountsPayload {
   readonly intentDrift: readonly string[]
   readonly capabilities: Capabilities
   readonly unit: CreditUnit
+  /**
+   * 登录走哪条路：`cpa`（CPA 的 OAuth）/ `gateway`（那个独立网关的浏览器登录）。
+   *
+   * 宿主由 `loginViaOf` 派生后放进 `/accounts` 的 `data`；读不到时按 `cpa` ——
+   * 四个插件渠道历来如此。
+   */
+  readonly loginVia?: 'cpa' | 'gateway' | 'none'
 }
 
 /** `PluginPanel` 的入参。 */
@@ -97,7 +105,12 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     select: (result) => {
       const data = result.data as { accounts?: unknown; autoCheckin?: unknown } | undefined
       if (data === undefined || typeof data !== 'object') return undefined
-      const raw = data as { accounts?: unknown; autoCheckin?: unknown; intentDrift?: unknown }
+      const raw = data as {
+        accounts?: unknown
+        autoCheckin?: unknown
+        intentDrift?: unknown
+        loginVia?: unknown
+      }
       return {
         accounts: Array.isArray(raw.accounts) ? (raw.accounts as NormalizedAccount[]) : [],
         autoCheckin: raw.autoCheckin === true,
@@ -106,6 +119,11 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         intentDrift: driftNamesOf(raw.intentDrift),
         capabilities,
         unit: meta.unit,
+        /**
+         * 登录走哪条路。宿主给了就信宿主（`loginViaOf` 是唯一 home），
+         * 没给就退回 `cpa` —— 那是四个插件渠道的历史行为。
+         */
+        loginVia: raw.loginVia === 'gateway' ? 'gateway' : raw.loginVia === 'none' ? 'none' : 'cpa',
       }
     },
   })
@@ -184,6 +202,25 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
     plugin,
     onAuthorized: () => void reload({ force: true }),
   })
+
+  /**
+   * **另一套**登录弹窗：compat 渠道走那个独立网关的浏览器登录。
+   *
+   * ⚠️ 两个 hook 都无条件调用（hooks 规则），但只有 `loginVia` 选中的那一个
+   * 会被真正打开 —— 另一套永远停在 `null`。
+   */
+  const gatewayLogin = useGatewayLogin({
+    plugin,
+    onLoggedIn: () => void reload({ force: true }),
+  })
+
+  /**
+   * 这个渠道的登录走哪条路。
+   *
+   * 优先读宿主给的值（`/accounts` 的 `loginVia`，由 `loginViaOf` 派生）；
+   * 数据还没到 / 读失败时退回 `cpa` —— 那是四个插件渠道的历史行为。
+   */
+  const loginVia = accountsResource.data?.loginVia ?? 'cpa'
 
   /**
    * 「删除账号」的待确认对象 —— `null` 表示没有弹窗。
@@ -338,8 +375,19 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
    * 而它会被传进每一张卡片。
    */
   const openAddLogin = useCallback((): void => {
-    accountLogin.open('add')
-  }, [accountLogin.open])
+    /**
+     * ⚠️ **两条流程，按 `loginVia` 分**，不按渠道名：
+     *
+     * - `cpa`：CPA 是 OAuth provider，起会话 + 打开授权页（四个插件渠道）；
+     * - `gateway`：那个独立网关用**自己的独立浏览器**登录，我们只轮询它
+     *   （compat 渠道，如豆包工作）。
+     *
+     * 混用的两种症状都是静默的：走 CPA 会得到 `provider_not_found`，
+     * 走网关会得到 `ECONNREFUSED`。
+     */
+    if (loginVia === 'gateway') gatewayLogin.open()
+    else accountLogin.open('add')
+  }, [loginVia, gatewayLogin.open, accountLogin.open])
 
   /** 卡片上的「重新登录」：同一个会话，只是标题与来意不同。 */
   const openRelogin = useCallback((): void => {
@@ -770,6 +818,63 @@ export function PluginPanel(props: PluginPanelProps): ReactNode {
         )}
         {(accountLogin.login?.phase === 'idle' || accountLogin.login?.phase === 'starting') && (
           <div className={css.hint}>{t('loginIntro')}</div>
+        )}
+      </Modal>
+
+      {/*
+       * **另一套**登录弹窗：compat 渠道（豆包工作）走那个独立网关。
+       *
+       * ⚠️ 与上面那个的关键差别：**没有「打开链接」这一步**。浏览器是网关自己
+       * spawn 的独立窗口（带 `--remote-debugging-pipe`），不是我们开一个标签页 ——
+       * 所以文案不能说「点下面的链接」，那会让人在错误的窗口里找。
+       */}
+      <Modal
+        open={gatewayLogin.login !== null}
+        onClose={gatewayLogin.close}
+        title={t('addAccount') + ' · ' + meta.label}
+        closeLabel={t('cancel')}
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={gatewayLogin.close}>
+              {t('cancel')}
+            </Button>
+            {(gatewayLogin.login?.phase === 'idle' || gatewayLogin.login?.phase === 'error') && (
+              <Button variant="primary" size="sm" onClick={() => void gatewayLogin.start()}>
+                {t('startLogin')}
+              </Button>
+            )}
+          </>
+        }
+      >
+        {gatewayLogin.login?.phase === 'wait' && (
+          <>
+            <div className={css.hint}>{t('gatewayLoginHint')}</div>
+            {gatewayLogin.login.message !== '' && (
+              <div className={css.hint}>{gatewayLogin.login.message}</div>
+            )}
+            <div className={css.hint}>{t('loginWaiting')}</div>
+          </>
+        )}
+        {gatewayLogin.login?.phase === 'done' && (
+          <>
+            <div className={css.hint}>
+              {t('gatewayLoginDone', { count: String(gatewayLogin.login.models) })}
+            </div>
+            {/*
+             * ⚠️ 必须说「还要重启 CPA」：写 `openai-compatibility` 只能在 CPA
+             * 未运行时进行（管理接口那条路会写坏配置）。不说的话，用户会以为
+             * 「登录成功 = 现在就能用」。
+             */}
+            <div className={css.hint}>{t('gatewayLoginRestart')}</div>
+          </>
+        )}
+        {gatewayLogin.login?.phase === 'error' && (
+          <div className={css.hint + ' ' + css.error}>
+            {t('failedWith', { action: t('startLogin'), reason: gatewayLogin.login.error })}
+          </div>
+        )}
+        {(gatewayLogin.login?.phase === 'idle' || gatewayLogin.login?.phase === 'starting') && (
+          <div className={css.hint}>{t('gatewayLoginIntro')}</div>
         )}
       </Modal>
 

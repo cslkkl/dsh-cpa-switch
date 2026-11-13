@@ -104,6 +104,17 @@ export const paths = {
   authStart: (plugin: string): string => '/api/v1/cpa/auth?plugin=' + encodeURIComponent(plugin),
   /** 查登录进度的完整路径（`state` 是宿主发的那一串）。 */
   authStatus: (state: string): string => '/api/v1/cpa/auth?state=' + encodeURIComponent(state),
+  /**
+   * compat 渠道（豆包工作）的登录 —— **另一条路**，走那个独立网关而不是 CPA。
+   *
+   * | 用途 | 路径 |
+   * | --- | --- |
+   * | 网关在不在 + 这次登录的进度 | `GET doubaoworkLogin` |
+   * | 轮询（成功那一刻宿主会把密钥与模型落盘） | `GET doubaoworkLogin + '?poll=1'` |
+   * | 起一次 / 取消 | `POST doubaoworkLogin`（取消带 `{action:'cancel'}`） |
+   */
+  doubaoworkLogin: '/api/v1/cpa/doubaowork-login',
+  doubaoworkPoll: '/api/v1/cpa/doubaowork-login?poll=1',
 } as const
 
 /** 查环境准备状态。 */

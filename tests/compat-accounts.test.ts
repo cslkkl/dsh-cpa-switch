@@ -170,7 +170,14 @@ describe('compat 渠道的面板读取', () => {
     expect(result.ok).toBe(false)
   })
 
-  it('能力位：余额 / 签到 / 任务 / 自动签到 / 成长中心 / 导入 全为 false', async () => {
+  /**
+   * ⚠️ **`login` 是唯一为真的那一位**（2026-11-13 加登录入口之后）。
+   *
+   * 它表示「面板有这个入口」，而**走哪条路**由 `loginVia` 单独表达 ——
+   * 两者分开正是为了让这个渠道「有登录入口、但没有 CPA 的 OAuth provider」
+   * 这件事说得清（早先合成一位时，面板打到 CPA 得到 `provider_not_found`）。
+   */
+  it('能力位：只有 login 为真，其余五个全为 false', async () => {
     const result = await opsFor(makeCpa({ [COMPAT]: COMPAT_PAYLOAD })).accounts.list(
       'doubaowork',
       true,
@@ -179,8 +186,30 @@ describe('compat 渠道的面板读取', () => {
     const capabilities = (result.data as { capabilities: Record<string, boolean> }).capabilities
 
     for (const [name, value] of Object.entries(capabilities)) {
+      if (name === 'login') {
+        // 有登录入口（走那个网关），但没有余额 / 签到 / 任务那些
+        expect(value, 'login 应为 true').toBe(true)
+        continue
+      }
       expect(value, `${name} 应为 false`).toBe(false)
     }
+  })
+
+  /**
+   * ⚠️ **`loginVia` 必须是 `gateway`**，不是 `cpa`。
+   *
+   * 这一位决定面板用哪套登录流程：`cpa` 会打到 CPA 的 OAuth（这个渠道没有
+   * provider，回 `provider_not_found`）；`gateway` 才会让那个网关起独立浏览器。
+   */
+  it('面板读到的 loginVia 是 gateway（不是 cpa —— 那条路对它是 provider_not_found）', async () => {
+    const result = await opsFor(makeCpa({ [COMPAT]: COMPAT_PAYLOAD })).accounts.list(
+      'doubaowork',
+      true,
+    )
+    if (result.ok !== true) throw new Error('list failed')
+    const data = result.data as { loginVia?: string }
+
+    expect(data.loginVia).toBe('gateway')
   })
 
   it('单位与展示名从渠道注册表来（不在这里另写一份）', async () => {
@@ -273,9 +302,11 @@ describe('compat 渠道的模型清单', () => {
  * 「这条路根本不存在」—— 前者是降级，后者是画错门。
  */
 describe('compat 渠道的 login 能力位', () => {
-  it('doubaowork 不能自己发起登录（CPA 没有它的 OAuth provider）', async () => {
-    const { channelOf } = await import('../src/channels/registry.ts')
-    expect(channelOf('doubaowork')?.capabilities.login).toBe(false)
+  it('doubaowork 有登录入口，但走的是网关那条（不是 CPA 的 OAuth）', async () => {
+    const { channelOf, loginViaOf } = await import('../src/channels/registry.ts')
+    expect(channelOf('doubaowork')?.capabilities.login).toBe(true)
+    // ⚠️ 这一条才是「别打到 CPA」的关键：`cpa` 会让它回 provider_not_found
+    expect(loginViaOf('doubaowork')).toBe('gateway')
   })
 
   it('四个插件渠道都能（它们的 OAuth 由 CPA 的那条路由提供）', async () => {
@@ -285,12 +316,10 @@ describe('compat 渠道的 login 能力位', () => {
     }
   })
 
-  it('面板读到的 capabilities 里 login 是 false', async () => {
-    const cpa = makeCpa({ [COMPAT]: COMPAT_PAYLOAD })
-    const result = await opsFor(cpa).accounts.list('doubaowork', true)
-    if (result.ok !== true) throw new Error('list failed')
-    const capabilities = (result.data as { capabilities: { login: boolean } }).capabilities
-
-    expect(capabilities.login).toBe(false)
+  it('四个插件渠道仍然走 CPA 那条', async () => {
+    const { PLUGIN_CHANNEL_IDS, loginViaOf } = await import('../src/channels/registry.ts')
+    for (const id of PLUGIN_CHANNEL_IDS) {
+      expect(loginViaOf(id), `${id} 应走 cpa`).toBe('cpa')
+    }
   })
 })

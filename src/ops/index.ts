@@ -25,6 +25,8 @@ import { createModelVisibilityOps, type ModelVisibilityOps } from './model-visib
 import { createPrefsOps, type PrefsOps } from './prefs.ts'
 import type { CandidateRow as CandidateModelRow } from './model-visibility.ts'
 import { createOauthOps, type OauthOps } from './oauth.ts'
+import { createDoubaoworkLoginOps, type DoubaoworkLoginOps } from './doubaowork-login.ts'
+import type { DoubaoworkGatewayClient } from '../doubaowork-gateway.ts'
 import { createPluginUpdateOps, type PluginUpdateOps } from './plugin-update.ts'
 import { createRemoveOps, type RemoveOps } from './remove.ts'
 import { createSchedulingOps, type SchedulingOps } from './scheduling.ts'
@@ -79,6 +81,14 @@ export interface OpsDeps {
   readonly setup: SetupSession
   /** 安装的注入点（判据用假实现；生产不传）。 */
   readonly install?: InstallDeps | undefined
+  /**
+   * 豆包工作**网关**的客户端（登录域用）。
+   *
+   * ⚠️ 这是本仓**第二条出站通道**，连的是用户那个独立网关而不是 CPA ——
+   * 理由与三道门见 [doubaowork-gateway.ts](../doubaowork-gateway.ts)。
+   * 省略时依赖它的那两个域会返回 `gateway-not-configured`，而不是崩。
+   */
+  readonly doubaoworkGateway?: DoubaoworkGatewayClient | undefined
 }
 
 /** 业务层的全部能力，按域分组。 */
@@ -124,6 +134,13 @@ export interface Operations {
    * ZCode 整渠道空回复，两处都显示一切正常）。
    */
   readonly modelHealth: ModelHealthOps
+  /**
+   * 豆包工作（compat 渠道）的**登录**：起独立浏览器、等它登完、把密钥与模型记下来。
+   *
+   * ⚠️ 与 {@link Operations.oauth} 是两套流程：那条走 CPA 的 OAuth，
+   * 这条走那个网关自己的浏览器登录（它持有 cookie，我们只要它签发的 api-key）。
+   */
+  readonly doubaoworkLogin: DoubaoworkLoginOps
 }
 
 /** 按域组装业务层。 */
@@ -164,5 +181,25 @@ export function createOperations(deps: OpsDeps): Operations {
       ...(deps.candidateModelRows === undefined ? {} : { candidateRows: deps.candidateModelRows }),
     }),
     prefs: createPrefsOps(),
+    doubaoworkLogin:
+      deps.doubaoworkGateway === undefined
+        ? /**
+           * 没接网关时给一组**如实失败**的方法，而不是 `undefined`。
+           *
+           * 为什么：面板会无条件调 `doubaoworkLogin.status()`（它要决定给不给
+           * 「添加账号」）。让它是 `undefined` 就得在每个调用点写一次可选链，
+           * 漏一处就是运行时 `Cannot read properties of undefined` ——
+           * 而那时界面只会显示「加载失败」，看不出是「网关没配」。
+           */
+          {
+            status: async () => ({ ok: false as const, error: 'gateway-not-configured' }),
+            start: async () => ({ ok: false as const, error: 'gateway-not-configured' }),
+            poll: async () => ({ ok: false as const, error: 'gateway-not-configured' }),
+            cancel: async () => ({ ok: false as const, error: 'gateway-not-configured' }),
+          }
+        : createDoubaoworkLoginOps({
+            client: deps.doubaoworkGateway,
+            ...(deps.onAccountsChanged === undefined ? {} : { onLoggedIn: deps.onAccountsChanged }),
+          }),
   }
 }

@@ -213,7 +213,18 @@ export const zh = {
   /** compat 渠道（没有「添加账号」按钮）用的那一句 —— 不许指着不存在的按钮说话。 */
   emptyNoAccountsNoLoginHint:
     '这个渠道不在 CPA 里登录：先在豆包工作网关中登录账号，再到插件设置里填上网关地址、凭据与模型清单',
+  /** compat 渠道（没有「添加账号」按钮）用的那一句 —— 不许指着不存在的按钮说话。 */
+  emptyNoAccountsNoLoginHint:
+    '这个渠道不在 CPA 里登录：先在豆包工作网关中登录账号，再到插件设置里填上网关地址、凭据与模型清单',
   loginIntro: '点「开始登录」会打开授权页，在浏览器里完成登录即可，不用手动复制链接。',
+  /** compat 渠道：浏览器是那个网关自己起的独立窗口，不是我们开标签页。 */
+  gatewayLoginIntro:
+    '点「开始登录」后，网关会弹出一个独立的浏览器窗口。请在那个窗口里登录豆包；登录完会自动接入，不用复制任何东西。',
+  gatewayLoginHint: '已让网关打开独立浏览器窗口，请在那个窗口里登录豆包。',
+  gatewayLoginDone: '登录成功，已读到 {count} 个模型。',
+  /** ⚠️ 不写「已生效」：写 CPA 配置要等它停下来那一轮。 */
+  gatewayLoginRestart:
+    '还要重启一次 CPA 才生效 —— 上游配置只能在 CPA 未运行时写进去。重启后模型会出现在选择器里。',
   loginHint: '已打开授权页。若没自动打开，用这个链接：',
   loginWaiting: '等待授权完成…（完成后会自动刷新）',
   loginFailed: '起登录失败',
@@ -513,7 +524,15 @@ export const en: Record<LocaleKey, string> = {
   emptyNoAccountsHint: 'Click "{action}" below and finish signing in your browser',
   emptyNoAccountsNoLoginHint:
     'This channel does not sign in through CPA: log in on the Doubao Work gateway, then fill in its URL, credential and model list in this plugin’s settings',
+  emptyNoAccountsNoLoginHint:
+    'This channel does not sign in through CPA: log in on the Doubao Work gateway, then fill in its URL, credential and model list in this plugin’s settings',
   loginIntro: 'Signing in opens the provider page. Finish there — no link copying needed.',
+  gatewayLoginIntro:
+    'After you click "Sign in", the gateway opens its own separate browser window. Log in to Doubao there — it connects automatically, nothing to copy.',
+  gatewayLoginHint: 'The gateway opened its own browser window. Log in to Doubao in that window.',
+  gatewayLoginDone: 'Signed in — found {count} model(s).',
+  gatewayLoginRestart:
+    'Restart CPA once to apply it: the upstream can only be written while CPA is stopped. The models show up in the picker after that.',
   loginHint: 'Opened the authorization page. If it did not open, use this link:',
   loginWaiting: 'Waiting for authorization… the list refreshes by itself',
   loginFailed: 'Could not start sign-in',

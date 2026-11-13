@@ -184,7 +184,8 @@ describe('resolveCompatUpstreams', () => {
     })
     expect(out).toHaveLength(1)
     expect(out[0]?.models).toEqual([])
-    expect(warns.join('\n')).toContain('doubaoworkModels')
+    // 现在指向「去面板点添加账号」那条真路（用户不必知道字段名）
+    expect(warns.join('\n')).toContain('添加账号')
   })
 
   it('base-url 两端空白被裁掉（用户粘 URL 常带空格）', async () => {

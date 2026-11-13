@@ -35,6 +35,15 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 
 import type { PluginConfig } from './config.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
+import { readDoubaoworkCredentials } from './state.ts'
+
+/**
+ * 网关默认的 OpenAI 兼容根地址。
+ *
+ * 与那个网关自己的默认模型口一致（`DW_UPSTREAM_PORT` 默认 43861）。
+ * 登录成功后我们还会从它的 `/api/*` 读回真实值 —— 这个常量只是**没登录过**时的兜底。
+ */
+export const DOUBAOWORK_DEFAULT_URL = 'http://127.0.0.1:43861/v1'
 
 /**
  * 模型清单的解析：逗号 / 分号 / 换行都算分隔符，去空白、去重、保序。
@@ -71,7 +80,21 @@ export interface CompatDeps {
  */
 export async function resolveCompatUpstreams(deps: CompatDeps): Promise<readonly CompatUpstream[]> {
   const config = deps.readConfig()
-  const baseUrl = config.doubaoworkUrl.trim()
+  /**
+   * **三个来源，优先级从高到低**（2026-11-13 加了登录产物之后定的）：
+   *
+   * 1. **配置**里的 `doubaowork*` —— 用户显式填的，永远赢；
+   * 2. **上次登录的产物**（`state.ts` 的 `cpa-panel-doubaowork.json`）——
+   *    在面板点一次「添加账号」就有了，用户不必手填；
+   * 3. 都没有 ⇒ 不写这一段。
+   *
+   * 为什么不是「登录完直接写配置」：插件配置是宿主持有的 volatile 值，
+   * 宿主半端**没有写入口**（只有用户在设置卡片里能改）。所以登录产物落在我自己的
+   * 状态文件里，再由这里读回来 —— 这是「点一次就有」唯一不需要越权的实现方式。
+   */
+  const saved = readDoubaoworkCredentials()
+  const baseUrl =
+    config.doubaoworkUrl.trim() !== '' ? config.doubaoworkUrl.trim() : (saved?.baseUrl ?? '')
   if (baseUrl === '') return []
 
   /**
@@ -97,16 +120,24 @@ export async function resolveCompatUpstreams(deps: CompatDeps): Promise<readonly
       deps.logger?.warn?.('cpa-panel: 解析 %s 失败: %o', ref, error)
     }
   }
+  // 配置里的凭据取不到 → 退回**上次登录**拿到的那把钥匙（它就是网关签发的）。
+  if (apiKey === '') apiKey = saved?.apiKey ?? ''
   if (apiKey === '') {
     deps.logger?.warn?.(
-      'cpa-panel: %s 已配置但凭据 %s 取不到值 —— 未写入 openai-compatibility（模型不会出现）',
+      'cpa-panel: %s 已配置但凭据 %s 取不到值、也没有登录记录 —— ' +
+        '未写入 openai-compatibility（模型不会出现）；在面板里点「添加账号」登录一次即可',
       DOUBAOWORK_ID,
       ref === '' ? '(doubaoworkKeyRef 为空)' : ref,
     )
     return []
   }
 
-  const models = parseModelList(config.doubaoworkModels)
+  /**
+   * 模型清单同理：用户填过就以用户为准，否则用上次登录时从网关 `/v1/models`
+   * 读到的那一批。
+   */
+  const configured = parseModelList(config.doubaoworkModels)
+  const models = configured.length > 0 ? configured : (saved?.models ?? [])
   if (models.length === 0) {
     /**
      * ⚠️ **仍然写这一段**（带密钥、不带 models）：让用户能用那个网关自己的
@@ -114,8 +145,8 @@ export async function resolveCompatUpstreams(deps: CompatDeps): Promise<readonly
      * 唯一能自己动手的一步。但必须 warn，别让沉默的空白骗人。
      */
     deps.logger?.warn?.(
-      'cpa-panel: %s 的模型清单为空（doubaoworkModels）—— CPA 不会自动探测上游，' +
-        '模型不会出现在选择器里；请把网关 /v1/models 的 id 填进去',
+      'cpa-panel: %s 的模型清单为空 —— CPA 不会自动探测上游，' +
+        '模型不会出现在选择器里；在面板里点「添加账号」登录一次即可自动带上',
       DOUBAOWORK_ID,
     )
   }

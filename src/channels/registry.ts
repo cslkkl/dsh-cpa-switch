@@ -153,6 +153,26 @@ export function isCompatChannel(id: string): boolean {
   return channelOf(id)?.backing === 'compat'
 }
 
+/**
+ * 这个渠道「登录」走哪条路 —— 面板据此决定用哪套登录流程。
+ *
+ * | 值 | 谁发起 | 面板该做什么 |
+ * | --- | --- | --- |
+ * | `'cpa'`（默认） | CPA 的 OAuth | 起会话 + 打开授权页 + 轮询 `state` |
+ * | `'gateway'` | 那个独立网关的**独立浏览器** | 让网关起登录 + 轮询它的 `login-status` |
+ * | `'none'` | 都不支持 | 不给登录入口 |
+ *
+ * ⚠️ **不许在浏览器半边硬编渠道名去分叉**：那样加第二个 compat 渠道时一定会漏一处，
+ * 而漏的后果是「点了没反应」或「报 provider_not_found」—— 两种都不报错。
+ */
+export function loginViaOf(id: string): 'cpa' | 'gateway' | 'none' {
+  const spec = channelOf(id)
+  if (spec === undefined) return 'none'
+  // 没有登录能力就没有入口 —— 先看这一位，避免「有流程但界面不给你按」
+  if (!spec.capabilities.login) return 'none'
+  return spec.backing === 'compat' ? 'gateway' : 'cpa'
+}
+
 /** 展示名：托管渠道取 spec，非托管取登记表，都不认识就**原样透传**（不猜）。 */
 export function channelLabel(id: string): string {
   return channelOf(id)?.label ?? UNMANAGED_LABELS[id] ?? id
