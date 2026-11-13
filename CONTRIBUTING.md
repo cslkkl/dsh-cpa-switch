@@ -5,13 +5,13 @@
 
 ## 先读什么
 
-| 想知道                             | 去哪                                         |
-| ---------------------------------- | -------------------------------------------- |
-| 怎么用、配什么                     | [README.md](README.md)                       |
-| **改代码要遵守什么**（唯一事实源） | [AGENTS.md](AGENTS.md)                       |
-| 为什么这样设计                     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 下一步该做什么                     | [docs/PLAN.md](docs/PLAN.md)                 |
-| 发版怎么做（贡献者不需要做）       | [docs/PUBLISHING.md](docs/PUBLISHING.md)     |
+| 想知道                             | 去哪                                                                   |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| 怎么用、配什么                     | [README.md](README.md)（门面）→ [docs/USAGE.md](docs/USAGE.md)（细节） |
+| **改代码要遵守什么**（唯一事实源） | [AGENTS.md](AGENTS.md)                                                 |
+| 为什么这样设计                     | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                           |
+| 下一步该做什么                     | [docs/PLAN.md](docs/PLAN.md)                                           |
+| 发版怎么做（贡献者不需要做）       | [docs/PUBLISHING.md](docs/PUBLISHING.md)                               |
 
 ## 起步
 
@@ -22,10 +22,25 @@ pnpm install
 pnpm build      # 必须：宿主读的是 lib/，源码不 build 等于没改
 ```
 
+装到本机 profile（**改源码时用这个**，`link:` 装法改完只要重新 build）：
+
+```powershell
+dsh plugin --profile web add .
+```
+
+也可以让 agent 走插件管理器装本目录（等价，装的是当前工作树）：
+
+```
+plugin_manager action: install_bundle
+target: <本目录绝对路径>
+```
+
 - 插件分**两半**，生效方式不同：宿主半端改完要**重启 DSH**，浏览器半端改完**刷新页面**即可。
-  两边都要先 `pnpm build` —— 命令与门禁清单见 [AGENTS.md](AGENTS.md) 的「常用命令」。
-- 本机调试要装到 DSH 的 profile 里才生效，`link:` 装法与判据见
-  [AGENTS.md](AGENTS.md) 的「活跃坑」。
+  两边都要先 `pnpm build` —— `lib/` 才是宿主真正加载的产物。
+- 本机调试要装进 profile 的 `node_modules/` 才生效；装完不显示、或显示「未运行」，
+  见 [AGENTS.md](AGENTS.md) 的活跃坑。
+- 只想用插件（不打算改代码）→ 根 [README.md](README.md) 的「快速开始」，
+  用法细节见 [docs/USAGE.md](docs/USAGE.md)。
 
 ## 提交前
 
