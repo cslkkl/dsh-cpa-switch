@@ -63,14 +63,13 @@ export const zh = {
    */
   sidebarEntry: '侧栏入口',
   /**
-   * ⚠️ 提示必须**说出它落在哪一个入口**（2026-10-26 维护者给定文案）：
-   * 打开后从「更多」进，而不是栏上 —— 不点明的话用户打开开关会发现栏上
-   * 什么也没多，以为没生效。
+   * ⚠️ 提示必须**说出它落在哪里**（2026-11-13 收短）：一句话说完「在哪」与
+   * 「关掉之后从哪进」，不解释实现、不描述宿主控件的位置。
    *
-   * ⚠️ **不描述「更多」在哪**（「左侧栏底部」这类）：那个按钮的位置随宿主版本变，
-   * 写死了迟早错；「更多」是宿主自己的控件名，用户看得见。
+   * ⚠️ **不写「左侧栏顶部 / 底部」**：那一列在折叠态与展开态下的位置随宿主版本
+   * 变，写死了迟早错。「插件图标」是用户看得见的东西，说到这一层就够。
    */
-  sidebarEntryHint: '开启时可以在「更多」里面打开；关掉后，面板只能从插件页打开',
+  sidebarEntryHint: '在左侧栏的插件图标里显示入口',
 
   stopped: '未运行',
   /**
@@ -435,8 +434,8 @@ export const en: Record<LocaleKey, string> = {
   back: 'Back',
   /** See the Chinese table: the bottom-of-panel switch for the sidebar row. */
   sidebarEntry: 'Sidebar entry',
-  /** See the Chinese table: the hint must say *where* the entry lands. */
-  sidebarEntryHint: 'On, open it from “More”; off, only from the Plugins page',
+  /** See the Chinese table: the hint must say *where* the entry lands, in one line. */
+  sidebarEntryHint: 'Show the entry in the sidebar plugin icons',
 
   stopped: 'Stopped',
   statusRunning: 'Running · 127.0.0.1:{port}',

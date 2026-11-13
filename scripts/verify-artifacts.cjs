@@ -318,9 +318,9 @@ let captured
  * 「用户关掉了」现在**同向**（默认关）⇒ 侧栏行永远注册不出来，下面那组断言
  * 会退化成「测不到东西」。所以桩必须存在，且值要**按用例可改**。
  *
- * ⚠️ `sidebarPinned` 决定挂**哪一个座**（2026-10-26）：`false` ⇒
- * `sidebar.panellist.actions`（「更多」里那一行）；`true` ⇒ `sidebar.panellist`
- * （栏上那个图标）。两档互斥 —— 同挂会让用户看到两个入口通向同一个面板。
+ * ⚠️ 这一档只有**一个**取值 `sidebarEntry`（2026-11-13）：开着就注册栏上那一行
+ * （`sidebar.panellist`），关着就一条都不注册。没有「放在哪」的第二个字段 ——
+ * 曾经有过「收进更多」那一档（`sidebar.panellist.actions`），已撤回（#83）。
  */
 const prefs = { sidebarEntry: true }
 
@@ -329,9 +329,10 @@ const sandbox = {
   console,
   /**
    * 浏览器里 `setTimeout` / `clearTimeout` 是**全局**的（不在 `window` 上才怪，
-   * 但作用域里直接可用）。产物用它们做「旧宿主兜底」的宽限等待，沙箱不补就会在
-   * 那次读回来之后抛 `clearTimeout is not defined` —— 而那是**我们自己的代码**
-   * 在真实浏览器里不会遇到的问题，别把它赖到产物上。
+   * 但作用域里直接可用）。产物里还可能残留别处的定时器用法，沙箱不补就会在
+   * 加载后抛 `setTimeout is not defined` —— 而那是**我们自己的代码**在真实浏览器里
+   * 不会遇到的问题，别把它赖到产物上。（2026-11-13 撤回「更多」那一档之后，
+   * 侧栏入口自身已经不需要定时器了。）
    */
   setTimeout,
   clearTimeout,
@@ -575,14 +576,31 @@ async function main() {
   await settle()
 
   const panellistSeat = registered.find((r) => r.name === 'sidebar.panellist')
-  const moreSeat = registered.find((r) => r.name === 'sidebar.panellist.actions')
   check(
-    '入口注册在 sidebar.panellist.actions（侧栏「更多」）',
-    moreSeat !== undefined && panellistSeat === undefined,
+    '入口注册在 sidebar.panellist（栏上那一行）',
+    panellistSeat !== undefined,
     registered.map((r) => r.name).join(','),
   )
-  check('「更多」那一行有自己的 id', typeof moreSeat?.id === 'string' && moreSeat.id !== '')
-  check('「更多」那一行的 order 是数字', typeof moreSeat?.order === 'number')
+  /**
+   * ⚠️ **不许注册「更多」那个座**（2026-11-13）：入口回到栏上之后，菜单里再出现
+   * 一行就是同一个面板的第二个入口，而用户拿它验证不了开关是否生效 ——
+   * 这正是撤回 #83 的原因。产物里连字符串都不该出现。
+   */
+  check(
+    '未注册 sidebar.panellist.actions（入口不再收进「更多」）',
+    registered.every((r) => r.name !== 'sidebar.panellist.actions'),
+    registered.map((r) => r.name).join(','),
+  )
+  check(
+    '栏上那一行的 id 是 PANEL_ID（与 main 的 key 同源）',
+    panellistSeat !== undefined && panellistSeat.id === 'cpa-panel',
+    panellistSeat && panellistSeat.id,
+  )
+  check(
+    '栏上那一行的 order 是数字',
+    typeof panellistSeat?.order === 'number',
+    panellistSeat && String(panellistSeat.order),
+  )
   const mainPanel = registered.find((r) => r.name === 'main')
   check('注册了 main（入口点开的落点）', mainPanel !== undefined)
   check(
@@ -630,27 +648,25 @@ async function main() {
    * - 偏好只能走 `panel-prefs` 那条路由 —— 写错路径是一次静默 404，开关会永远
    *   停在默认值，而用户点了也「没反应」。
    */
-  check('入口的 disposer 被接住（关得掉 / 换得了位置）', /stopSidebarEntry/.test(clientSrc))
+  check('入口的 disposer 被接住（关得掉那一行）', /stopSidebarEntry/.test(clientSrc))
   check('偏好读的是 panel-prefs 路由', clientSrc.includes('/api/v1/cpa/panel-prefs'))
   check('偏好写回读值喂给侧栏状态', /setSidebarEntryVisible\(/.test(clientSrc))
 
   /**
-   * ⚠️ **旧宿主兜底**（2026-10-26）：「更多」那个座是 `0.2.1-rc.3` 才声明的，
-   * 而 `slots.inject` 在槽位**从未声明**时永远不跑回调 —— 于是默认档在旧宿主上
-   * 等于「侧栏什么都没有」，而用户明明打开了开关。兜底必须真的存在。
-   */
-  check('有「更多」座没声明时的兜底（退回栏上那一行）', /moreFallback/.test(clientSrc))
-  /**
-   * ⚠️ 「更多」里那一行**必须带图标**（2026-10-26 真机）：另外两行各有一个
-   * 16px 图标，不给的话文字贴到最左边，一眼看出不是亲生的。
-   * 断言锚在**产物里的真实写法**上：MenuItemButton 的 icon: 后面紧跟
-   * PanelGlyph，且 size 是 16（与官方 Icon…OutlineRegular 同档）。
+   * ⚠️ **不许再有旧宿主兜底**（2026-11-13）：那段 2 秒兜底是「更多」座没被声明时
+   * 退回栏上一行用的 —— 而 `sidebar.panellist` 在本仓的声明下限
+   * （`engines.dsh`，见 `package.json`）上**一定存在**，兜底是死代码。
+   * 判据钉**产物里连那些标识符都没有**：留着它，下一次读代码的人会以为
+   * 「这个座可能不存在」。
    */
   check(
-    '「更多」那一行有 16px 图标（我们的侧栏字形）',
-    /icon:\s*\/\* @__PURE__ \*\/ \(0, react_jsx_runtime\.jsx\)\(PanelGlyph, \{\s*size: 16\s*\}\)/.test(
-      clientSrc,
-    ),
+    '没有「更多」座的兜底残留（moreFallback）',
+    !/moreFallback/.test(clientSrc),
+    String(/moreFallback/.test(clientSrc)),
+  )
+  check(
+    '产物里没有「更多」座的座位名（sidebar.panellist.actions）',
+    !clientSrc.includes('sidebar.panellist.actions'),
   )
 
   /**
@@ -665,9 +681,7 @@ async function main() {
   await settle()
   check(
     '偏好为关时入口被摘除（disposer 真的跑了）',
-    !registered.some(
-      (r) => r.name === 'sidebar.panellist' || r.name === 'sidebar.panellist.actions',
-    ),
+    registered.every((r) => r.name !== 'sidebar.panellist'),
     registered.map((r) => r.name).join(','),
   )
   check(

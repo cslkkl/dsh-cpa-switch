@@ -1,6 +1,11 @@
 # 决策：侧栏入口收在「更多」菜单里，不给位置选择（2026-10-26）
 
-状态：生效
+状态：被取代
+
+> **本篇已被取代（2026-11-13）**：入口回到栏上那一行，`sidebar.panellist.actions`、
+> `MoreMenuEntry.tsx` 与那段旧宿主兜底都已删除。改判理由、替代方案与代价见
+> [决策记录](2026-11-13-sidebar-entry-back-to-rail.md)。下文保留当时的问题与取舍，
+> 作为「为什么跟过一次、又为什么退回来」的依据 —— **不要再照它实现**。
 
 ## 问题
 
@@ -53,4 +58,5 @@
 - 入口为什么默认关 → [决策记录](2026-10-20-sidebar-entry-default-off.md)
 - 侧栏入口最初为什么加 → [决策记录](2026-10-19-sidebar-entry.md)
 - 代码：`src/client/index.tsx` 的 `mountSidebarEntry`、
-  [MoreMenuEntry.tsx](../../src/client/MoreMenuEntry.tsx)
+  `MoreMenuEntry.tsx`（**已于 2026-11-13 随本次撤回删除**，故不写链接）
+- 取代本篇的决策 → [决策记录](2026-11-13-sidebar-entry-back-to-rail.md)

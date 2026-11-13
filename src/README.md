@@ -490,7 +490,7 @@
 | `/api/v1/cpa/model-rows`       | GET      | 某渠道**会被推送的候选行**（面板勾选清单的来源，键与推送侧同一份）                                                   |
 | `/api/v1/cpa/model-visibility` | GET/POST | 哪些模型进**选择器**（`{channel, names}` 是**要隐藏**的那批）                                                        |
 | `/api/v1/cpa/model-health`     | GET/POST | 模型健康探测：`GET ?plugin=` 只列能探哪些；`POST {plugin}` **真跑一轮**（会烧额度）→ 每行 `healthy`/`empty`/`failed` |
-| `/api/v1/cpa/panel-prefs`      | GET/POST | 显示偏好：`{sidebarEntry}` 有没有侧栏入口，**默认关**（**唯一不碰 CPA 的写**）；打开后入口在侧栏「更多」菜单里       |
+| `/api/v1/cpa/panel-prefs`      | GET/POST | 显示偏好：`{sidebarEntry}` 有没有侧栏入口，**默认关**（**唯一不碰 CPA 的写**）；打开后入口就是侧栏栏上那一行         |
 | `/api/v1/cpa/routing`          | GET/POST | 路由策略（读写）                                                                                                     |
 | `/api/v1/cpa/scheduler-mode`   | POST     | 把各渠道 `scheduler_mode` 归一到 `off`                                                                               |
 | `/api/v1/cpa/priority`         | GET/POST | 账号使用顺序（面板已无 UI，脚本用）                                                                                  |
