@@ -9,7 +9,7 @@
 - **`paths.ts`** —— 插件自己的运行时布局与下载源。
   - 导出：`SOURCES` / `SOURCE_KEYS` / `managedCpaDir` / `managedExePath` /
     `managedConfigPath` / `managedPluginsDir` / `managedOverridesDir` /
-    `managedStartupLogPath` / 类型 `SourceKey`
+    `managedOfflineDir` / `managedStartupLogPath` / 类型 `SourceKey` / `SourceMirror`
   - **家目录解析不在这里** —— 认 `DSH_HOME` 的那一层在 [`../paths.ts`](../paths.ts)
   - exe、`config.yaml`、`plugins/` **刻意同层** —— CPA 的 `plugins.dir` 相对工作目录解析
   - 每个来源自己声明**解压落点**（`targetDir`）与**能不能整目录替换**（`wipeOnReplace`）：
@@ -19,6 +19,15 @@
     子进程的 stdout / stderr 重定向到这里，失败时读回尾部认原因。选文件而非 pipe
     的理由见[决策记录](../../.agents/notes/2026-10-06-startup-output-file-redirect.md)
   - ⚠️ `SOURCES.cpa` **绝不能指向没有 Release 的仓库**（没有兜底）
+  - **`mirrors`** 是「主源查不到时依次再问」的候选（每项只给 `latestApi`，必须返回
+    GitHub Release 形状）。⚠️ 填它之前**先验过它真的给二进制**：只给源码 tag 的镜像
+    填进来会让 `plugins/` 落一堆 `.go`，而 `verify()` / `extract()` **都不报错**。
+    2026-11-13 实测：上游 `mmqz/cpa-multi-plugins` 账号被封（仓库 404），codeberg 镜像
+    `mingjiu/…` 有 tag 但 `releases` 端点 404、`dist/` 只有 `linux-amd64/*.h` ——
+    **不可填**。所以现在两处 `mirrors` 都是空的（`NO_MIRRORS`），兜底走离线归档
+  - **`managedOfflineDir`**（`cpa/offline/`）是**离线归档**：`<asset>` + `MANIFEST.txt`
+    （`asset` / `tag` / `sha256` / `size` / `origin` 逐行 `k=v`）。网络侧全失败时用它
+    重装**同版本**，由 `InstallOutcome.offline` 标记、界面说明「不是新版」
 - **`install.ts`** —— **把一个来源装到磁盘上**（下载 / 校验 / 解压 / 备份 / 记录）。
   - 导出：`installSource` / 类型 `InstallOutcome` / `InstallDeps` / `SetupStep`
   - 「要不要跳过」是**参数**（`force`）而不是流程里的分支：`prepare` 传 `false`
@@ -30,6 +39,10 @@
   - ⚠️ **本层不碰 CPA 进程**：Windows 上被加载的 dll 改不了名，所以「先停 CPA」
     由调用方（[../ops/plugin-update.ts](../ops/plugin-update.ts)）做；这里只在下手失败时如实报错
   - 安装的三件事（查 release / 下载 / 解压）**可注入**，判据因此不必真下 17 MB
+  - ⚠️ **回退链**：`query` 失败时自动读 [managedOfflineDir](paths.ts) 的归档，
+    装成功后 `InstallOutcome.offline: true`。**回退不看注入点**（注入换的只是「怎么问网络」），
+    且离线那条**必须用真 `download`** —— 它认 `asset.localPath` 做本地拷贝，
+    假实现只会盯着 `url`（离线包根本没有可用 url）。判据 `tests/setup-offline.test.ts`
   - **overrides 回放**：渠道解压成功后把 [managedOverridesDir](paths.ts)（`cpa/overrides/`）
     里的 `*.dll` 覆盖进 `plugins/`，每文件一步 `override` 上报、结果带在
     `InstallOutcome.overrides`。渠道来源独占 `plugins/` 且**清空再解压**，用户手放的
@@ -48,8 +61,10 @@
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
   - 导出：`CONFIG_VERSION` / `STREAM_HEAD_TIMEOUT` / `readConfigVersion` / `renderConfig` /
     `patchModelAlias` / `patchServerHost` / `patchStreamHeadTimeout` /
-    `patchAccessApiKeys` / `writeConfig` / `generateSecretKey` /
-    `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`
+    `patchAccessApiKeys` / **`renderCompatYaml` / `patchOpenAiCompatibility`** /
+    `writeConfig` / `generateSecretKey` /
+    `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`；
+    类型 **`CompatUpstream`**
   - ⚠️ `CONFIG_VERSION` 是上游的**硬校验**值（不是 `8` 就拒绝启动，没有降级兼容）。
     它与 CPA 的**软件版本号没有映射关系** —— 上游不存在「版本 → 代际」的表，
     所以代际只能**读对端声明的那个数**，推不出来。`readConfigVersion` 就是那个读法
@@ -77,9 +92,25 @@
     会被宿主当凭据故障，轮换 + 冷却整个账号池（级联 503，2026-10-21 workbuddy
     11-128 实例）。补齐路纪律同上：只补 `workbuddy:` 子段内缺失的键、已有值
     （含显式 0）一字节不动、`configs:` / `workbuddy:` 找不到就放弃
+  - ⚠️ **`renderCompatYaml` / `patchOpenAiCompatibility` 是 compat 渠道唯一的接入面**
+    （2026-11-13 接豆包工作）。三条实测约束**必须**先读 `CompatUpstream` 的注释：
+    ① `models` 要显式列全（CPA 不探测上游，空 ⇒ 0 个模型）；
+    ② **不写 `prefix`**（与 `alias` 叠加会产出 `dbw/dbw/x` 双前缀 id）；
+    ③ **绝不用管理接口写这一段** —— `PUT /v0/management/openai-compatibility`
+    会丢掉 `keys`，还把整块嵌进相邻顶层键（真机落盘成 `api-keys.openai-compatibility`）
+  - ⚠️ `patchOpenAiCompatibility` 与其它 patch 的**唯一不同**：它按「整段替换」处理。
+    理由是这一段完全由我们生成（含密钥），不像 `api-keys` 那样是用户手写的清单。
+    纪律不变：只动这一段、内容没变时不写盘、绝不重写整份文件
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
-  - 导出：`findAsset` / `download` / `verify` / `extract` / `findFile` / `countDlls` /
-    `listPluginIds` / `sourcePresent` / `removeDir` / `inspect` / `humanSize` / 类型
+  - 导出：`findAsset` / `readOfflineArchive` / `download` / `verify` / `extract` /
+    `findFile` / `countDlls` / `listPluginIds` / `sourcePresent` / `removeDir` /
+    `inspect` / `humanSize` / 类型
+  - `findAsset` 依次问主源与 `mirrors`，**全部失败时把每一源的结论都留在错里**
+    （只报最后一条会让人以为只有一个源）
+  - `readOfflineArchive` 判据是「**读不懂就当没有归档**」：清单缺 `asset` / `tag` / `sha256`
+    任一、文件不在、声明大小与磁盘不符、清单点的不是这个来源的包 —— 全部返回 `undefined`。
+    ⚠️ 缺 `sha256` 尤其不能放行：`verify()` 见空 digest 是**跳过校验**，
+    那就退化成「归档被换了也不知道」
   - `listPluginIds` 是生成配置那条路的**启用清单来源**（磁盘上有什么就启用什么）
   - `sourcePresent` 是「某个来源在不在磁盘上」的**唯一 home** —— 它原先在 `inspect()`
     与安装流程里各写一遍，两处一旦分叉就是「探测说齐了、安装说缺件」
@@ -115,7 +146,10 @@
 
 ## 变更影响路由
 
-- 改下载源 → `SOURCES` + [架构说明](../../docs/ARCHITECTURE.md) 的范围边界
+- 改下载源 → `SOURCES`（含 `mirrors` 与 `managedOfflineDir`）+ [架构说明](../../docs/ARCHITECTURE.md) 的范围边界
+  - ⚠️ 加镜像前先验「它给的是二进制」：只给源码 tag 的镜像会让 `plugins/` 落源码而**零报错**
+  - 改离线归档的清单字段 → [download.ts](download.ts) 的 `readOfflineArchive` +
+    [tests/setup-offline.test.ts](../../tests/setup-offline.test.ts)
 - 改 `config.yaml` 字段 → 与 CPA 上游 `internal/config` 对照后同步本文件
 - 改安装的**跳过判据** → 它在 [install.ts](install.ts) 的 `force` 上（原先在 `prepare` 的循环里）；
   同步 [架构说明](../../docs/ARCHITECTURE.md) 的 F5

@@ -18,5 +18,12 @@ setup/ 特有约束：
   `routes` / `route-registry` / `gateway` / `runtime` / `ops/**`）—— 由 `check:layering`
   的 `setup-no-outer` 拦。本层下的是公开 release，不是 CPA 的 API。
 - 改下载源前先确认目标仓库**已有 Release**：没有兜底，就是又一次「启不动 CPA」。
+  ⚠️ **加镜像前还要确认它给的是二进制**：只给源码 tag 的镜像（如 codeberg 的
+  `mingjiu/cpa-multi-plugins`，`releases` 端点 404、`dist/` 只有 `linux-amd64/*.h`）
+  填进 `mirrors` 会让 `plugins/` 落一堆 `.go`，而 `verify()` / `extract()` **都不报错** ——
+  比现在的「查询失败」更糟（2026-11-13 实测）。
+- **上游没了不是世界末日**：`managedOfflineDir()`（`cpa/offline/`）留着最后一份已验证产物，
+  `installSource` 在网络侧全失败时用它重装**同版本**。⚠️ 这条路必须标记
+  `InstallOutcome.offline`，界面要说明「不是新版」—— 报成普通更新就是替不存在的上游撒谎。
 
 文件清单与「改哪」见 [README.md](README.md)，不写在这里。
