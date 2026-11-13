@@ -242,6 +242,13 @@ export const zh = {
   pluginUpdateAvailable: '渠道插件 {installed} → {latest}',
   pluginUpdateUnknown: '渠道插件已装版本未知（本版未记录）· 上游当前 {latest}',
   pluginUpdateCheckFailedWith: '查不到上游版本：{reason}',
+  /**
+   * ⚠️ 查不到上游、但本地有离线归档 —— 与上面那句**不是一回事**：
+   * 这条路装得动（装的是归档里的 {tag}，不是新版），所以给「更新」按钮。
+   * 说成「查不到」就会把它藏起来，而用户对着一个明明能自救的界面只会反复重试。
+   */
+  pluginUpdateOfflineAvailable:
+    '查不到上游版本：{reason}。本地有离线归档 {tag}，可重装该版本（不是新版）',
   pluginUpdateRun: '更新渠道插件',
   /**
    * ⚠️ **是「重试」不是「重新检测」**：后者是提示块上那个按钮的词，它重读的是
@@ -251,6 +258,14 @@ export const zh = {
   pluginUpdateRetry: '重试',
   pluginUpdateDone: '渠道插件已更新到 {tag}',
   pluginUpdateDoneStopped: '渠道插件已更新到 {tag}。CPA 已停止，需要时手动重新启动',
+  /**
+   * ⚠️ **离线兜底专用**，与上面两句不是一回事：上游查不到时用的是
+   * `runtime/offline/` 里的归档，装上去的是**已知的旧版本**。
+   * 说成「已更新到 {tag}」会让用户以为上游还活着。
+   */
+  pluginUpdateDoneOffline: '上游不可达，已从本地离线归档重装 {tag}（不是新版）',
+  pluginUpdateDoneOfflineStopped:
+    '上游不可达，已从本地离线归档重装 {tag}（不是新版）。CPA 已停止，需要时手动重新启动',
   pluginUpdateRunFailed: '更新失败，已还原到上一版',
   exhausted: '已耗尽',
   remain: '可用',
@@ -518,12 +533,20 @@ export const en: Record<LocaleKey, string> = {
   pluginUpdateAvailable: 'Channel plugins {installed} → {latest}',
   pluginUpdateUnknown: 'Installed version unknown (not recorded) · upstream has {latest}',
   pluginUpdateCheckFailedWith: 'Could not check upstream: {reason}',
+  /** ⚠️ 与上一句不是一回事：这条路装得动（装的是归档，不是新版），见中文表。 */
+  pluginUpdateOfflineAvailable:
+    'Could not check upstream: {reason}. A local offline archive of {tag} is available — it can reinstall that version (not a new one)',
   pluginUpdateRun: 'Update channel plugins',
   /** ⚠️ 「重试」与提示块那个「重新检测」不是一件事，见中文表。 */
   pluginUpdateRetry: 'Retry',
   pluginUpdateDone: 'Channel plugins updated to {tag}',
   pluginUpdateDoneStopped:
     'Channel plugins updated to {tag}. CPA is stopped — start it again when you need it',
+  /** ⚠️ 离线兜底专用，见中文表：装的是已知的旧版本，不能说成「已更新」。 */
+  pluginUpdateDoneOffline:
+    'Upstream unreachable — reinstalled {tag} from the local offline archive (not a new version)',
+  pluginUpdateDoneOfflineStopped:
+    'Upstream unreachable — reinstalled {tag} from the local offline archive (not a new version). CPA is stopped — start it again when you need it',
   pluginUpdateRunFailed: 'Update failed; the previous version was restored',
   exhausted: 'Exhausted',
   remain: 'Available',
