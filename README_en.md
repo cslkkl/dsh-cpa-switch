@@ -24,197 +24,68 @@ Check balances, check in, run tasks and switch accounts — manage CLIProxyAPI (
 inside DSH, without opening its own web console.
 
 Install the plugin and you are done: the CPA binary, the channel plugins, the config and the
-admin key are all prepared by the plugin itself.
+admin key are all prepared by the plugin itself. You only need **DSH**; downloading needs access
+to GitHub Releases (configure a proxy where a direct connection does not work).
 
 > [!NOTE]
 > **The key never leaves the host**: every action in the panel is performed by the plugin on
 > your behalf. The admin key only lives on the host side — the web page can never see it.
 
+## Quick start
+
+1. **Install**:
+
+   ```
+   dsh plugin --profile <profile> add dsh-cpa-switch
+   ```
+
+   Typing the package name `dsh-cpa-switch` into the GUI plugin manager is equivalent. To install
+   from source (development), see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+2. **Open the panel**: **Plugins → CPA Switch** in DSH. To keep it in the left sidebar, turn on
+   the "Sidebar entry" switch at the bottom of the panel (off by default) — the entry then
+   appears among the plugin icons in the left sidebar.
+
+3. **Add an account**: the "+ Add account" entry at the end of each channel's list opens the
+   OAuth page — finish the login in your browser. The four channels' models then appear in the
+   chat model picker on their own.
+
+If it does not show up, or shows as "not running", see the active pitfalls in
+[AGENTS.md](AGENTS.md) (Chinese).
+
 ## What it does
 
-Open **Plugins → CPA Switch** in DSH, or click **CPA Switch** in the left sidebar (the row
-next to Plugins / Automation tasks / Usage statistics / SSH). Each of the four channels gets
-its own tab:
+- **See account balances**: available / used / quota pool / package count; tokens and credits stay
+  separate, and balances at the million mark are abbreviated
+- **Quota cycle reminders**: when the provider gives a cycle end date, expand a notice within the
+  last seven days for the details
+- **Check in all / run all tasks**: one click per channel, or per account
+- **Enable / disable accounts**: "Use only this one" disables every other account in the channel
+- **Remembers your choice**: after a restart the account you picked is still in use; if something
+  changes it back, the panel restores your choice and says so
+- **Automatic check-in**: check-ins missed while DSH was not running are caught up at startup
+- **Process hosting**: CPA starts with DSH (an already-running instance is reused) and stops with it
+- **Says why it will not start**: a taken port, a config-generation mismatch and a bad config each
+  get their own message
+- **Models registered automatically**: the four channels' models appear in the picker on their own,
+  grouped by channel, and you can keep only the ones you use
+- **Sidebar entry, off by default**: turn the switch on and the entry appears among the left
+  sidebar's plugin icons
 
-- **See account balances**: available / used / quota pool / package count; tokens and credits
-  are shown separately and never summed together. Balances at the million mark are abbreviated
-  (`508M tokens` — one `M` step only, never rewritten as B).
-- **Quota cycle reminders**: when the provider supplies a valid cycle end date, expand a notice in
-  the last seven days to see the account, package, remaining quota, and end time. A cycle ending
-  does not necessarily mean unused quota expires.
-- **Check in all / run all tasks**: one click per channel; each account can also be operated
-  individually.
-- **Enable / disable accounts**: every account has a toggle, and "Use only this one" disables
-  every other account in the same channel at once.
-- **Add an account**: the "+ Add account" entry at the end of each channel's list opens the
-  OAuth page — finish the login in your browser and you are done.
-- **Remembers your choice**: after a DSH restart, the account you picked is still the one in use. If
-  something changes it back while DSH is running (channel plugins re-enable accounts on their own
-  credit schedule), the panel restores your choice and says so — the switches do not flip back to
-  "all on" and then bounce back in the meantime.
-- **Automatic check-in**: toggled per channel; check-ins missed while DSH was not running are
-  caught up when the plugin starts.
-- **Process hosting**: CPA starts with DSH (an already-running instance is reused) and stops
-  with it.
-- **Says why it will not start**: a port taken by another CPA, a config-generation mismatch,
-  and a bad config each get their own message; a port held by someone else's instance no longer
-  reports "Running".
-- **Models registered automatically**: once the plugin is installed and an account is added,
-  the four channels' models appear in DSH's model picker on their own.
-- **Keep only the models you use in the picker**: each channel's toolbar has a "Models" button —
-  uncheck a model and save, and it disappears from the chat model picker (the panel still
-  lists every model, so you can check it back at any time). Unchecked models remain callable;
-  they are only hidden from the dropdown.
-- **Sidebar entry, off by default**: the bottom of the panel has a "Sidebar entry" switch
-  (off by default). Turn it on and the entry appears **among the plugin icons in the left
-  sidebar**. With the switch off (the default) the panel is reachable from the Plugins page
-  only — the sidebar is shared with the host and other plugins, so this one does not claim a
-  slot until you ask for it.
+Per-item detail (config fields, channel differences, thinking levels, failure notices) →
+[docs/USAGE.md](docs/USAGE.md) (Chinese).
 
-### The four channels
+## The four channels
 
-| Channel   | Accounts | Balance unit | Check-in | Tasks |
-| --------- | -------- | ------------ | -------- | ----- |
-| WorkBuddy | several  | credits      | ✅       | ✅    |
-| Trae      | several  | credits      | ✅       | —     |
-| Qoder     | single   | credits      | ✅       | —     |
-| ZCode     | single   | **token**    | —        | —     |
-
-The four channels do not report the same balance fields: Trae has a single balance pool and no
-total or used figure, so its "used" cell shows `—` and no bar is drawn — that means "upstream did
-not say", not "used 0".
-
-**Degrades by capability**: features a channel does not support are not rendered — no button
-that "does nothing when clicked".
+WorkBuddy / Trae / Qoder / ZCode each get their own tab, and their models are grouped by channel
+in the picker. The four channels do not report the same balance fields, and they do not all
+support the same features (a feature a channel lacks is never rendered as a button that does
+nothing) — per-item differences → [docs/USAGE.md](docs/USAGE.md) (Chinese).
 
 ## Security
 
-The admin key only lives on the host side and is never sent to the browser — details in
-[Architecture](docs/ARCHITECTURE.md).
-
-## Requirements
-
-Only **DSH** (DeepSeek Harness). The CPA binary, the channel plugins and the admin key are not
-yours to prepare — the plugin downloads and configures them on first start; an existing CPA on
-the machine is reused, never overwritten.
-
-Downloading needs access to GitHub Releases; configure a proxy where a direct connection does
-not work.
-
-**Channel plugins are never upgraded automatically** (upstream can change behaviour at any
-release, so a silent swap is too risky). The panel shows "channel plugins a → b", and
-"Update channel plugins" swaps them when you click it: CPA is stopped first, the previous
-version is kept until the swap succeeds, and it is not started again for you.
-
-## Install
-
-From npm:
-
-```
-dsh plugin --profile <profile> add dsh-cpa-switch
-```
-
-Typing the package name `dsh-cpa-switch` into the GUI plugin manager is equivalent.
-
-From a local directory (development):
-
-```
-plugin_manager action: install_bundle
-target: <absolute path to this directory>
-```
-
-From this repository's source:
-
-```
-cd <this repository>
-pnpm install
-pnpm build
-dsh plugin --profile web add .
-```
-
-The plugin must be installed under the chosen profile's `node_modules/`. If it does not show up
-or shows as "not running", see the active pitfalls in [AGENTS.md](AGENTS.md).
-
-## Configuration
-
-| Field                 | Default         | Meaning                                                       |
-| --------------------- | --------------- | ------------------------------------------------------------- |
-| `adminKey`            | empty           | CPA admin key; leave empty to use the credential reference    |
-| `adminKeyRef`         | `CPA_ADMIN_KEY` | Reference name in the credential store                        |
-| `port`                | `8317`          | Port CPA listens on                                           |
-| `exePath`             | empty           | Path to the CPA executable; leave empty to probe common spots |
-| `manageLifecycle`     | `true`          | Whether the plugin starts and stops CPA                       |
-| `autoCheckinOnStart`  | `true`          | Run one catch-up check-in at startup                          |
-| `openControlPanel`    | `false`         | Also open CPA's own web console when it starts                |
-| `reasoningEfforts`    | `true`          | Whether models expose a thinking level (off / on)             |
-| `maxOutputTokens`     | `384000`        | Per-model output cap pushed to the host; `0` = don't declare  |
-| `startTimeoutSeconds` | `30`            | Longest wait for CPA to become ready                          |
-
-⚠️ **Output cap**: the plugin pushes `maxOutputTokens` into every model entry (host field
-`maxTokens`) so requests are no longer cut short by DSH's 32768 fallback. Measured: it
-currently **takes effect on WorkBuddy only** — qoder serves its own server-side template cap
-and never sees the client value, and trae drops the field and injects its own large value;
-declaring it for those two is future-proofing. The 384000 default is the current ceiling of
-the DeepSeek V4 series and leans **high on purpose**: the upstream does not reject an
-oversized cap (384000 sent to a model whose real cap is 128k returned fine), so truncation
-stays the upstream's job. See the appendix of the
-[probe report](docs/audits/2026-10-08-cpa-stream-probe.md).
-
-## Models for the conversation
-
-Once the plugin is installed and an account is added, the four channels' models appear in DSH's
-model picker on their own:
-
-- Models are **grouped by channel**: the group title is the channel (e.g. `CPA Switch · WorkBuddy`)
-  and each row inside is the **bare model name** (e.g. `deepseek-v4.1-flash`), so you can see at a
-  glance which channel a request will use.
-- This provider appears in DSH as **CPA Switch** — that is what you see in the model picker.
-- When one model is served by several channels, each channel gets its own entry — **picking a
-  channel means only that channel's accounts are used**, never round-robined across your other
-  accounts.
-- **Only usable accounts are listed**: models belonging to a disabled, failed, or currently
-  unavailable account do not appear — the picker never offers an entry that turns out to be
-  uncallable.
-- **Only these four channels are listed**: CPA may host channels this plugin does not manage,
-  and their models are left out. An unmanaged channel has no panel to configure it with, so
-  listing its name would be worse than listing nothing.
-- **Startup never shows you a partial list first**: if the first read after a DSH restart is still
-  incomplete (CPA just started, accounts still loading in batches), the plugin keeps the previous
-  complete list and re-reads within seconds — you never see a transient state with only one or two
-  models, or only one channel.
-
-Adding or removing accounts updates the model list automatically. How it works is described in
-[Architecture](docs/ARCHITECTURE.md).
-
-### Thinking level
-
-Every model in the picker can switch its **thinking level** — two options:
-
-- **off**: the model answers directly, with no visible reasoning.
-- **on** (default): the model thinks first, and the reasoning is **visible** in the conversation.
-
-On by default (`reasoningEfforts: true`). To turn the whole thing off, disable that switch in the
-plugin settings — the Effort row disappears and requests go back to carrying no level.
-
-⚠️ **Two levels is deliberate, not unfinished.** Measured against the upstream, the intermediate
-notches (`low` / `medium` / `max`) **do not do what they say** — the spread within one level is
-larger than the difference between levels — so offering them would set a false expectation. Only
-two values with certain meaning are exposed: **off** and **on**. Data and reasoning are in the
-[decision record](.agents/notes/2026-10-06-reasoning-effort-two-levels.md).
-
-⚠️ **The word sent for "off" adapts to the channel** (zcode only accepts `none`, not `off`), so
-choosing **off** works on all four channels without being rejected over wording.
-
-⚠️ If the upstream ever rejects a level value (the whole turn errors out), **switch that setting
-off** to recover.
-
-> **Why the menu has a `Default` row**: DSH adds it when a route declares no default level, and
-> its meaning is exactly that — **send no level, let the upstream decide**. Levels differ a lot
-> between models and the upstream keeps changing them, so the plugin pins no default: `Default`
-> is the fallback, and the other two rows are the two levels the plugin offers. It once did pin
-> one (`high`) to remove that row, but that crashed every model with the effort row removed, so
-> it was reverted. Mechanism and trade-offs are in the
-> [decision record](.agents/notes/2026-10-06-reasoning-default-row-removed.md).
+The admin key only lives on the host side and is never sent to the browser — boundaries and
+guards in [Architecture](docs/ARCHITECTURE.md).
 
 ## Known limitations
 
@@ -222,32 +93,22 @@ off** to recover.
 - **Downloading needs access to GitHub Releases**: a proxy is required where a direct connection
   does not work.
 - **Rate-limited accounts look normal**: the panel showing "enabled" does not mean "usable right
-  now"; it only surfaces when a conversation request fails — see the pitfall list in
-  [Architecture](docs/ARCHITECTURE.md).
+  now"; it only surfaces when a conversation request fails.
 
 ## Documentation
 
-The maintainer documentation map lives in [AGENTS.md](AGENTS.md). Common entry points:
+How to use it, how to change it and why it is designed this way each have their own home:
 
-| Looking for                                                   | Where                                        |
-| ------------------------------------------------------------- | -------------------------------------------- |
-| Why it is designed this way (invariants, contracts, pitfalls) | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Host-half modules, internal HTTP route table                  | [src/README.md](src/README.md)               |
-| The browser half                                              | [src/client/README.md](src/client/README.md) |
-| Environment setup                                             | [src/setup/README.md](src/setup/README.md)   |
-| Test coverage and how to run                                  | [tests/README.md](tests/README.md)           |
-| What is next, where it is stuck                               | [docs/PLAN.md](docs/PLAN.md)                 |
-
-## Development
-
-```powershell
-pnpm install
-pnpm build        # tsdown dual-target build → lib/
-pnpm check        # typecheck + lint + format + build + verify:artifacts + test
-```
-
-Editing the source requires a rebuild: the host loads the build output. After `pnpm build`,
-restart DSH for the host side and refresh the page for the browser side.
+| Looking for                                                      | Where                                        |
+| ---------------------------------------------------------------- | -------------------------------------------- |
+| **How to use it** (config fields / channel differences / levels) | [docs/USAGE.md](docs/USAGE.md)               |
+| Why it is designed this way (invariants, contracts, pitfalls)    | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Host-half modules, internal HTTP route table                     | [src/README.md](src/README.md)               |
+| The browser half                                                 | [src/client/README.md](src/client/README.md) |
+| Environment setup                                                | [src/setup/README.md](src/setup/README.md)   |
+| Test coverage and how to run                                     | [tests/README.md](tests/README.md)           |
+| What is next, where it is stuck                                  | [docs/PLAN.md](docs/PLAN.md)                 |
+| Maintainer index (rules / todo / active pitfalls)                | [AGENTS.md](AGENTS.md)                       |
 
 ## Acknowledgements
 
@@ -276,13 +137,9 @@ affiliated with WorkBuddy, Trae, Qoder, ZCode or any other platform's official t
 
 ## Contributing
 
-Issues and pull requests are welcome. Make sure `pnpm check` is green before submitting.
-
-How to get started, commit and PR conventions, and documentation-sync requirements →
-[CONTRIBUTING.md](CONTRIBUTING.md) (Chinese).
-
-This repo's conventions live in [AGENTS.md](AGENTS.md): changes must keep the documentation
-network in sync, and a link check runs after documentation changes (command in that file).
+Issues and pull requests are welcome. How to get started, install from source, the `pnpm check`
+gate, commit and PR conventions, and documentation-sync requirements → [CONTRIBUTING.md](CONTRIBUTING.md)
+(Chinese).
 
 ## License
 
