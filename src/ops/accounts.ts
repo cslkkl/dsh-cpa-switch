@@ -11,6 +11,7 @@ import { accountsPathOf, channelOf } from '../channels/registry.ts'
 import { disabledDriftOf } from '../intent-drift.ts'
 import { bareModelNameOf } from '../model-alias.ts'
 import { normalizeAccounts } from '../channels/normalize.ts'
+import type { ModelGroup } from '../channels/spec.ts'
 import { applyLedger } from '../checkin-ledger.ts'
 import { needsReloginOf } from '../relogin.ts'
 import { cacheKeys, type CpaGateway } from '../gateway.ts'
@@ -211,16 +212,22 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
     if (state !== undefined) return state
 
     try {
-      const data = (await deps.gateway.fetch(channel.modelsPath)) as
-        | {
-            groups?: {
-              label?: unknown
-              count?: unknown
-              models?: { id?: unknown; name?: unknown }[]
-            }[]
-          }
-        | undefined
-      const groups = Array.isArray(data?.groups) ? data.groups : []
+      const payload = await deps.gateway.fetch(channel.modelsPath)
+      /**
+       * ⚠️ **形状由 spec 决定**（2026-11-13）：`{groups:[…]}` 只是
+       * `/models/groups?refresh=1` 那一套的形状。compat 渠道的 `modelsPath` 指向
+       * `openai-compatibility`，返回里没有 `groups` —— 硬套会静默得到空列表，
+       * 而面板上「一个模型都不列」与「这渠道确实没模型」完全同形。
+       *
+       * 所以走 `parseModelGroups` 这条 spec 钩子，与 `extractAccounts` 同一个思路：
+       * 形状知识归渠道，搬运与兜底归这里。
+       */
+      const groups: ModelGroup[] =
+        channel.parseModelGroups !== undefined
+          ? channel.parseModelGroups(payload)
+          : Array.isArray((payload as { groups?: unknown } | undefined)?.groups)
+            ? ((payload as { groups: ModelGroup[] }).groups as ModelGroup[])
+            : []
       return {
         ok: true,
         groups: groups.map((group) => ({

@@ -81,6 +81,38 @@ export const DOUBAOWORK = {
   modelsPath: '/v0/management/openai-compatibility',
   /** 没有任何写动作：签到 / 任务 / 导入这些端点这条路上都不存在。 */
   actions: {},
+  /**
+   * 面板「模型」清单。
+   *
+   * ⚠️ **不能退回 `{groups:[…]}` 那套**：`modelsPath` 指向的是
+   * `openai-compatibility`，返回里没有 `groups` —— 硬套会静默得到空列表，
+   * 而面板上「一个模型都不列」与「这渠道确实没模型」完全同形。
+   *
+   * `id` 用 `alias`（那是客户端真正会请求的 id，也是目录里出现的那个），
+   * `name` 用上游声明的 `name`（裸名）—— 与推送行的展示名口径一致。
+   */
+  parseModelGroups: (payload) => {
+    const list = (payload as { 'openai-compatibility'?: unknown } | undefined)?.[
+      'openai-compatibility'
+    ]
+    if (!Array.isArray(list)) return []
+    const entry = (list as CompatProviderPayload[]).find(
+      (item) => String(item?.name ?? '') === DOUBAOWORK_ID,
+    )
+    if (entry === undefined) return []
+    return [
+      {
+        label: DOUBAOWORK_ID,
+        models: (entry.models ?? []).map((model) => ({
+          id:
+            typeof model?.alias === 'string' && model.alias !== ''
+              ? model.alias
+              : String(model?.name ?? ''),
+          name: typeof model?.name === 'string' ? model.name : (model?.alias ?? ''),
+        })),
+      },
+    ]
+  },
   extractAccounts: (payload) => {
     const list = (payload as { 'openai-compatibility'?: unknown } | undefined)?.[
       'openai-compatibility'

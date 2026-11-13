@@ -100,6 +100,13 @@ export interface AutoCheckinPath {
  */
 export type ChannelBacking = 'plugin' | 'compat'
 
+/** 一个模型分组（`ops/accounts` 的 `models()` 交给面板的形状）。 */
+export interface ModelGroup {
+  readonly label?: unknown
+  readonly count?: number
+  readonly models: { id?: unknown; name?: unknown }[]
+}
+
 /**
  * `/v0/management/openai-compatibility` 返回里单个上游的形状。
  *
@@ -150,6 +157,15 @@ export interface ChannelSpec {
    * `{openai-compatibility:[…]}`，形状对不上，硬套只会静默得到空列表。
    */
   readonly extractAccounts?: (payload: unknown) => AccountPayload[]
+  /**
+   * 从非标准 payload 里取出模型分组（只有 compat 渠道需要）。
+   *
+   * ⚠️ 省略时 `ops/accounts` 的 `models()` 只认 `{groups:[…]}` —— 那是
+   * `/models/groups?refresh=1` 的形状。compat 渠道的 `modelsPath` 指向
+   * `openai-compatibility`，返回里**没有 `groups`**，硬套同样只会静默得到
+   * 空列表：面板那个标签页「一个模型都不列」，而它与「这渠道确实没模型」同形。
+   */
+  readonly parseModelGroups?: (payload: unknown) => ModelGroup[]
   readonly capabilities: Capabilities
   /**
    * 同名模型的别名前缀（`wb/glm-5.3` 里的 `wb`）。

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { createOperations } from '../src/ops/index.ts'
 import { attachRouteRegistry } from '../src/route-registry.ts'
 import type { RouteRegistryDeps, RouteRegistryHost } from '../src/route-registry.ts'
 
@@ -46,7 +47,7 @@ async function liveCpaReachable(): Promise<boolean> {
 
 const LIVE = await liveCpaReachable()
 
-/** 真 HTTP 的 gateway —— 只实现被测路径用到的那两个端点。 */
+/** 真 HTTP 的 gateway —— 只实现被测路径用到的那几个成员。 */
 function liveGateway(): RouteRegistryDeps['gateway'] {
   const fetch = async (path: string, init?: { headers?: Record<string, string> }) => {
     const response = await globalThis.fetch(`http://127.0.0.1:${String(PORT)}${path}`, {
@@ -55,7 +56,24 @@ function liveGateway(): RouteRegistryDeps['gateway'] {
     if (!response.ok) throw new Error(`${String(response.status)} ${path}`)
     return await response.json()
   }
-  return { port: PORT, fetch } as unknown as RouteRegistryDeps['gateway']
+  /**
+   * ⚠️ `ops/` 的读路径先过 `requireRunning`（[result.ts](../../src/ops/result.ts)），
+   * 所以假通道必须交出这个方法 —— 只给 `fetch` 会在**第一个读**就
+   * `gateway.requireRunning is not a function`，而那看起来像实现坏了，
+   * 其实是夹具缺件（2026-11-13 实踩）。
+   */
+  return {
+    port: PORT,
+    fetch,
+    requireRunning: async () => undefined,
+    requireReady: async () => undefined,
+    hasAdminKey: () => true,
+    invalidateChannel: () => {},
+    async read<T>(_key: string, produce: () => Promise<T>): Promise<T> {
+      return await produce()
+    },
+    cacheStats: () => ({ hits: 0, misses: 0 }),
+  } as unknown as RouteRegistryDeps['gateway']
 }
 
 describe.skipIf(!LIVE)('真机联调：豆包工作作为 compat 渠道进入模型路由', () => {
@@ -91,6 +109,55 @@ describe.skipIf(!LIVE)('真机联调：豆包工作作为 compat 渠道进入模
     expect(providers).not.toContain('doubaowork')
   })
 
+  /**
+   * 面板那两个读取（第 5 个标签页的「账号」与「模型」）。
+   *
+   * ⚠️ 这两条验的是**形状对不上**那类静默失效：compat 端点的返回是
+   * `{openai-compatibility:[…]}`，而插件渠道是 `{accounts:…}` / `{groups:…}`。
+   * 硬套的形状命令上合法、跑得动，只是得到空列表 —— 面板显示「没有账号 / 没有模型」，
+   * 而它与「确实没配」完全同形。
+   */
+  it('面板：账号读得到（一个上游 = 一行）', async () => {
+    const ops = createOperations({
+      gateway: liveGateway(),
+      candidateModelRows: () => [],
+      runtime: { status: async () => ({ running: true, owned: false }) } as unknown as Parameters<
+        typeof createOperations
+      >[0]['runtime'],
+      setup: {} as Parameters<typeof createOperations>[0]['setup'],
+    })
+
+    const result = await ops.accounts.list('doubaowork', true)
+    expect(result.ok).toBe(true)
+    if (result.ok !== true) throw new Error('list failed')
+    const accounts = (result.data as { accounts: { nickname: string; credits: unknown }[] })
+      .accounts
+    expect(accounts).toHaveLength(1)
+    expect(accounts[0]?.nickname).toBe('doubaowork')
+    // 没有余额端点 ⇒ null（不是 0）
+    expect(accounts[0]?.credits).toBeNull()
+  })
+
+  it('面板：模型清单读得到（不是空列表）', async () => {
+    const ops = createOperations({
+      gateway: liveGateway(),
+      candidateModelRows: () => [],
+      runtime: { status: async () => ({ running: true, owned: false }) } as unknown as Parameters<
+        typeof createOperations
+      >[0]['runtime'],
+      setup: {} as Parameters<typeof createOperations>[0]['setup'],
+    })
+
+    const result = await ops.accounts.models('doubaowork')
+    expect(result.ok).toBe(true)
+    const groups = (result as unknown as { groups: { models: { id: string; bare: string }[] }[] })
+      .groups
+    const ids = groups.flatMap((group) => group.models.map((model) => model.id))
+    expect(ids).toContain('dbw/doubao-seed-2.1-pro')
+    // 裸名对上「隐藏模型」的键
+    const bares = groups.flatMap((group) => group.models.map((model) => model.bare))
+    expect(bares).toContain('doubao-seed-2.1-pro')
+  })
   it('整条路由链：拿真 CPA 的数据算出 cpa-doubaowork 分组', async () => {
     const pushed: { groups: Record<string, { ids: readonly string[] }> }[] = []
     const entry = {
