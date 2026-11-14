@@ -8,7 +8,15 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -19,6 +27,7 @@ import {
   managedConfigPath,
   managedCpaDir,
   managedExePath,
+  managedOfflineDir,
   managedPluginsDir,
 } from './paths.ts'
 import type { SourceKey } from './paths.ts'
@@ -31,6 +40,14 @@ export interface Asset {
   readonly size: number
   /** `sha256:xxxx` 形式；老 release 可能没有。 */
   readonly digest: string
+  /**
+   * 本地归档路径 —— **有它就不走网络**（离线兜底专用）。
+   *
+   * 由 {@link readOfflineArchive} 填。走这条路时 {@link download} 只做一次本地
+   * 拷贝，sha256 仍然照算、照样与 `digest` 比对 —— 「先校验再解压」这条不变量
+   * 不为离线让路（离线包也可能被误替换）。
+   */
+  readonly localPath?: string
 }
 
 /** 下载完成的产物。 */
@@ -49,16 +66,42 @@ export function humanSize(bytes: number): string {
 
 /** 查 latest release 里符合模式的资产。 */
 export async function findAsset(source: (typeof SOURCES)[SourceKey]): Promise<Asset> {
-  let data: { tag_name?: unknown; assets?: unknown }
-  try {
-    data = (await getJson(source.latestApi, {
-      headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-cpa-switch' },
-      signal: AbortSignal.timeout(30000),
-    })) as typeof data
-  } catch (error) {
-    // 带上 cause：排查时要能看到底层是超时、DNS 还是代理问题
-    throw new Error(`release 查询失败：${String((error as Error).message)}`, { cause: error })
+  /**
+   * 依次问主源与镜像 —— **每一源都要真的给二进制**（判据见
+   * [paths.ts](paths.ts) 的 `mirrors` 注释：只给源码 tag 的镜像不算）。
+   *
+   * 每条失败都留着：全部打不通时，用户需要看到的是「主源 404、镜像超时」
+   * 这种**分源结论**，而不是最后一条的错（那会让人以为只有一个源）。
+   */
+  const endpoints = [source.latestApi, ...source.mirrors.map((mirror) => mirror.latestApi)]
+  const failures: string[] = []
+
+  for (const endpoint of endpoints) {
+    try {
+      return await queryRelease(endpoint, source)
+    } catch (error) {
+      // 带上 cause：排查时要能看到底层是超时、DNS 还是代理问题
+      failures.push(`${endpoint} → ${String((error as Error).message)}`)
+    }
   }
+
+  throw new Error(`release 查询失败：${failures.join('；')}`, {
+    cause: new Error(failures.join('；')),
+  })
+}
+
+/**
+ * 问一个具体端点要 latest release 资产。
+ *
+ * 从 {@link findAsset} 拆出来，只为让「主源 / 镜像」共用**同一份**解析规则 ——
+ * 两个源的响应形状必须一致，分开写就会有一边漏 `digest`（而漏掉的表现是
+ * **静默跳过 sha256 校验**）。
+ */
+async function queryRelease(endpoint: string, source: (typeof SOURCES)[SourceKey]): Promise<Asset> {
+  const data = (await getJson(endpoint, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-cpa-switch' },
+    signal: AbortSignal.timeout(30000),
+  })) as { tag_name?: unknown; assets?: unknown }
 
   const assets = Array.isArray(data.assets) ? data.assets : []
   const asset = assets.find((a: { name?: unknown }) => source.assetPattern.test(String(a.name))) as
@@ -76,11 +119,76 @@ export async function findAsset(source: (typeof SOURCES)[SourceKey]): Promise<As
   }
 }
 
+/** 离线归档清单里我们认的字段（其余行忽略，供人读）。 */
+const OFFLINE_MANIFEST = 'MANIFEST.txt'
+
 /**
- * 下载到临时文件，返回路径与 sha256。
+ * 读 {@link managedOfflineDir} 里的离线归档，造一个**不走网络**的 {@link Asset}。
  *
- * 走 `net.ts` 的 `downloadTo`（流式 + 代理支持），**不把整包读进内存**：
- * CPA 本体 22 MB、渠道包 17 MB，一次性 Buffer.concat 在高并发下不划算。
+ * 触发时机只有一处：{@link findAsset} 的全部网络源都失败之后（见 `install.ts`）。
+ * 也就是说它不是「另一个下载源」，而是**上游消失时的最后一份已知良好产物**。
+ *
+ * 四条**读不懂就当作没有**的判据，都不猜：
+ * - 清单缺失 / 读不到 → `undefined`；
+ * - 清单里没有 `asset` / `tag` / `sha256` 任一 → `undefined`（缺 sha256 就不能校验，
+ *   而「不校验就解压」违反本层硬约束）；
+ * - 清单点的文件不在 → `undefined`；
+ * - 清单里给了 `size` 而磁盘上的大小不符 → `undefined`（多半下到一半或被截断）。
+ *
+ * @returns 可交给 `download()` 的资产；没有可用归档时 `undefined`。
+ */
+export function readOfflineArchive(source: (typeof SOURCES)[SourceKey]): Asset | undefined {
+  const dir = managedOfflineDir()
+  let manifest: string
+  try {
+    manifest = readFileSync(join(dir, OFFLINE_MANIFEST), 'utf8')
+  } catch {
+    return undefined
+  }
+
+  const field = (name: string): string => {
+    const matched = new RegExp(`^[ \\t]*${name}[ \\t]*=[ \\t]*(.*)$`, 'mu').exec(manifest)
+    return (matched?.[1] ?? '').trim()
+  }
+
+  const name = field('asset')
+  const tag = field('tag')
+  const sha256 = field('sha256').toLowerCase()
+  if (name === '' || tag === '' || !/^[a-f0-9]{64}$/u.test(sha256)) return undefined
+  // 清单点的必须是**这个来源**的包，不然会把 CPA 本体的包解进 plugins/
+  if (!source.assetPattern.test(name)) return undefined
+
+  const path = join(dir, name)
+  let actual: number
+  try {
+    actual = statSync(path).size
+  } catch {
+    return undefined
+  }
+  const declared = Number(field('size'))
+  if (Number.isFinite(declared) && declared > 0 && declared !== actual) return undefined
+
+  return {
+    tag,
+    name,
+    /** 离线包没有远程地址；填清单里记的来源只为报错时能说清它是谁的包。 */
+    url: field('origin'),
+    size: actual,
+    digest: `sha256:${sha256}`,
+    localPath: path,
+  }
+}
+
+/**
+ * 把资产取到临时文件，返回路径与 sha256。
+ *
+ * 两条路，产物形状相同：
+ * - `asset.localPath` 有值（离线归档）→ **本地拷贝**，不碰网络；
+ * - 否则走 `net.ts` 的 `downloadTo`（流式 + 代理支持），**不把整包读进内存**：
+ *   CPA 本体 22 MB、渠道包 17 MB，一次性 Buffer.concat 在高并发下不划算。
+ *
+ * ⚠️ 离线那条也要算 sha256：`verify()` 是下游唯一的完整性闸门，跳过它等于
+ * 让「归档被误替换 / 拷到一半」变成一次**静默的坏解压**。
  */
 export async function download(
   asset: Asset,
@@ -89,6 +197,22 @@ export async function download(
   const dir = join(tmpdir(), 'dsh-cpa-switch-dl')
   mkdirSync(dir, { recursive: true })
   const target = join(dir, asset.name)
+
+  if (asset.localPath !== undefined) {
+    try {
+      copyFileSync(asset.localPath, target)
+      const { createHash } = await import('node:crypto')
+      const bytes = readFileSync(target)
+      onProgress?.(bytes.byteLength, bytes.byteLength)
+      return {
+        path: target,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        size: bytes.byteLength,
+      }
+    } catch (error) {
+      throw new Error(`离线归档拷贝失败：${String((error as Error).message)}`, { cause: error })
+    }
+  }
 
   try {
     const { bytes, sha256 } = await downloadTo(asset.url, target, {

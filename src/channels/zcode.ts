@@ -18,6 +18,7 @@ export const ZCODE = {
     autoCheckin: false,
     school: false,
     import: false,
+    login: true,
   },
   aliasPrefix: 'zcode',
   creditsPath: '/v0/management/plugins/zcode/credits',

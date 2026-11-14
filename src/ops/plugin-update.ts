@@ -23,10 +23,10 @@
 
 import type { LoggerLike } from '../credentials.ts'
 import type { CpaRuntime } from '../runtime.ts'
-import { SOURCES, SOURCE_KEYS, findAsset } from '../setup/index.ts'
+import { SOURCES, SOURCE_KEYS, findAsset, readOfflineArchive } from '../setup/index.ts'
 import type { InstallDeps, SetupSession, SourceKey } from '../setup/index.ts'
 import { readInstalled } from '../state.ts'
-import { messageOf, type OpsResult } from './result.ts'
+import { messageOf, type OpsFailure, type OpsResult, type OpsSuccess } from './result.ts'
 
 /**
  * 不带 `?key=` 时更新哪个来源。
@@ -45,10 +45,34 @@ export interface PluginUpdateDeps {
   readonly install?: InstallDeps | undefined
 }
 
+/**
+ * 「查版本」这一条路径的结果。
+ *
+ * ## 为什么它比 {@link OpsResult} 多一格
+ *
+ * `OpsFailure` 只带 `error` / `reason`，这是全层共用的契约（见本文件
+ * {@link PluginUpdateOps.update} 里不回 `stopped` 的那段理由）。**这里破例一次，
+ * 因为「本地有没有离线归档」没有第二个回答者**：`stopped` 能去读 `/status`，
+ * 而归档只存在于 `runtime/cpa/offline/`，只有 `readOfflineArchive` 知道。
+ *
+ * 不把这一格报出去的直接后果是**那条兜底路径在界面上不可达**：查不到上游 ⇒
+ * 界面只给「重试」⇒ 用户永远点不到「更新」⇒ 明明能重装却只能反复重试
+ * （2026-11-13，上游仓库消失后的实际局面）。
+ *
+ * 所以失败时**同时**说两件事：上游为什么查不到（`error` / `reason`），
+ * 以及自己还能做什么（`offline.tag`）。
+ */
+export type PluginUpdateCheckResult = OpsSuccess | PluginUpdateCheckFailure
+
+/** 查版本失败的那一支 —— 比 {@link OpsFailure} 多一格「本地还能装什么」。 */
+export type PluginUpdateCheckFailure = OpsFailure & {
+  readonly offline?: { readonly tag: string }
+}
+
 /** 更新域的对外方法。 */
 export interface PluginUpdateOps {
   /** 查「已装的 tag」与「上游最新的 tag」。`key` 为空时按 {@link DEFAULT_KEY}。 */
-  check(key: string): Promise<OpsResult>
+  check(key: string): Promise<PluginUpdateCheckResult>
   /** 更新：停 CPA → 覆盖替换 → 报告。 */
   update(key: string): Promise<OpsResult>
 }
@@ -81,7 +105,7 @@ export function createPluginUpdateOps(deps: PluginUpdateDeps): PluginUpdateOps {
    * `readInstalled`），那时「装的是哪版」**不知道**。编一个 `true` 会催用户去更新
    * 一份可能已经最新的东西；编 `false` 则把真话说反。如实报「未知」，界面照此显示。
    */
-  async function check(rawKey: string): Promise<OpsResult> {
+  async function check(rawKey: string): Promise<PluginUpdateCheckResult> {
     const key = resolveKey(rawKey)
     if (key === undefined) {
       return { ok: false, reason: 'unknown-source', error: `不认识的来源：${rawKey}` }
@@ -96,7 +120,21 @@ export function createPluginUpdateOps(deps: PluginUpdateDeps): PluginUpdateOps {
     } catch (error) {
       // 查不到上游（断网 / 代理 / GitHub 限流）不是「没有新版」，是一句失败
       deps.logger?.warn?.('cpa-panel: plugin update check failed: %o', error)
-      return { ok: false, error: messageOf(error), reason: 'release-query-failed' }
+      /**
+       * ⚠️ **查不到上游时仍可能装得动**：`installSource` 有离线归档兜底
+       * （见 [setup/install.ts](../setup/install.ts)）。
+       *
+       * 不说出这一格，界面在失败态只会给「重试」—— 于是那条回退路径在界面上
+       * **根本不可达**（用户永远没有「更新」按钮可按）。所以这里把归档版本一并报出去，
+       * 由界面决定给不给那个按钮；界面文案必须说明「装的是归档、不是新版」。
+       */
+      const archived = readOfflineArchive(SOURCES[key])
+      return {
+        ok: false,
+        error: messageOf(error),
+        reason: 'release-query-failed',
+        ...(archived === undefined ? {} : { offline: { tag: archived.tag } }),
+      }
     }
 
     return {
@@ -171,6 +209,13 @@ export function createPluginUpdateOps(deps: PluginUpdateDeps): PluginUpdateOps {
       verified: outcome.verified,
       /** CPA 现在是停着的，界面据此提示用户手动启动。 */
       stopped,
+      /**
+       * 装的是**离线归档**（上游不可达）。
+       *
+       * ⚠️ 必须原样带给浏览器：那时装上去的是已知的旧版本，界面要说「这不是新版」。
+       * 吞掉这个字段，用户就会以为上游还在发版。
+       */
+      ...(outcome.offline === true ? { offline: true } : {}),
     }
   }
 

@@ -61,6 +61,9 @@ describe('runBoot', () => {
     reasoningEfforts: true,
     maxOutputTokens: 384000,
     startTimeoutSeconds: 30,
+    doubaoworkUrl: '',
+    doubaoworkKeyRef: 'DOUBAOWORK_API_KEY',
+    doubaoworkModels: '',
   })
 
   /** 日志面：按 printf 渲染后留下，好断言「这句话说了没有」。 */

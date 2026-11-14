@@ -36,6 +36,16 @@ export interface PluginUpdateInfo {
   /** 只有**记过**安装版本时才有这个字段；`undefined` = 不知道。 */
   readonly hasUpdate?: boolean
   readonly error?: string
+  /**
+   * 查不到上游、但本地有**离线归档**时，这一格给出归档的 tag。
+   *
+   * 有它 ⇒ 界面仍然给「更新」按钮（那条路装得动，只是装的不是新版）；
+   * 没有它 ⇒ 只给「重试」。见宿主 `ops/plugin-update.ts` 的 `check`。
+   *
+   * ⚠️ 显式带上 `undefined`：`exactOptionalPropertyTypes` 下「没这一格」与
+   * 「这一格是 undefined」是两种写法，判据里两种都要能传。
+   */
+  readonly offline?: { readonly tag?: string } | null | undefined
 }
 
 /** 这一行该给用户什么动作。 */
@@ -64,6 +74,19 @@ export interface UpdateView {
 export function updateView(info: PluginUpdateInfo | undefined, t: Translate): UpdateView {
   if (info === undefined) return { line: '', action: 'none' }
   if (info.ok === false) {
+    /**
+     * ⚠️ **查不到上游 ≠ 什么都做不了**：本地有离线归档时那条路装得动
+     * （见宿主 `setup/install.ts`），所以给的是「更新」而不是「重试」。
+     *
+     * 两种失败的区别必须说出来 —— 否则用户点了那个按钮会以为自己在拿新版。
+     */
+    const archived = typeof info.offline?.tag === 'string' ? info.offline.tag : ''
+    if (archived !== '') {
+      return {
+        line: t('pluginUpdateOfflineAvailable', { reason: info.error ?? '', tag: archived }),
+        action: 'update',
+      }
+    }
     return {
       line: t('pluginUpdateCheckFailedWith', { reason: info.error ?? '' }),
       action: 'retry',
@@ -89,14 +112,28 @@ export function updateView(info: PluginUpdateInfo | undefined, t: Translate): Up
  * ⚠️ **`stopped` 必须说出来**：换了 dll 之后 CPA 是**停着的**（Windows 上被加载的
  * dll 改不了名，所以换之前先停）。不说的话用户看到「更新成功」却怎么也连不上，
  * 只能自己猜是谁把服务关了。
+ *
+ * ⚠️ **`offline` 也必须说出来**：那时装的是 `runtime/offline/` 里的**已知旧版本**
+ * （上游不可达，见宿主 `setup/install.ts`）。报成普通「已更新到 {tag}」等于
+ * 让用户以为上游还活着 —— 而下次他还会点「更新」，得到同一个版本。
  */
 export function updateResultLine(
-  outcome: { readonly ok?: boolean; readonly stopped?: boolean; readonly tag?: string } | null,
+  outcome: {
+    readonly ok?: boolean
+    readonly stopped?: boolean
+    readonly offline?: boolean
+    readonly tag?: string
+  } | null,
   t: Translate,
 ): string {
   if (outcome === null) return ''
   if (outcome.ok !== true) return t('pluginUpdateRunFailed')
   const tag = typeof outcome.tag === 'string' && outcome.tag !== '' ? outcome.tag : ''
+  if (outcome.offline === true) {
+    return outcome.stopped === true
+      ? t('pluginUpdateDoneOfflineStopped', { tag })
+      : t('pluginUpdateDoneOffline', { tag })
+  }
   return outcome.stopped === true
     ? t('pluginUpdateDoneStopped', { tag })
     : t('pluginUpdateDone', { tag })

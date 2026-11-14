@@ -15,7 +15,7 @@
  */
 
 import { json } from './cpa.ts'
-import { CHANNEL_IDS, CHANNELS, providerIdOf } from './channels/registry.ts'
+import { CHANNEL_IDS, CHANNELS, loginViaOf, providerIdOf } from './channels/registry.ts'
 import { CONFIG_VERSION } from './setup/index.ts'
 import type { PluginConfig } from './config.ts'
 import type { AdminKeyStore } from './credentials.ts'
@@ -195,6 +195,14 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
             capabilities: channel.capabilities,
             /** `providerIdOf` 是那份映射的唯一 home，**不在 route-table 里另写一份**。 */
             providerId: providerIdOf(channel.id),
+            /**
+             * 登录走哪条路（`cpa` / `gateway` / `none`）。
+             *
+             * ⚠️ 让浏览器半边**不必**按渠道名分叉就能选对流程：
+             * 猜错的两种症状都是**静默**的 —— 打到 CPA 的 OAuth 会得到
+             * `provider_not_found`，打到网关会得到 `ECONNREFUSED`。
+             */
+            loginVia: loginViaOf(channel.id),
           })),
         }),
     },
@@ -273,6 +281,37 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
         const state = url.searchParams.get('state')
         if (state !== null) return json(await ops.oauth.status(state))
         return json(await ops.oauth.start(url.searchParams.get('plugin') ?? ''))
+      },
+    },
+    {
+      /**
+       * 豆包工作（compat 渠道）的登录。
+       *
+       * ## 为什么不是复用 `/auth` 那条
+       *
+       * `/auth` 走 CPA 的 OAuth（`?provider=<渠道>`）。豆包工作**不在 CPA 里登录** ——
+       * 它的账号是那个独立网关用「独立浏览器 + CDP 抓 cookie」登的，
+       * 所以 `?provider=doubaowork` 只会得到 `provider_not_found`（真机实证）。
+       *
+       * 这条打到**网关自己的**面板接口（见 `doubaowork-gateway.ts` 的三道门），
+       * 登录成功后才把密钥与模型记下来 —— 那才是 `openai-compatibility` 需要的东西。
+       *
+       * 三段语义合在一个 path 上（与 `/auth` 同款）：
+       * - `GET` 无参 → 网关在不在 + 这次登录的进度；
+       * - `GET ?poll=1` → **轮询**（`success` 的那一刻会落盘并回模型数）；
+       * - `POST` → 起一次登录（body `{action:'cancel'}` 则是取消）。
+       */
+      path: '/api/v1/cpa/doubaowork-login',
+      methods: ['GET', 'POST'],
+      handle: async (request) => {
+        if (request.method === 'POST') {
+          const body = await readBody(request)
+          if (body.action === 'cancel') return json(await ops.doubaoworkLogin.cancel())
+          return json(await ops.doubaoworkLogin.start())
+        }
+        const url = new URL(request.url)
+        if (url.searchParams.get('poll') === '1') return json(await ops.doubaoworkLogin.poll())
+        return json(await ops.doubaoworkLogin.status())
       },
     },
     {

@@ -757,14 +757,77 @@ export function isModelHidden(hidden: HiddenModels, channel: string, bare: strin
 
 /* ── 面板自己的显示偏好 ───────────────────────────────────────────────── */
 
+/* ── 豆包工作（compat 上游）的登录产物 ────────────────────────────────── */
+
+/**
+ * 登录成功后从网关读到的三件事。
+ *
+ * ## 为什么不写进插件配置
+ *
+ * `doubaoworkUrl` / `doubaoworkKeyRef` / `doubaoworkModels` 是**用户手填的意图**，
+ * 而这里是**一次登录观察到的结果** —— 两者性质不同，混在一起就会互相覆盖：
+ * 用户改了地址，我们却拿旧登录产物把模型清单盖回去。
+ *
+ * 所以：配置是「用户怎么说」，本文件是「上次登录看到了什么」。
+ * `compat-upstreams.ts` 的优先级是 **配置 > 本文件**（用户显式填的赢）。
+ *
+ * ## 为什么必须落盘
+ *
+ * 写 CPA 的 `openai-compatibility` 要在**CPA 未运行时**（管理接口那条路会写坏配置，
+ * 见 `setup/config.ts` 的实测记录），而登录时 CPA 正跑着 —— 于是
+ * 「先记下来，等 CPA 停着的那一轮再写进去」是唯一不冒险的顺序。
+ */
+export interface DoubaoworkCredentials {
+  /** 网关的 OpenAI 兼容根地址。 */
+  readonly baseUrl: string
+  /** 网关签发的调用密钥（`sk-dw-…`）。 */
+  readonly apiKey: string
+  /** 客户端可见的模型 id（**裸名**，不带 `dbw/` 前缀）。 */
+  readonly models: readonly string[]
+  /** 写入时刻（毫秒）。只用于界面显示「什么时候登的」。 */
+  readonly at: number
+}
+
+/** 「上次登录看到了什么」的落地文件。 */
+function doubaoworkPath(): string {
+  return join(storagesDir(), 'cpa-panel-doubaowork.json')
+}
+
+/**
+ * 读上次登录的产物；缺字段 / 损坏一律当「没有」。
+ *
+ * ⚠️ **逐字段校验**：这份值会被直接写进 CPA 配置，一个空 `apiKey` 写进去会让
+ * `openai-compatibility` 那一段变成**必然 401 的**配置，而症状是
+ * 「模型在列表里、一发就报错」，很难联想到根因在这里。
+ */
+export function readDoubaoworkCredentials(): DoubaoworkCredentials | undefined {
+  const parsed = readJson<Partial<DoubaoworkCredentials>>(doubaoworkPath())
+  if (parsed === undefined) return undefined
+  const baseUrl = typeof parsed.baseUrl === 'string' ? parsed.baseUrl.trim() : ''
+  const apiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey.trim() : ''
+  if (baseUrl === '' || apiKey === '') return undefined
+  const models = Array.isArray(parsed.models)
+    ? parsed.models.filter((model): model is string => typeof model === 'string' && model !== '')
+    : []
+  return { baseUrl, apiKey, models, at: Number(parsed.at ?? 0) }
+}
+
+/** 记下一次登录的产物（登录成功时调一次）。 */
+export function writeDoubaoworkCredentials(credentials: DoubaoworkCredentials): void {
+  writeJson(doubaoworkPath(), credentials)
+}
+
+/** 忘掉上次登录（用户关掉这个渠道、或换了网关时用）。 */
+export function clearDoubaoworkCredentials(): void {
+  writeJson(doubaoworkPath(), {})
+}
 /**
  * 面板显示偏好的落地文件。
  *
  * 与上面两个状态文件同属**意图类**（用户自己按的开关）：它不参与任何上游调用，
  * 只决定我们自己的界面长什么样。单独一个文件而不是塞进别的表：那两份的读法
  * 各自带着「只认 source=panel」「坏格子只丢一格」这类规矩，混进来会让它们变复杂。
- */
-function panelPrefsPath(): string {
+ */ function panelPrefsPath(): string {
   return join(storagesDir(), 'cpa-panel-prefs.json')
 }
 

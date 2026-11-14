@@ -65,6 +65,33 @@ describe('版本一行的判定', () => {
     expect(view.action).toBe('retry')
   })
 
+  /**
+   * ⚠️ **查不到上游 + 本地有归档 ≠ 只能重试**：`installSource` 有离线兜底，
+   * 那条路装得动（装的是归档版本，不是新版）。这里若只给「重试」，
+   * 那条兜底路径在界面上**根本不可达** —— 用户永远等不到一次能装上的点击。
+   */
+  it('⚠️ 查不到上游但本地有归档 → 给「更新」按钮，并说明装的是哪一版', () => {
+    const view = updateView(
+      { ok: false, error: 'release 查询失败：404', offline: { tag: 'v0.8.97' } },
+      t,
+    )
+    expect(view.line).toContain('查不到')
+    expect(view.line).toContain('v0.8.97')
+    expect(view.line).toContain('不是新版')
+    expect(view.action).toBe('update')
+  })
+
+  it('归档的 tag 是空串 / 缺字段时退回「重试」（不编版本号）', () => {
+    const blanks: PluginUpdateInfo['offline'][] = [{}, { tag: '' }, null]
+    for (const offline of blanks) {
+      const view = updateView({ ok: false, error: 'x', offline }, t)
+      expect(view.action).toBe('retry')
+      expect(view.line).not.toContain('离线归档')
+    }
+    // 连这一格都没有时同样只给「重试」
+    expect(updateView({ ok: false, error: 'x' }, t).action).toBe('retry')
+  })
+
   it('响应认不出（没有 upstream tag）时保持沉默，不编结论', () => {
     expect(updateView({ ok: true }, t)).toEqual({ line: '', action: 'none' })
     expect(updateView({ ok: true, latest: {} }, t)).toEqual({ line: '', action: 'none' })
@@ -90,5 +117,29 @@ describe('更新跑完那一行', () => {
     const line = updateResultLine({ ok: false }, t)
     expect(line).toContain('失败')
     expect(line).not.toContain('{tag}')
+  })
+
+  /**
+   * ⚠️ **离线兜底是第四种事实**，不许并进「已更新到 {tag}」：
+   * 上游不可达时用的是 `runtime/offline/` 里的归档，装上去的是**已知的旧版本**。
+   * 说成普通更新，用户会以为上游还活着，下次再点一次拿到同一个版本。
+   */
+  it('⚠️ 走离线归档时必须说「不是新版」（否则等于替上游撒谎）', () => {
+    const line = updateResultLine({ ok: true, stopped: false, offline: true, tag: 'v0.8.97' }, t)
+    expect(line).toContain('v0.8.97')
+    expect(line).toContain('离线归档')
+    expect(line).toContain('不是新版')
+  })
+
+  it('离线 + CPA 被停 → 两句都要说全', () => {
+    const line = updateResultLine({ ok: true, stopped: true, offline: true, tag: 'v0.8.97' }, t)
+    expect(line).toContain('v0.8.97')
+    expect(line).toContain('不是新版')
+    expect(line).toContain('停止')
+  })
+
+  it('online 成功那两句**不含**「离线」字样（不能串台）', () => {
+    expect(updateResultLine({ ok: true, stopped: false, tag: 'v0.8.66' }, t)).not.toContain('离线')
+    expect(updateResultLine({ ok: true, stopped: true, tag: 'v0.8.66' }, t)).not.toContain('离线')
   })
 })

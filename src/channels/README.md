@@ -10,11 +10,24 @@
 
 **「哪个渠道供给哪些模型」只认权威端点**，不认 `owned_by`：
 
-| 问题                                       | 事实源                                                      | 别用什么                      |
-| ------------------------------------------ | ----------------------------------------------------------- | ----------------------------- |
-| 某渠道**能调到**哪些模型                   | 逐个凭据 `GET /v0/management/auth-files/models?name=<凭据>` | ❌ `/v1/models` 的 `owned_by` |
-| 某渠道**声明**支持哪些模型（含没登录的组） | 渠道的 `modelsPath`（见各 spec）                            | ——                            |
-| 某模型**属于哪个渠道**                     | 上面第一行的读数里出现过它                                  | ❌ `owned_by`                 |
+| 问题                                       | 事实源                                                        | 别用什么                          |
+| ------------------------------------------ | ------------------------------------------------------------- | --------------------------------- |
+| 某渠道**能调到**哪些模型                   | 逐个凭据 `GET /v0/management/auth-files/models?name=<凭据>`   | ❌ `/v1/models` 的 `owned_by`     |
+| 某渠道**声明**支持哪些模型（含没登录的组） | 渠道的 `modelsPath`（见各 spec）                              | ——                                |
+| 某模型**属于哪个渠道**                     | 上面第一行的读数里出现过它                                    | ❌ `owned_by`                     |
+| **compat 渠道**供给哪些模型                | `GET /v0/management/openai-compatibility` 的 `models[].alias` | ❌ `auth-files`（它根本不在里面） |
+
+⚠️ **两类凭据的供给面互不相通**（2026-11-13 实测）：`auth-files` 只列**文件型**凭据
+（返回里 `source: "file"` + 一个 `.cli-proxy-api\*.json` 的 `path`），
+`openai-compatibility` 的 key 是**配置型**的，**永远不出现在那份清单里**；
+反过来 `auth-files/models?name=<任意串>` 对 compat 条目只回 `{"models":[]}` ——
+拿它当空结果，会把「这个渠道不供模型」与「问错了接口」混成同一件事，
+症状是模型**永远进不了选择器且零报错**。读法在 `route-registry.ts` 的
+`readCompatChannelModels`。
+
+⚠️ **compat 渠道的 `models` 是配置声明，不是探测结果**：CPA **不会**去请求上游的
+`/v1/models`（实测：省略或 `models: []` ⇒ 一个模型都不注册）。所以那份清单只能由
+`compat-upstreams.ts` 从插件配置里给。
 
 ⚠️ **供给面只收「托管渠道 + 能用」的凭据**（2026-10-07）：`auth-files/models`
 只报模型名，而「能不能用」要看同一个 `auth-files` 返回的 `disabled` / `status` /
@@ -58,15 +71,23 @@ WorkBuddy 侧 id 叫 `kimi-k2.7`、name 是 `Kimi-K2.7-Code`）。**归属表必
 ## 文件
 
 - **`spec.ts`** —— `ChannelSpec` 接口 + 上游原始形状 + 共用的数值搬运。
-  - 导出：类型 `ChannelSpec` / `AccountPayload` / `CreditsPayload` / `RawPackage` / `AutoCheckinPath`；
+  - 导出：类型 `ChannelSpec` / `ChannelBacking` / `AccountPayload` / `CreditsPayload` /
+    `RawPackage` / `AutoCheckinPath` / `CompatProviderPayload`；
     函数 `numberOrUndefined` / `toPackage` / `parseNestedCredits`
   - ⚠️ `numberOrUndefined` 把非有限数一律当「没给」：`Number(null)` 是 0，那又变回编一个 0
-- **`workbuddy.ts`** / **`trae.ts`** / **`qoder.ts`** / **`zcode.ts`** —— 各一个 spec。
+  - ⚠️ **`backing` 是本目录唯一的「渠道形状」维度**：省略 = `plugin`（`/v0/management/plugins/<id>/*`），
+    `compat` = `openai-compatibility` 那种配置型上游。它的三条实测约束写在
+    `spec.ts` 的 `ChannelBacking` 注释里，改之前必读
+- **`workbuddy.ts`** / **`trae.ts`** / **`qoder.ts`** / **`zcode.ts`** / **`doubaowork.ts`** —— 各一个 spec。
   - ⚠️ trae 的余额结构与其余三个**不同**：只有 `credits_pool_remain`，没有 `used` / `size`
   - ⚠️ zcode 的模型目录是 `/models`，其余是 `/models/groups?refresh=1`
-  - 改后必测：`tests/channels.test.ts`
+  - ⚠️ **doubaowork 是唯一的 `backing: 'compat'`**：它没有 `/plugins/<id>/*` 那套端点，
+    `accountsPath` / `configPath` / `extractAccounts` 三处都必须自己给；
+    能力位全是 `false`（上游那条路上拿不到余额与签到），**这不是偷懒，是事实**
+  - 改后必测：`tests/channels.test.ts` / `tests/channels-registry.test.ts`
 - **`registry.ts`** —— 唯一查询入口 + 全部派生表。
-  - 导出：`CHANNELS` / `CHANNEL_IDS` / `channelOf` / `channelLabel` / `channelOrder` /
+  - 导出：`CHANNELS` / `CHANNEL_IDS` / **`PLUGIN_CHANNELS` / `PLUGIN_CHANNEL_IDS`** /
+    `channelOf` / **`isCompatChannel`** / `channelLabel` / `channelOrder` /
     `aliasPrefixOf` / `accountsPathOf` / `configPathOf` / `ACTION_PATHS` / `AUTO_CHECKIN_PATHS` /
     `ROUTE_PREFIXES` / `SCHEDULER_MODE` / `PROVIDER_PREFIX` / `PROVIDER_NAME` /
     `providerIdOf` / `providerLabelOf` / 类型 `ChannelId`
@@ -74,6 +95,8 @@ WorkBuddy 侧 id 叫 `kimi-k2.7`、name 是 `Kimi-K2.7-Code`）。**归属表必
     且**不进模型路由** —— 供给面与 `ROUTE_PREFIXES` 都只认托管渠道，
     判据是「有没有 spec」，CPA 以后新增渠道自动被挡
     （[决策记录](../../.agents/notes/2026-10-07-model-routes-managed-healthy-only.md)）
+  - ⚠️ **`PLUGIN_CHANNELS` 不是「少两个渠道」的同义词**，它是「管理面是渠道插件」的那批。
+    按 `/plugins/<id>/*` 遍历的地方一律用它；`CHANNELS` 用于面板页签与模型分组
   - ⚠️ 别名前缀的兜底是「原样小写」：不能被猜一个缩写出来
   - `providerIdOf` / `providerLabelOf` 是**模型选择器的分组身份**（一个渠道一个 provider）：
     组名取「`PROVIDER_NAME` · 渠道展示名」，组顺序跟 {@link channelOrder}；

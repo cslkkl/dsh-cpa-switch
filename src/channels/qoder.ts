@@ -18,6 +18,7 @@ export const QODER = {
     autoCheckin: true,
     school: false,
     import: true,
+    login: true,
   },
   aliasPrefix: 'qoder',
   creditsPath: '/v0/management/plugins/qoder/credits',

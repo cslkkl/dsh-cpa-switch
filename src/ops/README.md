@@ -39,15 +39,15 @@
 
 ## 改哪
 
-| 改了                     | 必须同步                                                                                                                                                                                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 任何一个**写**路径       | 成功后调 `deps.gateway.invalidateChannel(plugin)`；跨渠道的写用空串；判据 `tests/ops-write-paths.test.ts`                                                                                                                                                       |
-| `enable.ts` 的启用态逻辑 | 回读确认 + 逐个容错 + 意图记**回读值**（F33、F43）；纯判据 [select-plan.ts](../select-plan.ts)、[intent-drift.ts](../intent-drift.ts)。**漂移探针 `driftOf` 必须复用 `disabledDriftOf`**（与 `/accounts` 同一份判定，两处各判一次就会「探针说没有、主读说有」） |
-| `actions.ts` 的签到      | 记账本只在 `checkin` 记、`tasks` 不记；渠道级记保留键（[checkin-ledger.ts](../checkin-ledger.ts)）                                                                                                                                                              |
-| `oauth.ts` 的状态判定    | 「完成」的那一刻既要失效缓存又要通知宿主 —— 两件事合并成一次判定                                                                                                                                                                                                |
-| `plugin-update.ts`       | 「有没有新版」的判据是 **tag 是否相同**（不解析版本号）；没记过安装 tag 时 `hasUpdate` **缺席**而不是 `false` —— 判据 `tests/plugin-update.test.ts`                                                                                                             |
-| 新增一个域               | 加文件 + 在 [index.ts](index.ts) 挂上 + 在 [../README.md](../README.md) 与本章程的表里各加一行                                                                                                                                                                  |
-| 改对外返回的形状         | 同步 `src/client/`（它是唯一的消费方）与契约层（若在 `contracts/` 里）                                                                                                                                                                                          |
+| 改了                     | 必须同步                                                                                                                                                                                                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 任何一个**写**路径       | 成功后调 `deps.gateway.invalidateChannel(plugin)`；跨渠道的写用空串；判据 `tests/ops-write-paths.test.ts`                                                                                                                                                                    |
+| `enable.ts` 的启用态逻辑 | 回读确认 + 逐个容错 + 意图记**回读值**（F33、F43）；纯判据 [select-plan.ts](../select-plan.ts)、[intent-drift.ts](../intent-drift.ts)。**漂移探针 `driftOf` 必须复用 `disabledDriftOf`**（与 `/accounts` 同一份判定，两处各判一次就会「探针说没有、主读说有」）              |
+| `actions.ts` 的签到      | 记账本只在 `checkin` 记、`tasks` 不记；渠道级记保留键（[checkin-ledger.ts](../checkin-ledger.ts)）                                                                                                                                                                           |
+| `oauth.ts` 的状态判定    | 「完成」的那一刻既要失效缓存又要通知宿主 —— 两件事合并成一次判定                                                                                                                                                                                                             |
+| `plugin-update.ts`       | 「有没有新版」的判据是 **tag 是否相同**（不解析版本号）；没记过安装 tag 时 `hasUpdate` **缺席**而不是 `false`；装的是离线归档时 `offline` 必须**原样带给浏览器**（吞掉就等于替不存在的上游说「已更新」）—— 判据 `tests/plugin-update.test.ts`、`tests/setup-offline.test.ts` |
+| 新增一个域               | 加文件 + 在 [index.ts](index.ts) 挂上 + 在 [../README.md](../README.md) 与本章程的表里各加一行                                                                                                                                                                               |
+| 改对外返回的形状         | 同步 `src/client/`（它是唯一的消费方）与契约层（若在 `contracts/` 里）                                                                                                                                                                                                       |
 
 ## 判据在哪
 
@@ -59,6 +59,8 @@
 - `tests/action-outcome.test.ts` —— 写操作返回的归一。
 - `tests/plugin-update.test.ts` —— 查版本的三态（未知 / 有新版 / 已最新）、更新前停 CPA 的四条分支、
   覆盖替换的三种结局（校验不过不动一个字节、解压失败还原旧件、成功后不留备份）、安装记录的容忍解析。
+- `tests/setup-offline.test.ts` —— 离线归档兜底：清单读不懂就当没有、缺 `sha256` 不许放行、
+  大小不符作废、`offline` 从安装层一路透传到路由返回。
 
 ## 参考
 

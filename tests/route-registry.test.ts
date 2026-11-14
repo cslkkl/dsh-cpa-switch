@@ -8,6 +8,7 @@ import { attachRouteRegistry, readStableCatalog } from '../src/route-registry.ts
 import type { Clock, RouteRegistryDeps, RouteRegistryHost } from '../src/route-registry.ts'
 import {
   CHANNEL_IDS,
+  PLUGIN_CHANNEL_IDS,
   PROVIDER_PREFIX,
   providerIdOf,
   providerLabelOf,
@@ -385,6 +386,22 @@ function fakeCpa(input: {
    */
   models: Readonly<Record<string, readonly (string | { id?: unknown })[] | 'fail'>>
   catalog: readonly string[]
+  /**
+   * compat 渠道（`openai-compatibility`）的夹具。
+   *
+   * `undefined` = **那个端点根本不该被问**（多数机器的状态）。给了它就代表
+   * 「用户配了这个渠道」，`/v0/management/openai-compatibility` 才开始返回内容 ——
+   * 这条区分本身是被测行为（见「没配就不问」那条判据）。
+   */
+  compat?: {
+    readonly entries: readonly {
+      name: string
+      disabled?: boolean
+      models: readonly { name: string; alias?: string }[]
+    }[]
+    /** 让这个端点按给定消息抛错（判「永久 / 暂时」用）。 */
+    readonly fails?: string
+  }
 }): FakeCpa {
   const waiting: (() => void)[] = []
   const gate: { match: string; count: number }[] = []
@@ -455,6 +472,18 @@ function fakeCpa(input: {
           : input.catalog
       return { data: ids.map((id) => ({ id })) }
     }
+    if (path === '/v0/management/openai-compatibility') {
+      if (input.compat === undefined) throw new Error(`unexpected path: ${path}`)
+      if (input.compat.fails !== undefined) throw new Error(input.compat.fails)
+      return {
+        'openai-compatibility': input.compat.entries.map((entry) => ({
+          name: entry.name,
+          ...(entry.disabled === true ? { disabled: true } : {}),
+          'auth-index': 'compat-fixture',
+          models: entry.models.map((model) => ({ ...model })),
+        })),
+      }
+    }
     throw new Error(`unexpected path: ${path}`)
   }
   return {
@@ -511,7 +540,16 @@ function fakeHost(entry: unknown): { host: RouteRegistryHost; emit: (event: stri
   }
 }
 
-function depsFor(cpa: FakeCpa): RouteRegistryDeps {
+function depsFor(
+  cpa: FakeCpa,
+  /**
+   * 追加依赖。
+   *
+   * ⚠️ `compatChannels` **默认不传**（= 用户没配 compat 渠道）—— 那是绝大多数机器
+   * 的状态，也是「旧夹具一行都不用改」的原因。要验 compat 才显式给。
+   */
+  extra: Partial<RouteRegistryDeps> = {},
+): RouteRegistryDeps {
   return {
     gateway: cpa.gateway,
     runtime: {
@@ -520,6 +558,7 @@ function depsFor(cpa: FakeCpa): RouteRegistryDeps {
     resolveApiKey: async () => 'test-key',
     adminKey: () => 'admin',
     logger: { info: () => {}, warn: () => {} },
+    ...extra,
   }
 }
 
@@ -3081,7 +3120,15 @@ describe('按渠道分组', () => {
     await attachRouteRegistry(host, depsFor(cpa))('boot')
 
     const groups = pushed.at(-1)?.groups ?? {}
-    expect(Object.keys(groups).sort()).toEqual(CHANNEL_IDS.map((id) => providerIdOf(id)).sort())
+    /**
+     * ⚠️ **只有「这一轮供到了模型」的渠道才有组**：宿主对空 `models` 是硬错误
+     * （一个非法 ⇒ 整次 update 被拒），所以没模型的渠道连行都不能有。
+     * 夹具里没有 compat 渠道（豆包工作要显式配 base-url 才会被读），
+     * 所以这里比的是「插件渠道」，不是全部托管渠道。
+     */
+    expect(Object.keys(groups).sort()).toEqual(
+      PLUGIN_CHANNEL_IDS.map((id) => providerIdOf(id)).sort(),
+    )
     // 独供模型落在自己渠道的组里
     expect(groups['cpa-qoder']?.ids).toEqual(['dfmodel'])
     expect(groups['cpa-workbuddy']?.ids).toContain('hy3')
@@ -3103,7 +3150,11 @@ describe('按渠道分组', () => {
     const providers = (
       entry.options.config as { providers: Record<string, { displayName: string }> }
     ).providers
-    for (const id of CHANNEL_IDS) {
+    /**
+     * 只校验**这一轮真的产出行的**渠道；组名与组序仍从注册表派生。
+     * compat 渠道（豆包工作）在这份夹具里没配，不产出行 —— 见上一个用例的注释。
+     */
+    for (const id of PLUGIN_CHANNEL_IDS) {
       expect(providers[providerIdOf(id) ?? '']?.displayName).toBe(providerLabelOf(id))
     }
   })
@@ -3199,6 +3250,13 @@ describe('按渠道分组', () => {
 
     // 四个托管渠道都补回来了
     for (const id of CHANNEL_IDS) {
+      /**
+       * ⚠️ 判据是「**这一轮有模型**的渠道都补回」，不是「五个渠道都补回」：
+       * `cpa-doubaowork` 在这份夹具里没配（`compatChannels` 不传 ⇒ 不读那个端点），
+       * 因此本轮没有它的行 —— 而「没有行」正是宿主对空 `models` 的硬要求。
+       * 用 `PLUGIN_CHANNEL_IDS` 表达「这台机器上真的会供货的那些渠道」。
+       */
+      if (!PLUGIN_CHANNEL_IDS.includes(id)) continue
       expect(pushed.at(-1)?.ourProviderIds, `${providerIdOf(id) ?? ''} 必须补回`).toContain(
         providerIdOf(id) ?? '',
       )
@@ -3326,5 +3384,255 @@ describe('运行时补丁：新模型的窗口自动补', () => {
     expect((pushed.at(-1)?.rows ?? []).find((row) => row.id === 'glm-5.3')?.contextWindow).toBe(
       1_000_000,
     )
+  })
+})
+
+/**
+ * **compat 渠道的供给面**（`openai-compatibility`，2026-11-13 接豆包工作时立）。
+ *
+ * 这组判据守的是「第 5 个渠道能不能真的出现在选择器里」这条链，
+ * 而链上每一环坏了都**零报错**：
+ *
+ * | 环 | 坏了的症状 |
+ * | --- | --- |
+ * | 供给面不读那个端点 | 模型永远进不了选择器，看起来像「用户没配」 |
+ * | 无条件读（没配也问） | 每轮记一条失败 ⇒ `complete: false` ⇒ 清单永久退化回上一份 |
+ * | 把 compat 算进别名表 | `oauth.model-alias` 二次拆分 ⇒ 目录里出现 `dbw/dbw/x` |
+ * | 剥不掉 `dbw/` 前缀 | 展示名变成 `dbw/x`，且「隐藏这个模型」的勾选键与展示名口径漂开 |
+ */
+describe('compat 渠道的供给面', () => {
+  let home = ''
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cpa-compat-supply-'))
+    process.env.DSH_HOME = home
+    mkdirSync(join(home, 'cpa-panel', 'runtime', 'cpa'), { recursive: true })
+    writeFileSync(configPath(), 'config-version: 8\noauth:\n    auth-dir: "auth"\n', 'utf8')
+  })
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  /** 四个插件渠道各供一个模型，其中 `glm-5.3` 被两家供给（保证别名表非空）。 */
+  const FILES = [
+    { name: 'w1', provider: 'workbuddy' },
+    { name: 't1', provider: 'trae' },
+  ]
+  const MODELS = { w1: ['glm-5.3'], t1: ['glm-5.3'] }
+
+  it('⚠️ 没配 compat 渠道时**一次都不问**那个端点（每轮白记一条失败会把清单钉死在旧值）', async () => {
+    const cpa = fakeCpa({ files: FILES, models: MODELS, catalog: ['wb/glm-5.3', 'trae/glm-5.3'] })
+    const { entry } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(fakeHost(entry).host, depsFor(cpa))
+
+    await refresh('boot')
+
+    expect(cpa.requestedPaths()).not.toContain('/v0/management/openai-compatibility')
+  })
+
+  it('配了就问，且模型以 `<前缀>/<裸名>` 的形态进组（组名是渠道展示名）', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      catalog: ['wb/glm-5.3', 'dbw/doubao-seed-2.1-pro'],
+      compat: {
+        entries: [{ name: 'doubaowork', models: [{ name: 'doubao-seed-2.1-pro' }] }],
+      },
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    const groups = pushed.at(-1)?.groups ?? {}
+    /**
+     * ⚠️ **行的来源是「目录 id × 别名解析」，不是「供给面有一行就推一行」**
+     * （2026-11-13 写判据时先按错的模型写过一遍，红了两条）。
+     *
+     * `buildCpaRouteProfile` 只遍历 `catalogIds(catalog)`；供给面回答的是
+     * 「这个 id 归哪个渠道」。所以 compat 渠道要出行，**两件事都要成立**：
+     * 目录里有 `dbw/xxx`，且 `dbw` 能反查成 doubaowork（由 `aliasPrefix` 保证）。
+     */
+    expect(groups['cpa-doubaowork']).toBeDefined()
+    expect(groups['cpa-doubaowork']?.ids).toEqual(['dbw/doubao-seed-2.1-pro'])
+    // 展示名仍是裸名（渠道由分组标题承载）
+    expect(pushed.at(-1)?.rows.find((row) => row.id === 'dbw/doubao-seed-2.1-pro')?.name).toBe(
+      'doubao-seed-2.1-pro',
+    )
+  })
+
+  it('上游只给 `name`、不给 `alias` 时，供给面退回裸名（不是空的）', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      // 目录里是裸名形态（上游没配置 alias 时 CPA 报的就是这个）
+      catalog: ['wb/glm-5.3', 'doubao-seed-2.1-pro'],
+      compat: {
+        entries: [{ name: 'doubaowork', models: [{ name: 'doubao-seed-2.1-pro' }] }],
+      },
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    // 裸名走 `routeOwnerOf` 的「按供给面反查」那条路，照样认得出归属
+    expect(pushed.at(-1)?.groups['cpa-doubaowork']?.ids).toEqual(['doubao-seed-2.1-pro'])
+  })
+
+  it('给了 alias 就用 alias（那是客户端真正会请求的 id）', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      catalog: ['dbw/doubao-seed-evolving'],
+      compat: {
+        entries: [
+          {
+            name: 'doubaowork',
+            models: [{ name: 'upstream-real-name', alias: 'dbw/doubao-seed-evolving' }],
+          },
+        ],
+      },
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    expect(pushed.at(-1)?.groups['cpa-doubaowork']?.ids).toEqual(['dbw/doubao-seed-evolving'])
+    // 展示名是**剥掉渠道前缀后的裸名**（渠道由分组标题承载）
+    expect(pushed.at(-1)?.rows.find((row) => row.id === 'dbw/doubao-seed-evolving')?.name).toBe(
+      'doubao-seed-evolving',
+    )
+  })
+
+  it('⚠️ compat 渠道**不进** `oauth.model-alias`（它自己已用 alias 拆过，再拆就是双前缀）', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      catalog: ['wb/glm-5.3', 'trae/glm-5.3', 'dbw/glm-5.3'],
+      compat: {
+        // 故意让 compat 也「供给同名模型」—— 若它被算进别名表，这里就会多写一条
+        entries: [{ name: 'doubaowork', models: [{ name: 'glm-5.3', alias: 'dbw/glm-5.3' }] }],
+      },
+    })
+    const { entry } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    const config = readFileSync(configPath(), 'utf8')
+    // 别的渠道的别名照常写（说明这一段确实被处理了，不是整段跳过）
+    expect(config).toContain('wb/glm-5.3')
+    expect(config).toContain('trae/glm-5.3')
+    // 但 compat 渠道不能出现在别名段的**渠道键**上
+    expect(config).not.toContain('        doubaowork:')
+  })
+
+  it('⚠️ `disabled: true` 的上游不供模型，且**记进 dropped**（护栏才认得出这是合法缩水）', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      /**
+       * ⚠️ 目录里**没有** `dbw/` 那条 —— 上游停用时 CPA 不会把它算进 `/v1/models`。
+       * 夹具要照着这个事实写：若故意留着它，行仍会**经别名解析**产出
+       * （行来自目录，不来自供给面），那样验的就不是「停用」而是「目录旧」。
+       */
+      catalog: ['wb/glm-5.3'],
+      compat: {
+        entries: [
+          { name: 'doubaowork', disabled: true, models: [{ name: 'doubao-seed-2.1-pro' }] },
+        ],
+      },
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    // 停用的上游不产出行；同轮别的渠道照常推出（不许全灭）
+    expect(pushed.at(-1)?.groups['cpa-doubaowork']).toBeUndefined()
+    expect(pushed.at(-1)?.groups['cpa-workbuddy']).toBeDefined()
+  })
+
+  it('⚠️ 端点 404（老 CPA 没这个端点）= 永久失败 → 跳过它、推其余，不当成读残', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      catalog: ['wb/glm-5.3'],
+      compat: { entries: [], fails: '404 not found' },
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    // 别的渠道的模型照推 —— 一个坏渠道不许把门永久卡死
+    expect(pushed.at(-1)?.groups['cpa-workbuddy']).toBeDefined()
+  })
+
+  it('端点暂时失败（无状态码）→ 当成「还要等」，不推残缺清单', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      catalog: ['wb/glm-5.3'],
+      compat: { entries: [], fails: 'request timed out' },
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    // 暂时失败 ⇒ 这一轮不算读全 ⇒ 不推（`pushed` 里没有新的一份成功清单）
+    expect(pushed.length).toBe(0)
+  })
+
+  it('`openai-compatibility` 里**别人的**上游不收（不是我们的渠道，抢过来就是挂错标签）', async () => {
+    const cpa = fakeCpa({
+      files: FILES,
+      models: MODELS,
+      catalog: ['wb/glm-5.3', 'dbw/doubao-seed-2.1-pro', 'other/some-model'],
+      compat: {
+        entries: [
+          { name: 'doubaowork', models: [{ name: 'doubao-seed-2.1-pro' }] },
+          { name: 'someone-else', models: [{ name: 'some-model', alias: 'other/some-model' }] },
+        ],
+      },
+    })
+    const { entry, pushed } = fakeEntry(BASELINE)
+    const refresh = attachRouteRegistry(
+      fakeHost(entry).host,
+      depsFor(cpa, { compatChannels: () => ['doubaowork'] }),
+    )
+
+    await refresh('boot')
+
+    const ids = Object.keys(pushed.at(-1)?.groups ?? {})
+    expect(ids).toContain('cpa-doubaowork')
+    // 别人的上游没有 spec ⇒ 没有 provider 组，也不该冒充成我们的
+    expect(ids).not.toContain('cpa-someone-else')
   })
 })

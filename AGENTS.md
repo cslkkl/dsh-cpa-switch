@@ -159,12 +159,12 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
   `tests/state-isolation-guard.test.ts` 静态钉住「调写入方的测试必须显式隔离」。
   → [事故复盘](docs/postmortem/2026-10-24-test-wrote-real-state.md)
 - **profile 层的同 id 行会整行吃掉 bundle 骨架** —— 用户的 `cordis.patch.yml` 里只要也写
-  `- id: llm-pi-ai`，随包发布的四行 `cpa-*` 就**每次启动都不生效**（后层整行替换、不深合并），
+  `- id: llm-pi-ai`，随包发布的 `cpa-*` 行就**每次启动都不生效**（后层整行替换、不深合并），
   provider 只能靠运行时推 ⇒ 重启后首条消息报 `no adapter registered for provider "cpa-…"`。
-  修法在**用户那一侧**：覆盖该 id 的 patch 必须自己声明四行骨架（`models` 可省略），
+  修法在**用户那一侧**：覆盖该 id 的 patch 必须自己声明全部骨架行（`models` 可省略），
   用 `# >>> cpa-switch 骨架` 首尾标记圈住。骨架会被吃掉、但**不会报错**，只会晚到（F39）。
 - **推给宿主的每个 provider 都必须至少有一个模型** —— 空 `models` 是宿主硬错误，而校验是
-  **strict** 且作用于**整次 update**：一个非法 ⇒ 四个渠道一起消失（账号页却正常）。
+  **strict** 且作用于**整次 update**：一个非法 ⇒ 全部渠道一起消失（账号页却正常）。
   「补一行 `models: []` 留住适配器」是错的，已回滚 → [验收记录](.agents/notes/2026-10-19-acceptance-history.md)。
 - **渠道插件会按额度把被禁用的号重新打开** —— 症状「我没动它，号全亮了」。
   口径**单向**：只把用户禁用的号禁回去；判定只有一处 `src/intent-drift.ts`（F51、F52）→
@@ -188,7 +188,28 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 - **`/api/v1/cpa/*` 响应「扁平」，索引签名会让错取字段编译通过** —— `select` 取整个 `result`；
   界面不许因「读不到」就 `return null` → [决策记录](.agents/notes/2026-10-13-model-visibility-in-panel.md)。
 - **上游一次报错 ≠ 模型常性，单次测量 ≠ 可分类** —— 判模型行为看多次请求的响应内容 →
-  [决策记录](.agents/notes/2026-10-12-reasoning-effort-retriage.md)。
+  [决策记录](.agents/notes/2026-10-12-reasoning-effort-retriage.md)
+
+**compat 渠道（豆包工作）的三条零信号坑**（2026-11-13 实测，逐条都踩过）
+
+- **`openai-compatibility` 只能走文件写，不能走管理接口** ——
+  `PUT /v0/management/openai-compatibility` 会**丢掉 `keys`**（落盘成 `keys: []`），
+  还把整块嵌进相邻的顶层键（真机落盘成 `api-keys.openai-compatibility`）。
+  那份配置 CPA 下次启动不一定认得，而**写的那一刻返回的是 `{"status":"ok"}`**。
+  唯一正确的路是 `setup/config.ts` 的 `patchOpenAiCompatibility`（CPA 未运行时）。
+- **`prefix` 与 `alias` 会叠加** —— 设 `prefix: dbw` + `alias: dbw/x` 时，
+  目录里同时出现 `dbw/x` 与 `dbw/dbw/x` 两个 id。现在统一「`alias` 自带 `<别名前缀>/`、
+  `prefix` 留空」，且**前缀必须与渠道 spec 的 `aliasPrefix` 逐字相同**
+  （漂开 ⇒ `channelOfPrefix` 认不出 ⇒ 归属算不出来 ⇒ 模型从选择器里消失，不报错）。
+- **compat 凭据不进 `auth-files`** —— 那份清单只收**文件型**凭据（返回里带
+  `source: "file"` 与 `.cli-proxy-api\*.json` 的 `path`）。配置型的
+  `openai-compatibility` key **永远不在里面**，而 `auth-files/models?name=<任意串>`
+  对它只回 `{"models":[]}` —— 拿它当空结果，模型就**永远进不了选择器**。
+  读法在 `route-registry.ts` 的 `readCompatChannelModels`，且**只在用户配了才去读**
+  （无条件读会让每轮记一条失败 ⇒ `complete: false` ⇒ 清单永久退化）。
+- **`ensureProviders` 的期望集合不能是「全部托管渠道」** —— 没有模型的渠道**不该有行**
+  （宿主对空 `models` 是硬错误），拿全量去比会让「不该有行」被当成「行丢了」，
+  于是每次事件都重推一次、日志一直报「provider 行不见了」。期望集合取自 `lastGood.groups`。
 
 **模型路由的三条不变量（一条因果链，改任一条先读另两条）**
 

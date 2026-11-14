@@ -17,7 +17,7 @@ import { mkdirSync } from 'node:fs'
 import { ensureApiKey, resolveApiKey } from './credentials.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import type { PluginConfig } from './config.ts'
-import { CHANNELS } from './channels/registry.ts'
+import { PLUGIN_CHANNELS } from './channels/registry.ts'
 import type { CpaRuntime } from './runtime.ts'
 import type { Operations } from './ops/index.ts'
 import type { SyncResult } from './route-registry.ts'
@@ -25,10 +25,12 @@ import {
   inspect,
   managedOverridesDir,
   patchAccessApiKeys,
+  patchOpenAiCompatibility,
   patchServerHost,
   patchStreamHeadTimeout,
 } from './setup/index.ts'
 import type { SetupSession } from './setup/index.ts'
+import { resolveCompatUpstreams } from './compat-upstreams.ts'
 
 /** 生命周期流程的依赖。 */
 export interface BootDeps {
@@ -165,6 +167,39 @@ export async function runBoot(deps: BootDeps): Promise<void> {
     } catch (error) {
       deps.logger?.warn?.('cpa-panel: overrides 目录预建失败（不影响启动）: %o', error)
     }
+
+    /**
+     * **compat 上游（豆包工作）对齐 —— 2026-11-13。**
+     *
+     * 与上面三条补丁同款纪律：**必须在 `runtime.ensure()` 之前、且仅当 CPA 未运行**
+     * （CPA 运行中持有 `config.yaml` 且保存时回写，运行中改它是抢写）。
+     *
+     * 三条实测事实决定了它只能走文件、不能走管理接口（细节见 `setup/config.ts`
+     * 的 `CompatUpstream`）：
+     * - `PUT /v0/management/openai-compatibility` 会**丢掉 keys**；
+     * - 还会把整块**嵌进相邻的顶层键**（真机落盘成了 `api-keys.openai-compatibility`）；
+     * - `models` 必须显式列全，CPA **不会探测上游**。
+     *
+     * 空清单是**正常状态**（用户没配这个渠道）：`patchOpenAiCompatibility([])`
+     * 会把已经存在的那一段删掉 —— 这正是「用户在设置里关掉它」该有的效果。
+     */
+    try {
+      const compat = await resolveCompatUpstreams({
+        readConfig,
+        credentials: deps.credentials,
+        ...(deps.logger === undefined ? {} : { logger: deps.logger }),
+      })
+      if (cancelled()) return
+      if (patchOpenAiCompatibility(compat)) {
+        deps.logger?.info?.(
+          'cpa-panel: 已写入 openai-compatibility（%d 个上游 / %d 个模型）',
+          compat.length,
+          compat.reduce((sum, upstream) => sum + upstream.models.length, 0),
+        )
+      }
+    } catch (error) {
+      deps.logger?.warn?.('cpa-panel: openai-compatibility 对齐失败（不影响启动）: %o', error)
+    }
   }
   if (!portBusy && preflight.manageLifecycle && missing.length > 0) {
     deps.logger?.info?.('cpa-panel: environment incomplete (%o), preparing before start', missing)
@@ -197,8 +232,12 @@ export async function runBoot(deps: BootDeps): Promise<void> {
      *
      * 放在恢复之前：先断掉撤销源，再应用用户的选择，日志里看到的顺序才是
      * 「谁在改这个布尔」。
+     *
+     * ⚠️ **遍历的是 `PLUGIN_CHANNELS`，不是全部渠道**：compat 渠道（豆包工作）
+     * 的账号不在 `auth-files` 里，也没有 `/plugins/<id>/config` 这个「插件的配置」
+     * —— 对它调这个函数只会白打一次接口。注册表口径见 `channels/registry.ts`。
      */
-    for (const channel of CHANNELS) {
+    for (const channel of PLUGIN_CHANNELS) {
       const claimed = await ops.enable.claimDisabledOwnership(channel.id)
       if (!claimed.ok || claimed.skipped === 'unsupported') continue
       deps.logger?.info?.('cpa-panel: lifecycle ownership (%s) %o', channel.id, claimed)

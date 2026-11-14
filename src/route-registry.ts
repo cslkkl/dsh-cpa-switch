@@ -38,9 +38,11 @@ import {
   channelLabel,
   channelOf,
   channelOrder,
+  isCompatChannel,
   providerIdOf,
   providerLabelOf,
 } from './channels/registry.ts'
+import type { CompatProviderPayload } from './channels/spec.ts'
 import { aliasFor, buildAliasTable, stripChannelPrefixes, type AliasTable } from './model-alias.ts'
 import { capsOverrideOf, syncCapsFromCatalog } from './caps-overrides.ts'
 import { capsOf, reasoningEffortsOf } from './model-caps.ts'
@@ -253,6 +255,22 @@ export interface RouteRegistryDeps {
    */
   readonly isHiddenModel?: ((channel: string, bare: string) => boolean) | undefined
   /**
+   * **用户实际配了的 compat 渠道 id**（现读；空数组 = 一个都没配）。
+   *
+   * 语义是「要不要去问 `openai-compatibility`」，**不是**「渠道清不清楚」——
+   * 渠道知识仍然只在 `channels/registry.ts`。这里只回答「这一轮值不值得发那个请求」：
+   *
+   * - 不传 / 返回空 ⇒ **完全不碰那个端点**。这是绝大多数机器的状态，
+   *   也是老版本 CPA（没有该端点）不会因我们而报错的前提；
+   * - 返回了 id ⇒ 只有这些 id 会被收进供给面（`openai-compatibility` 里
+   *   可能还配着别人的上游，那不是我们的渠道）。
+   *
+   * ⚠️ **不许改成「无条件读、失败当空」**：那会让每一轮都记一条失败，
+   * 而 `complete: false` 会把整份快照判成读残 → 清单永久退化回上一份，
+   * 根因却是「问了一个不需要的接口」（2026-11-13 实踩）。
+   */
+  readonly compatChannels?: (() => readonly string[]) | undefined
+  /**
    * 显示设置改动后要**重推一次清单**。
    *
    * ⚠️ 没有它，用户勾完「隐藏」要等下一次目录变化才生效 —— 而目录可能几小时
@@ -355,6 +373,113 @@ export function credentialUsable(file: AuthFileRef): boolean {
 }
 
 /**
+ * 读「每个 **compat 渠道**各提供哪些模型」。
+ *
+ * ## 为什么不复用 `auth-files`
+ *
+ * 两类凭据的供给面是两个**互不相通**的接口（2026-11-13 实测）：
+ *
+ * | 凭据类型 | 出口 | 能不能被 `auth-files` 看见 |
+ * | --- | --- | --- |
+ * | 渠道插件写的 auth 文件 | `/v0/management/auth-files` | ✅（返回带 `source: "file"` + `path`） |
+ * | `openai-compatibility` 的 key | `/v0/management/openai-compatibility` | ❌ **永远不出现** |
+ *
+ * 而且 `auth-files/models?name=<任意串>` 对 compat 条目只回 `{"models":[]}` ——
+ * 拿它当空结果会把「这个渠道不供模型」与「问错了接口」混成同一件事，
+ * 于是 compat 渠道的模型**永远进不了选择器**，且零报错。
+ *
+ * 所以 compat 渠道的供给面只能**读它自己的声明**：`models[].alias` 就是客户端
+ * 可见的那个 id。⚠️ 这是本仓唯一一处「供给面不来自凭证读」的地方 ——
+ * 它成立的前提是 `openai-compatibility` 的 `models` 是**配置声明**（CPA 不会
+ * 因为某个 key 挂了就把它从列表里删掉），所以健康度另读 `disabled`。
+ *
+ * ⚠️ **不认识的 `name` 一律跳过**（与 `auth-files` 那条闸同一个判据：
+ * 「有没有 spec」）。CPA 里可能还配着别人的 openai-compatibility 上游 ——
+ * 那不是我们的渠道，抢过来挂标签就是下一次误判归属。
+ */
+async function readCompatChannelModels(deps: RouteRegistryDeps): Promise<{
+  byChannel: Record<string, string[]>
+  failures: ChannelFailure[]
+  dropped: DroppedCredential[]
+}> {
+  const byChannel: Record<string, string[]> = {}
+  const failures: ChannelFailure[] = []
+  const dropped: DroppedCredential[] = []
+
+  /**
+   * ⚠️ **没配就不问**（2026-11-13）。
+   *
+   * `openai-compatibility` 是**可选**的一段：绝大多数机器上压根没有它，
+   * 老版本 CPA / 裁掉了这个端点的构建更是连路径都不存在。无条件去 fetch 会
+   * 每一轮都记一条失败 → `complete: false` → 整份快照被判「读残」→
+   * 清单退化回上一份，而根因是「问了一个我们不需要的接口」。
+   *
+   * 所以判据是**用户配了没有**（`compatChannels()`），不是「端点存不存在」——
+   * 后者只能靠请求去发现，而那正是这条规则要避免的事。
+   */
+  const configured = deps.compatChannels?.() ?? []
+  if (configured.length === 0) return { byChannel, failures, dropped }
+  const wanted = new Set(configured)
+
+  let list: CompatProviderPayload[]
+  try {
+    const data = (await deps.gateway.fetch('/v0/management/openai-compatibility')) as
+      { 'openai-compatibility'?: unknown } | undefined
+    const raw = data?.['openai-compatibility']
+    list = Array.isArray(raw) ? (raw as CompatProviderPayload[]) : []
+  } catch (error) {
+    /**
+     * 配了却读不到 = **真的读失败**（与上面「没配」是两件事）。
+     * 按性质分类：老构建的 404 是**永久**（上层跳过它，推其余），
+     * 超时 / 连接被拒是**暂时**（等下一轮）。
+     */
+    return {
+      byChannel,
+      failures: [{ name: '', provider: '', kind: failureKindOf(error) }],
+      dropped,
+    }
+  }
+
+  for (const entry of list) {
+    const name = String(entry?.name ?? '')
+    // 不是**已配置**的 compat 渠道 → 连问都不问。
+    if (!wanted.has(name)) continue
+    const channel = channelOf(name)
+    if (channel === undefined || channel.backing !== 'compat') continue
+
+    if (entry.disabled === true) {
+      /**
+       * ⚠️ 与 `auth-files` 那边同理：**必须记进 `dropped`**，不能只是 `continue`。
+       * 护栏（`shrunkRows`）要靠这个信号才认得出「这次缩水是合法的」——
+       * 不记的话，用户一停用这个上游，那份少了模型的清单就会被判成「读残」
+       * 而**永久卡在旧值上**。
+       */
+      dropped.push({ name, provider: name })
+      continue
+    }
+
+    /**
+     * `alias` 是**客户端可见的 id**，`name` 是上游真实模型名。
+     * 优先取 `alias` —— 我们的 `setup/config.ts` 就把它写成 `<aliasPrefix>/<name>`，
+     * 而目录里 CPA 报的也正是它。缺 `alias` 时退回 `name`（裸名），
+     * 让 `routeOwnerOf` 的「按凭据目录反查」那条路接住。
+     */
+    const ids = (entry.models ?? [])
+      .map((model) =>
+        typeof model?.alias === 'string' && model.alias !== ''
+          ? model.alias
+          : typeof model?.name === 'string'
+            ? model.name
+            : '',
+      )
+      .filter((id) => id !== '')
+    byChannel[name] = [...new Set([...(byChannel[name] ?? []), ...ids])]
+  }
+
+  return { byChannel, failures, dropped }
+}
+
+/**
  * 读「每个渠道各提供哪些模型」。
  *
  * ⚠️ **失败只标 `complete: false`，不塞空数组**。曾经写成
@@ -364,12 +489,20 @@ export function credentialUsable(file: AuthFileRef): boolean {
  *
  * 失败同时按**性质**分类（见 {@link ChannelFailure}）：404 / 凭据失效这类
  * **永远好不了**的，必须能与「超时」分开 —— 否则一个坏渠道会让上层永远等下去。
+ *
+ * ## 两路读合并（2026-11-13）
+ *
+ * 渠道插件的供给面来自 `auth-files`，compat 渠道（豆包工作）的来自
+ * `openai-compatibility`（理由见 {@link readCompatChannelModels}）。
+ * 两路**并行读、各自记自己的失败**，最后合到同一份 `byChannel` 里 ——
+ * 上层（`agreeOnOwnership` / 别名表 / 护栏）只认这一份，不必知道渠道是哪种接法。
  */
 async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels> {
   const byChannel: Record<string, string[]> = {}
   const failures: ChannelFailure[] = []
   const dropped: DroppedCredential[] = []
-  let files: AuthFileRef[]
+  let files: AuthFileRef[] = []
+  let listFailed = false
   try {
     const list = (await deps.gateway.fetch('/v0/management/auth-files')) as {
       files?: unknown
@@ -379,81 +512,99 @@ async function readChannelModels(deps: RouteRegistryDeps): Promise<ChannelModels
     /**
      * ⚠️ **凭据列表读失败必须显式区别于「列表为空」**。
      *
-     * 曾经这里返回 `{ byChannel, complete: false, failures: [] }` —— 于是上层
-     * 只看 `failures` 时会把「一条凭据都没读到」当成「没有凭据」，
-     * 进而落进 `ownership-unsynced` 的**重试**路径去傻等。
+     * 曾经这里写成 `catch { map[provider] = [] }` 的兄弟形态：上层只看 `failures`
+     * 时会把「一条凭据都没读到」当成「没有凭据」，进而落进 `ownership-unsynced`
+     * 的**重试**路径去傻等。
      *
-     * 现在用 `complete: false` + 一个 `transient` 失败条目标出来 ——
-     * 它是**暂时**的（列表端点超时/连接被拒都会这样），要等；但**等的是这一次读**，
-     * 不是「等某个渠道」。
+     * 现在用一个 `transient` 失败条目标出来 —— 它是**暂时**的（列表端点超时/
+     * 连接被拒都会这样），要等；但**等的是这一次读**，不是「等某个渠道」。
+     *
+     * ⚠️ **但不能早退**（2026-11-13）：compat 渠道的供给面走的是**另一个端点**，
+     * 这一路挂了不代表那一路上挂了。早退会让豆包的模型跟着一起消失，
+     * 而症状与「豆包没配」完全同形。
      */
-    return {
-      byChannel,
-      complete: false,
-      failures: [{ name: '', provider: '', kind: 'transient' }],
-      dropped,
-    }
+    listFailed = true
+    failures.push({ name: '', provider: '', kind: 'transient' })
   }
-  await Promise.all(
-    files.map(async (file) => {
-      const provider = String(file?.provider ?? '')
-      if (provider === '') return
-      /**
-       * **只收「托管渠道 + 能用的号」的供给面**（2026-10-07）。
-       *
-       * 两条闸各治一种「有名字、用不了」：
-       *
-       * 1. `channelOf(provider) === undefined` ⇒ 不是本插件管的渠道。
-       *    CPA 侧渠道是动态的（实测存在 kimi / mimo 等未登记渠道），
-       *    本插件只管 {@link CHANNELS} 里的四个 —— 其余一律不进路由清单，
-       *    **不靠特判渠道名**，新渠道自动被这条闸挡住。
-       * 2. `!credentialUsable(file)` ⇒ 这个号已禁用 / 已报错 / 当前不可用。
-       *    实测这类号仍会报出一批模型名，不挡掉就会顶着渠道名进清单。
-       *
-       * ⚠️ **被挡掉的渠道不算「读失败」**：它不是读不出来，是**不该出现**。
-       * 记进 `failures` 会让上层按「暂时/永远」重试或跳过，那是另一件事
-       * （见 {@link ChannelFailure}）。
-       */
-      if (channelOf(provider) === undefined) return
-      if (!credentialUsable(file)) {
+  if (!listFailed) {
+    await Promise.all(
+      files.map(async (file) => {
+        const provider = String(file?.provider ?? '')
+        if (provider === '') return
         /**
-         * ⚠️ **这里必须记下来，不能只是 `return`**（2026-10-07）。
+         * **只收「托管渠道 + 能用的号」的供给面**（2026-10-07）。
          *
-         * 被挡掉有两种后果完全不同的读法：
-         * - 当成「这个渠道没供模型」→ 清单少一块，看起来与「读残了」一模一样；
-         * - 记成「这个号**合法地**不供了」→ 上层才知道这次缩水是对的。
+         * 两条闸各治一种「有名字、用不了」：
          *
-         * 护栏（见 `refresh`）需要后者：不记的话，用户一禁用账号，
-         * 那份少了模型的清单就会被护栏判成「读残」而**永久卡在旧值上**。
+         * 1. `channelOf(provider) === undefined` ⇒ 不是本插件管的渠道。
+         *    CPA 侧渠道是动态的（实测存在 kimi / mimo 等未登记渠道），
+         *    本插件只管 {@link CHANNELS} 里的四个 —— 其余一律不进路由清单，
+         *    **不靠特判渠道名**，新渠道自动被这条闸挡住。
+         * 2. `!credentialUsable(file)` ⇒ 这个号已禁用 / 已报错 / 当前不可用。
+         *    实测这类号仍会报出一批模型名，不挡掉就会顶着渠道名进清单。
+         *
+         * ⚠️ **被挡掉的渠道不算「读失败」**：它不是读不出来，是**不该出现**。
+         * 记进 `failures` 会让上层按「暂时/永远」重试或跳过，那是另一件事
+         * （见 {@link ChannelFailure}）。
          */
-        dropped.push({ name: String(file.name), provider })
-        return
-      }
-      try {
-        const data = (await deps.gateway.fetch(
-          `/v0/management/auth-files/models?name=${encodeURIComponent(String(file.name))}`,
-          { timeoutMs: 60000 },
-        )) as { models?: unknown }
-        /**
-         * 与目录那侧**共用一份解析**（`catalogIds`）—— 上游两个端点的条目形态不同
-         * （这里是字符串数组、`/v1/models` 是 `{ id }`），但「取 id 列表」这件事只有
-         * 一个判据，抄两份必然漂。
-         *
-         * `undefined` 时交空对象：`catalogIds` 内部就是 `?? []`，与原来的
-         * `(data.models ?? [])` 逐字等价（`exactOptionalPropertyTypes` 不许
-         * 显式传 `undefined`，所以不写成 `{ data: data.models }`）。
-         */
-        const ids = catalogIds(data.models === undefined ? {} : { data: data.models as unknown[] })
-        byChannel[provider] = [...new Set([...(byChannel[provider] ?? []), ...ids])]
-      } catch (error) {
-        failures.push({
-          name: String(file.name),
-          provider,
-          kind: failureKindOf(error),
-        })
-      }
-    }),
-  )
+        if (channelOf(provider) === undefined) return
+        if (!credentialUsable(file)) {
+          /**
+           * ⚠️ **这里必须记下来，不能只是 `return`**（2026-10-07）。
+           *
+           * 被挡掉有两种后果完全不同的读法：
+           * - 当成「这个渠道没供模型」→ 清单少一块，看起来与「读残了」一模一样；
+           * - 记成「这个号**合法地**不供了」→ 上层才知道这次缩水是对的。
+           *
+           * 护栏（见 `refresh`）需要后者：不记的话，用户一禁用账号，
+           * 那份少了模型的清单就会被护栏判成「读残」而**永久卡在旧值上**。
+           */
+          dropped.push({ name: String(file.name), provider })
+          return
+        }
+        try {
+          const data = (await deps.gateway.fetch(
+            `/v0/management/auth-files/models?name=${encodeURIComponent(String(file.name))}`,
+            { timeoutMs: 60000 },
+          )) as { models?: unknown }
+          /**
+           * 与目录那侧**共用一份解析**（`catalogIds`）—— 上游两个端点的条目形态不同
+           * （这里是字符串数组、`/v1/models` 是 `{ id }`），但「取 id 列表」这件事只有
+           * 一个判据，抄两份必然漂。
+           *
+           * `undefined` 时交空对象：`catalogIds` 内部就是 `?? []`，与原来的
+           * `(data.models ?? [])` 逐字等价（`exactOptionalPropertyTypes` 不许
+           * 显式传 `undefined`，所以不写成 `{ data: data.models }`）。
+           */
+          const ids = catalogIds(
+            data.models === undefined ? {} : { data: data.models as unknown[] },
+          )
+          byChannel[provider] = [...new Set([...(byChannel[provider] ?? []), ...ids])]
+        } catch (error) {
+          failures.push({
+            name: String(file.name),
+            provider,
+            kind: failureKindOf(error),
+          })
+        }
+      }),
+    )
+  }
+
+  /**
+   * 合上 compat 渠道那一路（豆包工作这类配置型上游）。
+   *
+   * ⚠️ **失败各记各的**：`auth-files` 读失败的那一刻，compat 那一路可能读得好好的 ——
+   * 早退（第一个 `catch` 里那个 `return`）会让后者整轮作废。
+   * 反过来也一样，所以两路的 `failures` / `dropped` 在这里**并集**。
+   */
+  const compat = await readCompatChannelModels(deps)
+  for (const [channel, models] of Object.entries(compat.byChannel)) {
+    byChannel[channel] = [...new Set([...(byChannel[channel] ?? []), ...models])]
+  }
+  failures.push(...compat.failures)
+  dropped.push(...compat.dropped)
+
   return { byChannel, complete: failures.length === 0, failures, dropped }
 }
 
@@ -508,6 +659,20 @@ function invertByChannel(
 ): Record<string, string[]> {
   const out: Record<string, string[]> = {}
   for (const [channel, models] of Object.entries(byChannel)) {
+    /**
+     * ⚠️ **compat 渠道不进这张表**（2026-11-13，豆包工作接入时定）。
+     *
+     * `openai-compatibility` 的 `models[].alias` **本身就是拆分手段** ——
+     * 我们生成的别名是 `dbw/<name>`，它逐字就是客户端可见的 id。
+     * 再把它算进 `overlaps`，`patchModelAlias` 就会往 `oauth.model-alias` 里
+     * 再写一条 `name → dbw/name`，于是 CPA 对同一个别名**套两次前缀**，
+     * 目录里出现 `dbw/dbw/<name>`（实测该形态确实会生成，见
+     * `tests/route-registry.test.ts` 的「compat 渠道不进别名段」）。
+     *
+     * 识别那一侧不受影响：`aliasTableOf` 会把 compat 的 id 塞进 `knownIds`，
+     * 于是 `resolve('dbw/x')` 照样认得出来（`reverse` 是另一条循环）。
+     */
+    if (isCompatChannel(channel)) continue
     for (const raw of models) {
       if (raw === '') continue
       const bare = stripChannelPrefix(raw)
@@ -543,12 +708,22 @@ function stripChannelPrefix(id: string): string {
  *
  * `knownIds` 传**已存在于 CPA 配置里的别名**（`aliases` 段）—— 别名是持久状态，
  * 上游供给面一变就可能不再重名，只看重叠会认不出自己写过的别名（双重前缀 bug）。
+ *
+ * ⚠️ **compat 渠道的 id 也要进 `knownIds`**（2026-11-13）：它们的别名不是我们写的，
+ * 而是 `openai-compatibility` 的 `alias` 字段给的，所以既不在 `oauth.model-alias` 里、
+ * 也不会出现在 `invertByChannel` 里（那里按渠道跳过了它们）。
+ * 不塞进来的后果：`resolve('dbw/x')` 失配 → 走到 `routeOwnerOf` 的
+ * 「按凭据目录反查」分支 → 那个分支把整串 id 当裸名（`bare: id`）→
+ * **展示名变成 `dbw/x`**，且「隐藏这个模型」的勾选键与展示名口径漂开（静默）。
  */
 function aliasTableOf(
   byChannel: Readonly<Record<string, readonly string[]>>,
   existing: readonly string[],
 ): AliasTable {
-  return buildAliasTable(invertByChannel(byChannel), existing)
+  const compatIds = Object.entries(byChannel)
+    .filter(([channel]) => isCompatChannel(channel))
+    .flatMap(([, models]) => models)
+  return buildAliasTable(invertByChannel(byChannel), [...existing, ...compatIds])
 }
 
 /** 判断模型 id 归属哪个渠道：显式前缀优先，否则按凭据目录反查。 */
@@ -2165,7 +2340,24 @@ export function attachRouteRegistry(
       if (entry === undefined || entry.fiber === undefined) return
       const current = (entry.options.config ?? {}) as { providers?: Record<string, unknown> }
       const providers = current.providers ?? {}
-      const missing = CHANNEL_IDS.map((channel) => providerIdOf(channel)).filter(
+      /**
+       * 判据要问的是「**本来该在的那些行**还在不在」，所以期望集合取自
+       * `lastGood` 的分组，而不是「全部托管渠道」。
+       *
+       * ⚠️ **2026-11-13 实踩**：接上豆包工作（第五个渠道）之后，它在本机没配
+       * `base-url` ⇒ 这一轮不供模型 ⇒ **不该有行**（宿主对空 `models` 是硬错误）。
+       * 而期望集合仍是「五个渠道」时，`cpa-doubaowork` 每次都算「缺失」，
+       * 于是每次事件都重推一次 —— 幂等性直接没了，日志里还会一直报
+       * 「provider 行不见了」。**「不该有行」与「行丢了」必须分得开。**
+       *
+       * 没有历史时退回骨架清单：那时要保证的只是「适配器在」，
+       * 具体哪些渠道有模型还不知道。
+       */
+      const expected =
+        lastGood === undefined
+          ? CHANNEL_IDS.map((channel) => providerIdOf(channel))
+          : lastGood.groups.map((group) => group.id)
+      const missing = expected.filter(
         (id): id is string => id !== undefined && providers[id] === undefined,
       )
       if (missing.length === 0) return

@@ -81,6 +81,50 @@ export interface AutoCheckinPath {
   readonly field: string
 }
 
+/**
+ * 渠道的**管理面由谁提供**。
+ *
+ * 这是「一个渠道」与「一套端点」之间**唯一**需要区分的地方，也是本仓
+ * 唯一一处允许路径不落在 `/v0/management/plugins/<id>/` 的理由。
+ *
+ * | 值 | 管理面 | 凭据类型 | 谁能读供给面 |
+ * | --- | --- | --- | --- |
+ * | `plugin`（默认） | `/v0/management/plugins/<id>/*` | CPA 渠道插件写的 **auth 文件** | `/v0/management/auth-files` |
+ * | `compat` | `/v0/management/openai-compatibility` | CPA **配置**里的 OpenAI 兼容上游 | 该端点自己声明的 `models[]` |
+ *
+ * ⚠️ **两类凭据的供给面是两个不同的接口，不通用**（2026-11-13 实测）：
+ * `auth-files` 只列**文件型**凭据（返回里 `source: "file"` + 一个 `.cli-proxy-api\*.json` 的
+ * `path`），`openai-compatibility` 的 key 是配置型的，**永远不出现在那里**；
+ * 反过来 `auth-files/models?name=<任意串>` 对 compat 条目也只返回 `{"models":[]}` ——
+ * 拿它当空结果会把「这个渠道不供给模型」和「问错了接口」混成同一件事。
+ */
+export type ChannelBacking = 'plugin' | 'compat'
+
+/** 一个模型分组（`ops/accounts` 的 `models()` 交给面板的形状）。 */
+export interface ModelGroup {
+  readonly label?: unknown
+  readonly count?: number
+  readonly models: { id?: unknown; name?: unknown }[]
+}
+
+/**
+ * `/v0/management/openai-compatibility` 返回里单个上游的形状。
+ *
+ * 只声明我们真会读的字段：`name` 是渠道 join 键，`models[].alias` 是**客户端可见的
+ * 模型 id**，`disabled` 是健康度。`keys` 不出现在返回里（上游脱敏），所以
+ * **无法逐个 key 枚举账号** —— 一个上游只能当**一个**账号看。
+ */
+export interface CompatProviderPayload {
+  name?: unknown
+  disabled?: unknown
+  /** 客户端调这个上游时要求的前缀。**我们不写**（见 `channels/doubaowork.ts`）。 */
+  prefix?: unknown
+  'base-url'?: unknown
+  models?: { name?: unknown; alias?: unknown }[]
+  /** CPA 分配的路由身份，读回来只用于展示与排错。 */
+  'auth-index'?: unknown
+}
+
 /** 一个渠道的适配器。 */
 export interface ChannelSpec {
   /** 渠道 id，同时也是上游插件与 dll 的名字。 */
@@ -88,6 +132,40 @@ export interface ChannelSpec {
   readonly label: string
   /** 余额单位。zcode 是 token，**不能与其它渠道混算总额**。 */
   readonly unit: CreditUnit
+  /**
+   * 管理面由谁提供；省略即 `plugin`（沿用四个渠道插件的历史形状）。
+   *
+   * 省略是刻意的：新增 compat 渠道只写差异，四个老渠道一个字都不用改。
+   */
+  readonly backing?: ChannelBacking
+  /**
+   * 覆盖 `/accounts` 的模板路径（只有 compat 渠道需要）。
+   *
+   * ⚠️ 省略时由注册表的 `accountsPathOf` 给 `/v0/management/plugins/<id>/accounts`
+   * 那个**四渠道同构**的模板 —— 模板存在的前提是「管理面是渠道插件」，
+   * 对 compat 渠道它会 404，而 404 在面板上长成「读取失败」，
+   * 与「这个渠道没有账号」完全同形。
+   */
+  readonly accountsPath?: string
+  /** 覆盖 `/config` 的模板路径（只有 compat 渠道需要，理由同上）。 */
+  readonly configPath?: string
+  /**
+   * 从非标准 payload 里取出账号列表（只有 compat 渠道需要）。
+   *
+   * ⚠️ 省略时 `normalizeAccounts` 只认 `{accounts:[…]}` / `{results:[…]}`
+   * 两种形状 —— 那是渠道插件 `/accounts` 的两种历史返回。compat 的返回是
+   * `{openai-compatibility:[…]}`，形状对不上，硬套只会静默得到空列表。
+   */
+  readonly extractAccounts?: (payload: unknown) => AccountPayload[]
+  /**
+   * 从非标准 payload 里取出模型分组（只有 compat 渠道需要）。
+   *
+   * ⚠️ 省略时 `ops/accounts` 的 `models()` 只认 `{groups:[…]}` —— 那是
+   * `/models/groups?refresh=1` 的形状。compat 渠道的 `modelsPath` 指向
+   * `openai-compatibility`，返回里**没有 `groups`**，硬套同样只会静默得到
+   * 空列表：面板那个标签页「一个模型都不列」，而它与「这渠道确实没模型」同形。
+   */
+  readonly parseModelGroups?: (payload: unknown) => ModelGroup[]
   readonly capabilities: Capabilities
   /**
    * 同名模型的别名前缀（`wb/glm-5.3` 里的 `wb`）。
@@ -96,8 +174,14 @@ export interface ChannelSpec {
    * 与渠道的其它知识同源；分开放就会出现两处渠道清单。
    */
   readonly aliasPrefix: string
-  /** 余额接口（不带 auth_index 时一次给全部）。 */
-  readonly creditsPath: string
+  /**
+   * 余额接口（不带 auth_index 时一次给全部）。
+   *
+   * ⚠️ **省略 = 这个渠道没有余额端点**（compat 渠道）。省略时必须同时声明
+   * `capabilities.credits === false` —— 否则面板会渲染余额格却永远填不上，
+   * 那是「没给」与「读失败」同形的静默状态。
+   */
+  readonly creditsPath?: string
   /**
    * 模型目录接口。
    *

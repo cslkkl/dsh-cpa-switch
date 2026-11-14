@@ -70,7 +70,16 @@ type SetupAction =
  */
 type PluginUpdateAction =
   | { readonly phase: 'working' }
-  | { readonly phase: 'done'; readonly tag: string; readonly stopped: boolean }
+  | {
+      readonly phase: 'done'
+      readonly tag: string
+      readonly stopped: boolean
+      /**
+       * 装的是离线归档（上游不可达）→ 那一行话要说明「不是新版」。
+       * 见宿主 `setup/install.ts` 的 `offline`。
+       */
+      readonly offline: boolean
+    }
   | { readonly phase: 'error' }
   | null
 
@@ -165,7 +174,12 @@ export function Panel(props: PanelProps): ReactNode {
   const update = updateView(updateResource.data, t)
   const updateResult = updateResultLine(
     updateAction?.phase === 'done'
-      ? { ok: true, stopped: updateAction.stopped, tag: updateAction.tag }
+      ? {
+          ok: true,
+          stopped: updateAction.stopped,
+          offline: updateAction.offline,
+          tag: updateAction.tag,
+        }
       : updateAction?.phase === 'error'
         ? { ok: false }
         : null,
@@ -181,13 +195,19 @@ export function Panel(props: PanelProps): ReactNode {
   const updatePlugins = useCallback(async (): Promise<void> => {
     setUpdateAction({ phase: 'working' })
     const result = await runPluginUpdate('plugins')
-    const data = result as { tag?: unknown; stopped?: unknown; error?: unknown }
+    const data = result as {
+      tag?: unknown
+      stopped?: unknown
+      offline?: unknown
+      error?: unknown
+    }
     setUpdateAction(
       result.ok
         ? {
             phase: 'done',
             tag: typeof data.tag === 'string' ? data.tag : '',
             stopped: data.stopped === true,
+            offline: data.offline === true,
           }
         : { phase: 'error' },
     )

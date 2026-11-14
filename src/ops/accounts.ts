@@ -7,10 +7,11 @@
  * @module dsh-cpa-switch/ops/accounts
  */
 
-import { accountsPathOf, channelOf } from '../channels/registry.ts'
+import { accountsPathOf, channelOf, loginViaOf } from '../channels/registry.ts'
 import { disabledDriftOf } from '../intent-drift.ts'
 import { bareModelNameOf } from '../model-alias.ts'
 import { normalizeAccounts } from '../channels/normalize.ts'
+import type { ModelGroup } from '../channels/spec.ts'
 import { applyLedger } from '../checkin-ledger.ts'
 import { needsReloginOf } from '../relogin.ts'
 import { cacheKeys, type CpaGateway } from '../gateway.ts'
@@ -118,10 +119,17 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
 
     try {
       const accountsPath = accountsPathOf(plugin)
+      /**
+       * ⚠️ 余额端点**可能不存在**（compat 渠道没有这个接口）。
+       * 判据是「`capabilities.credits` 为真**且** spec 给了路径」，两条都成立才算有 ——
+       * 只看能力位会 fetch `undefined`，只看路径会漏掉「有端点但界面不该显示」的渠道。
+       */
+      const creditsPath = channel.creditsPath
+      const hasCredits = channel.capabilities.credits && creditsPath !== undefined
       const [base, creditData, authFilesData] = await Promise.all([
         deps.gateway.fetch(accountsPath),
-        channel.capabilities.credits
-          ? deps.gateway.fetch(channel.creditsPath).catch(() => undefined)
+        hasCredits
+          ? deps.gateway.fetch(creditsPath).catch(() => undefined)
           : Promise.resolve(undefined),
         /**
          * ⚠️ **失败就当没读到**（`.catch`）：它只服务界面上一句
@@ -184,6 +192,13 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
           label: channel.label,
           unit: channel.unit,
           capabilities: channel.capabilities,
+          /**
+           * 登录走哪条路（`cpa` / `gateway` / `none`）—— 面板据此选流程。
+           *
+           * ⚠️ 从**注册表**派生（`loginViaOf`），不在浏览器半边按渠道名分叉：
+           * 猜错的两种症状都是静默的（`provider_not_found` / `ECONNREFUSED`）。
+           */
+          loginVia: loginViaOf(channel.id),
           serverTime: baseRecord?.server_time,
           schedule: baseRecord?.schedule,
           autoCheckin: baseRecord?.checkin_auto,
@@ -204,16 +219,22 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
     if (state !== undefined) return state
 
     try {
-      const data = (await deps.gateway.fetch(channel.modelsPath)) as
-        | {
-            groups?: {
-              label?: unknown
-              count?: unknown
-              models?: { id?: unknown; name?: unknown }[]
-            }[]
-          }
-        | undefined
-      const groups = Array.isArray(data?.groups) ? data.groups : []
+      const payload = await deps.gateway.fetch(channel.modelsPath)
+      /**
+       * ⚠️ **形状由 spec 决定**（2026-11-13）：`{groups:[…]}` 只是
+       * `/models/groups?refresh=1` 那一套的形状。compat 渠道的 `modelsPath` 指向
+       * `openai-compatibility`，返回里没有 `groups` —— 硬套会静默得到空列表，
+       * 而面板上「一个模型都不列」与「这渠道确实没模型」完全同形。
+       *
+       * 所以走 `parseModelGroups` 这条 spec 钩子，与 `extractAccounts` 同一个思路：
+       * 形状知识归渠道，搬运与兜底归这里。
+       */
+      const groups: ModelGroup[] =
+        channel.parseModelGroups !== undefined
+          ? channel.parseModelGroups(payload)
+          : Array.isArray((payload as { groups?: unknown } | undefined)?.groups)
+            ? ((payload as { groups: ModelGroup[] }).groups as ModelGroup[])
+            : []
       return {
         ok: true,
         groups: groups.map((group) => ({

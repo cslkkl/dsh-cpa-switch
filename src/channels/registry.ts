@@ -19,13 +19,35 @@
  */
 
 import type { AutoCheckinPath, ChannelSpec } from './spec.ts'
+import { DOUBAOWORK } from './doubaowork.ts'
 import { QODER } from './qoder.ts'
 import { TRAE } from './trae.ts'
 import { WORKBUDDY } from './workbuddy.ts'
 import { ZCODE } from './zcode.ts'
 
-/** 托管渠道，按面板与路由的展示顺序。 */
-export const CHANNELS = [WORKBUDDY, TRAE, QODER, ZCODE] as const
+/**
+ * 托管渠道，按面板与路由的展示顺序。
+ *
+ * ⚠️ **新渠道只往末尾追加**：`channelOrder` 就是这张表的顺序，
+ * 而组顺序决定选择器里分组的先后。插在中间不会报错，只会让用户已经记住的位置
+ * 整体挪一格 —— 那是纯噪音的变更。
+ */
+export const CHANNELS = [WORKBUDDY, TRAE, QODER, ZCODE, DOUBAOWORK] as const
+
+/**
+ * **管理面是 CPA 渠道插件**的那批（`backing !== 'compat'`）。
+ *
+ * 需要它的原因：`/v0/management/plugins/<id>/*` 这套模板端点只对它们成立。
+ * compat 渠道（豆包工作）的凭据在 CPA **配置**里，不在 `auth-files`，
+ * 也没有 `/plugins/<id>/accounts` —— 任何按「插件渠道」遍历的地方都必须换成这份，
+ * 否则会打到一个必然 404 的路径上，而 404 在界面上长得像「读取失败」。
+ */
+export const PLUGIN_CHANNELS: readonly ChannelSpec[] = CHANNELS.filter(
+  (channel) => (channel as ChannelSpec).backing !== 'compat',
+)
+
+/** 这张清单的 id，按展示顺序。 */
+export const PLUGIN_CHANNEL_IDS: readonly string[] = PLUGIN_CHANNELS.map((channel) => channel.id)
 
 /** 渠道 id 的联合类型 —— **由清单推导**，不再手写一遍。 */
 export type ChannelId = (typeof CHANNELS)[number]['id']
@@ -122,6 +144,35 @@ export function channelOf(id: string): ChannelSpec | undefined {
   return CHANNEL_SPECS.find((channel) => channel.id === id)
 }
 
+/**
+ * 这个渠道的管理面是不是 `openai-compatibility`（而不是渠道插件）。
+ *
+ * 判据是 spec 的 `backing`，**不是渠道名** —— 加第二个 compat 渠道时不用改这里。
+ */
+export function isCompatChannel(id: string): boolean {
+  return channelOf(id)?.backing === 'compat'
+}
+
+/**
+ * 这个渠道「登录」走哪条路 —— 面板据此决定用哪套登录流程。
+ *
+ * | 值 | 谁发起 | 面板该做什么 |
+ * | --- | --- | --- |
+ * | `'cpa'`（默认） | CPA 的 OAuth | 起会话 + 打开授权页 + 轮询 `state` |
+ * | `'gateway'` | 那个独立网关的**独立浏览器** | 让网关起登录 + 轮询它的 `login-status` |
+ * | `'none'` | 都不支持 | 不给登录入口 |
+ *
+ * ⚠️ **不许在浏览器半边硬编渠道名去分叉**：那样加第二个 compat 渠道时一定会漏一处，
+ * 而漏的后果是「点了没反应」或「报 provider_not_found」—— 两种都不报错。
+ */
+export function loginViaOf(id: string): 'cpa' | 'gateway' | 'none' {
+  const spec = channelOf(id)
+  if (spec === undefined) return 'none'
+  // 没有登录能力就没有入口 —— 先看这一位，避免「有流程但界面不给你按」
+  if (!spec.capabilities.login) return 'none'
+  return spec.backing === 'compat' ? 'gateway' : 'cpa'
+}
+
 /** 展示名：托管渠道取 spec，非托管取登记表，都不认识就**原样透传**（不猜）。 */
 export function channelLabel(id: string): string {
   return channelOf(id)?.label ?? UNMANAGED_LABELS[id] ?? id
@@ -168,16 +219,21 @@ export function channelOfPrefix(prefix: string): string | undefined {
 /**
  * 某渠道的 `/accounts` 路径。
  *
- * 四个渠道**同构**，所以它属于注册表的模板，而不是每个 spec 各写一遍 ——
+ * 四个渠道插件**同构**，所以模板属于注册表而不是每个 spec 各写一遍 ——
  * spec 只记录**不一样**的东西。
+ *
+ * ⚠️ **`backing: 'compat'` 的渠道必须自己给 `accountsPath`**：模板的前提是
+ * 「管理面是渠道插件」，对 compat 渠道它必然 404。404 在面板上长成
+ * 「读取失败：HTTP 404」，与「这个渠道一个号都没有」**完全同形** ——
+ * 所以这里不做兜底猜测，让 spec 显式声明。
  */
 export function accountsPathOf(id: string): string {
-  return `/v0/management/plugins/${id}/accounts`
+  return channelOf(id)?.accountsPath ?? `/v0/management/plugins/${id}/accounts`
 }
 
-/** 某渠道的 `/config` 路径（同样四渠道同构）。 */
+/** 某渠道的 `/config` 路径（四个渠道插件同构；compat 渠道同理显式声明）。 */
 export function configPathOf(id: string): string {
-  return `/v0/management/plugins/${id}/config`
+  return channelOf(id)?.configPath ?? `/v0/management/plugins/${id}/config`
 }
 
 /** 写操作路径表：`渠道 -> 动作 -> 路径`。缺失的动作表示该渠道不支持。 */

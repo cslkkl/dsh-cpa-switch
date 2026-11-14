@@ -27,9 +27,9 @@
 # `source.models !== undefined` 时才传入）。骨架 + 空清单是合法状态：
 # 路由存在、模型列表暂空，插件就绪后补上。
 #
-# **为什么是四行（一个渠道一个 provider）**：模型选择器**按 provider 分组**，
+# **为什么是一个渠道一行（一个渠道一个 provider）**：模型选择器**按 provider 分组**，
 # 四个渠道原先共用一行 `cpa` —— 模型一多就是一层平铺（实测 96 行）。
-# 拆成四行之后分组常驻，重载空窗里也不会整组消失。
+# 拆开之后分组常驻，重载空窗里也不会整组消失。
 #
 # ⚠️ **这一层会被「同 id 的用户行」整行吃掉**（2026-10-19 实机）：
 # 用户 profile 的 `cordis.patch.yml` 若也写了 `- id: llm-pi-ai`（很常见 —— 有人在那里
@@ -59,5 +59,17 @@
         api: openai-completions
       cpa-zcode:
         displayName: CPA Switch · ZCode
+        apiKeyEnv: CPA_API_KEY
+        api: openai-completions
+      #
+      # ⚠️ 第五组：**豆包工作**（2026-11-13）。它不是 CPA 渠道插件，而是
+      # `openai-compatibility` 声明的一个 OpenAI 兼容上游 —— 但推给宿主的
+      # provider 骨架与其余四组**逐字同构**，因为「一个渠道一个 provider」这条
+      # 只跟渠道注册表有关，与渠道的管理面长什么样无关。
+      #
+      # 组名里的渠道展示名来自 `channels/doubaowork.ts` 的 `label`（豆包工作），
+      # 由 `tests/route-registry.test.ts` 的「骨架与推送的分组一致」钉住。
+      cpa-doubaowork:
+        displayName: CPA Switch · 豆包工作
         apiKeyEnv: CPA_API_KEY
         api: openai-completions

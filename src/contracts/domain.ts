@@ -53,6 +53,22 @@ export interface Capabilities {
   readonly autoCheckin: boolean
   readonly school: boolean
   readonly import: boolean
+  /**
+   * 面板能不能**自己发起一次登录**（`+ 添加账号` / 重新登录）。
+   *
+   * ⚠️ 它与 {@link Capabilities.import} 是**两件事**：后者是「导入一份账号 JSON」，
+   * 前者是「起一次登录会话」。
+   *
+   * ⚠️ **`true` 只说明「有这个入口」，不说明走哪条路** —— 具体走 CPA 的 OAuth
+   * 还是那个独立网关的浏览器登录，由渠道注册表的 `loginViaOf` 派生，
+   * 经 `/accounts` 的 `loginVia` 送到面板。
+   *
+   * 两件事**必须分开表达**，因为它们会分叉：compat 渠道（豆包工作）**有**登录入口
+   * （网关的独立浏览器登录），但 CPA 那边**没有**它的 OAuth provider。
+   * 2026-11-13 真机就是这么翻的车：只有一位能力位时，面板给它渲染了「添加账号」
+   * 却打到 CPA，得到 `开始登录失败：provider_not_found`。
+   */
+  readonly login: boolean
 }
 
 /** 一个额度包。字段同样按渠道能给的填，缺的为 `undefined`。 */

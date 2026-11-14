@@ -18,6 +18,7 @@ export const WORKBUDDY = {
     autoCheckin: true,
     school: true,
     import: true,
+    login: true,
   },
   aliasPrefix: 'wb',
   creditsPath: '/v0/management/plugins/workbuddy/credits',

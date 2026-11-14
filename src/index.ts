@@ -31,6 +31,9 @@ import { CpaRuntime } from './runtime.ts'
 import { CpaGateway } from './gateway.ts'
 import { createOperations } from './ops/index.ts'
 import { SetupSession } from './setup/index.ts'
+import { resolveCompatUpstreams } from './compat-upstreams.ts'
+import { createDoubaoworkGatewayClient } from './doubaowork-gateway.ts'
+import { DOUBAOWORK_ID } from './channels/doubaowork.ts'
 import { registerRoutes } from './routes.ts'
 import { buildRoutes } from './route-table.ts'
 import { isModelHidden, readHiddenModels } from './state.ts'
@@ -146,6 +149,14 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
      * 生效（重推由 `onModelsVisibilityChanged` 触发）。
      */
     isHiddenModel: (channel, bare) => isModelHidden(readHiddenModels(), channel, bare),
+    /**
+     * 用户配了 compat 渠道（豆包工作）才去读它的供给面。
+     *
+     * ⚠️ 判据是**配置里有没有 base-url**，不是「端点存不存在」：无条件去问会让
+     * 每一轮都记一条失败（老 CPA 没这个端点），而 `complete: false` 会把整份快照
+     * 判成读残 —— 症状是清单永久停在旧的一份，根因却是白问了一个接口。
+     */
+    compatChannels: () => (readConfig().doubaoworkUrl.trim() === '' ? [] : [DOUBAOWORK_ID]),
   })
 
   /**
@@ -160,6 +171,16 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     adminKey,
     /** 写配置时落 `access.api-keys`（`/v1` 鉴权）；值在 boot 第一步已备好。 */
     apiKey: () => resolveApiKey({ credentials: ctx.credentials }),
+    /**
+     * 全新安装时把 compat 上游（豆包工作）一并写进 `openai-compatibility`。
+     * 与 `boot` 的补丁路径共用 `resolveCompatUpstreams` —— 两处解析不漂。
+     */
+    compat: () =>
+      resolveCompatUpstreams({
+        readConfig,
+        credentials: ctx.credentials,
+        ...(ctx.logger === undefined ? {} : { logger: ctx.logger }),
+      }),
     logger: ctx.logger,
     /** 用户点「一键准备」成功后，CPA 可能刚被拉起 —— 立刻推模型路由。 */
     onPrepared: (trigger) => void ensureRoutesFresh(trigger).catch(() => {}),
@@ -168,6 +189,13 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
   const ops = createOperations({
     gateway,
     logger: ctx.logger,
+    /**
+     * 豆包工作网关的客户端 —— 登录域用它起独立浏览器。
+     *
+     * ⚠️ 无条件注入（哪怕用户没配这个渠道）：面板要能回答「网关在不在」，
+     * 那条读只做一次 1.5 秒的探活，不启动任何进程、不碰 CPA。
+     */
+    doubaoworkGateway: createDoubaoworkGatewayClient(),
     /** OAuth 授权完成 = 账号落盘，模型目录可能变了 —— 立即重推。 */
     onAccountsChanged: () => void ensureRoutesFresh('oauth').catch(() => {}),
     /**
