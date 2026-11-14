@@ -43,6 +43,9 @@ const CONFIG: PluginConfig = {
   reasoningEfforts: true,
   maxOutputTokens: 384000,
   startTimeoutSeconds: 30,
+  doubaoworkUrl: '',
+  doubaoworkKeyRef: 'DOUBAOWORK_API_KEY',
+  doubaoworkModels: '',
 }
 
 /** base64url(32 字节) —— 43 个字符、无 `+` / `/` / `=`，才能安全塞进 YAML 双引号串。 */

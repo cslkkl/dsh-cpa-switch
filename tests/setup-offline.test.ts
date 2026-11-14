@@ -245,6 +245,9 @@ describe('offline 从安装层一路透传到路由返回', () => {
     reasoningEfforts: true,
     maxOutputTokens: 384000,
     startTimeoutSeconds: 30,
+    doubaoworkUrl: '',
+    doubaoworkKeyRef: 'DOUBAOWORK_API_KEY',
+    doubaoworkModels: '',
   }
 
   it('⚠️ 上游 404 + 有归档 → 返回体带 offline: true 与归档里的 tag', async () => {

@@ -52,9 +52,12 @@ export interface AccountCardProps {
    * 用户点了本卡的「重新登录」。
    *
    * ⚠️ 走**渠道级**登录会话（与「添加账号」同一个），不是 per-account 的：
-   * CPA 的 `/v8/management/oauth/auth-url` 只按 provider 起会话，协议里没有
+   * CPA 那条「按 provider 要授权地址」的路由只按 provider 起会话，协议里没有
    * 「指定重登哪一个 uid」这一位。落到哪个号由**用户在授权页登录谁**决定，
    * 凭据文件名按 uid 覆盖 —— 所以这个回调**不需要**账号参数。
+   *
+   * ⚠️ 这里不写那个管理接口的路径字面量：浏览器产物断言禁止它出现，
+   * 而那条规定守的是「密钥与后台只走宿主那一侧」。
    */
   readonly onRelogin: () => void
   /**

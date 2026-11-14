@@ -46,6 +46,12 @@ export interface RenderConfigInput {
    */
   readonly pluginIds: readonly string[]
   /**
+   * OpenAI 兼容上游（compat 渠道）。省略 = 不写这一段。
+   *
+   * 见 {@link CompatUpstream} —— 豆包工作靠它接进来，理由与三条实测约束都在那里。
+   */
+  readonly compat?: readonly CompatUpstream[]
+  /**
    * 调用密钥（`/v1` 客户端鉴权用的 `CPA_API_KEY` 的**值**）。
    *
    * ⚠️ **缺它不是「无鉴权」的等价降级**：给了密钥 CPA 才会对 `/v1/*` 校验 ——
@@ -100,6 +106,101 @@ export const CONFIG_VERSION = 8
 export const STREAM_HEAD_TIMEOUT = 5
 
 /**
+ * 一个「OpenAI 兼容上游」的声明 —— `openai-compatibility` 数组里的一项。
+ *
+ * ## 为什么本仓需要这个概念
+ *
+ * 豆包工作（`channels/doubaowork.ts`）是一个**独立网关**，不是 CPA 的渠道插件
+ * （那个仓库里零 Go 代码、零 dll）。它能被 CPA 用上的唯一身份就是
+ * 「一个 OpenAI 兼容的 base-url」，而 CPA 里那个身份由这一段配置声明。
+ *
+ * ## 三条实测约束（2026-11-13 摸出来的，改之前先读）
+ *
+ * 1. **`models` 必须显式列全，CPA 不会去探测上游**。实测：省略 `models` 或写
+ *    `models: []`，`/v1/models` 里**一个条目都不会出现** —— 没有自动发现。
+ *    所以模型清单只能由我们声明。
+ * 2. **不写 `prefix`，只用 `alias`** —— 两者会**叠加**。实测 `prefix: dbw` +
+ *    `alias: dbw/x` 时目录里同时存在 `dbw/x` 与 `dbw/dbw/x`；只写 `prefix`
+ *    又会让裸名残留。现在统一「`alias` 自带 `<aliasPrefix>/`、`prefix` 留空」。
+ * 3. ⚠️ **这一整段绝不能走管理接口写**（`PUT /v0/management/openai-compatibility`）。
+ *    实测（2026-11-13，真机）：那个接口会**丢掉 `keys`**（落盘成 `keys: []`），
+ *    还把整块嵌进了相邻的顶层键（落盘成 `api-keys.openai-compatibility`，
+ *    而不是顶层键）—— 一份 CPA 下次启动不一定认得的配置。
+ *    所以只走本文件的 {@link patchOpenAiCompatibility}（与 `patchModelAlias`
+ *    同款纪律：只动一个片段、绝不重写整份文件）。
+ */
+export interface CompatUpstream {
+  /** 上游名。⚠️ **必须与渠道 spec 的 `id` 逐字相同** —— 两边靠它 join。 */
+  readonly name: string
+  /** OpenAI 兼容根地址（带 `/v1`）。 */
+  readonly baseUrl: string
+  /**
+   * 上游调用密钥的**明文**（调用方从凭据库解析后传进来）。
+   *
+   * ⚠️ 它会写进 `config.yaml`。那是 CPA 的配置，本来就只有本机可读
+   * （`server.host: 127.0.0.1`），与 `access.api-keys` 同一处置。
+   * 但它**不进本插件的任何响应**，浏览器的 `/api/v1/cpa/*` 拿不到一个字节。
+   */
+  readonly apiKey: string
+  /**
+   * 上游的模型 id（**裸名**，我们加 `<aliasPrefix>/` 前缀）。
+   *
+   * 为什么收裸名：`alias` 是**客户端可见的 id**，而我们要求它与
+   * `model-alias.ts` 的「渠道/模型」形态逐字一致（`wb/glm-5.3`、`dbw/xxx`）——
+   * 这样 `stripChannelPrefixes` 与 `bareModelNameOf` 两条既有判据直接适用。
+   */
+  readonly models: readonly string[]
+  /**
+   * 写进 `alias` 的前缀。
+   *
+   * ⚠️ **必须与渠道 spec 的 `aliasPrefix` 是同一个值**（豆包是 `dbw`）。
+   * 两处漂开的后果是静默的：CPA 目录里的 id 变成 `dbw2/xxx`，
+   * `channelOfPrefix` 认不出 `dbw2` ⇒ 归属算不出来 ⇒ 模型从选择器里消失，
+   * 且**没有任何报错**。判据在 `tests/setup-config.test.ts`。
+   */
+  readonly aliasPrefix: string
+}
+
+/**
+ * 渲染 `openai-compatibility` 段（顶层键，缩进 4 —— 与 CPA 回写后的风格一致）。
+ *
+ * @returns 整段文本；没有可用上游时返回**空串**（调用方据此不写这一段）。
+ *
+ * ⚠️ **密钥里出现引号或换行的一律跳过**：那会造出非法 YAML，而坏在**零信号**处
+ * （与 {@link patchAccessApiKeys} 同一条防注入纪律）。正常密钥是 `sk-dw-…` 形态。
+ */
+export function renderCompatYaml(upstreams: readonly CompatUpstream[], indent = ''): string {
+  const usable = upstreams.filter(
+    (upstream) => upstream.apiKey !== '' && !/["\r\n]/.test(upstream.apiKey),
+  )
+  if (usable.length === 0) return ''
+  const lines: string[] = [`${indent}openai-compatibility:`]
+  for (const upstream of usable) {
+    /**
+     * ⚠️ `name` **必须加引号**：YAML 1.1 里裸写的 `on` / `off` / `yes` / `no` / `null`
+     * 会被解析成布尔或空值（go-yaml 同样认这套）。现在的渠道名都是普通词，
+     * 但这属于「今天不会错、加个上游就静默错」的那类坑 —— 引号是零成本的。
+     */
+    lines.push(`${indent}    - name: "${upstream.name}"`)
+    lines.push(`${indent}      base-url: "${upstream.baseUrl}"`)
+    lines.push(`${indent}      keys:`)
+    lines.push(`${indent}          - api-key: "${upstream.apiKey}"`)
+    /**
+     * 空清单时**整段省略**：`models: []` 与不写产出的模型数一样（都是 0），
+     * 但省略能让「还没配模型」在配置里一眼可见，而不是伪装成「配了却没生效」。
+     */
+    if (upstream.models.length > 0) {
+      lines.push(`${indent}      models:`)
+      for (const model of upstream.models) {
+        lines.push(`${indent}          - name: "${model}"`)
+        lines.push(`${indent}            alias: "${upstream.aliasPrefix}/${model}"`)
+      }
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
  * 从 YAML 文本里取顶层的 `config-version`。
  *
  * 只做朴素正则，不引 YAML 解析器（插件保持零依赖）：目标行是**顶格**的
@@ -142,6 +243,14 @@ export function renderConfig(input: RenderConfigInput): string {
       ...(id === 'workbuddy' ? [`      stream_head_timeout: ${String(STREAM_HEAD_TIMEOUT)}`] : []),
     ])
   const aliasBlock = input.aliases === undefined ? [] : renderAliasYaml(input.aliases).split('\n')
+  /**
+   * compat 上游段。**顶层键** —— 与 `oauth` / `plugins` 平级。
+   *
+   * ⚠️ 别让它落进别的段里（实测管理接口就是这么把它嵌进 `api-keys` 的）：
+   * 嵌错一层的配置 CPA 下次启动**不一定认得**，且不会有任何提示。
+   */
+  const compatYaml = renderCompatYaml(input.compat ?? [])
+  const compatBlock = compatYaml === '' ? [] : ['', ...compatYaml.split('\n')]
   const accessBlock =
     typeof input.apiKey === 'string' && input.apiKey !== ''
       ? ['', 'access:', '  api-keys:', `    - "${input.apiKey}"`]
@@ -167,6 +276,7 @@ export function renderConfig(input: RenderConfigInput): string {
     '  dir: "plugins"',
     '  configs:',
     ...channelLines,
+    ...compatBlock,
     '',
   ].join('\n')
 }
@@ -210,6 +320,67 @@ export function patchModelAlias(aliases: AliasTable): boolean {
     .replace(existing, '')
     .replace(OAUTH_HEAD, `oauth:\n${renderAliasYaml(aliases)}`)
   return writeConfig(patched)
+}
+
+/**
+ * 把 `openai-compatibility` 段补写进**已有**的配置。
+ *
+ * 为什么需要单独一条路：{@link renderConfig} 只在「配置文件不存在」时写 ——
+ * 已经跑过一次的机器（以及被 CPA 回写过整份缩进的配置）里没有这一段，
+ * 于是 compat 渠道永远接不进来。
+ *
+ * ## 三种形状三种处置
+ *
+ * - **没有这一段** → 在文件尾追加（顶格键在哪都合法，尾追加最不容易碰坏既有段）；
+ * - **已有这一段** → **整段替换**（这一段完全由我们生成，含密钥，不像
+ *   `api-keys` 那样是用户的清单）—— 但只有内容真的不同才写盘，避免每次启动都动文件；
+ * - **有多条同名的奇怪形状** → 按「整段替换」处理，顺带把重复的清掉。
+ *
+ * ⚠️ 与 `patchModelAlias` / `patchServerHost` / `patchAccessApiKeys` 同款纪律：
+ * 只动一个片段、**绝不重写整份文件**（那会连密钥哈希带注释一起冲掉）。
+ *
+ * ⚠️ **调用时机必须是「CPA 未运行时」**：CPA 运行中持有该文件且保存时会回写，
+ * 运行中改它与它抢写是竞态。
+ *
+ * ⚠️ **为什么不走管理接口**：实测 `PUT /v0/management/openai-compatibility`
+ * 会丢掉 `keys` 并把整块嵌进相邻的顶层键（见 {@link CompatUpstream} 第 3 条）。
+ *
+ * @param upstreams - 要写的上游清单；空数组时**删除整段**（用户关掉了这个渠道）。
+ * @returns 是否真的改写了文件。
+ */
+export function patchOpenAiCompatibility(upstreams: readonly CompatUpstream[]): boolean {
+  const rendered = renderCompatYaml(upstreams)
+  let content: string
+  try {
+    content = readFileSync(managedConfigPath(), 'utf8')
+  } catch {
+    return false
+  }
+
+  const lines = content.split('\n')
+  /** 段的范围：从 `openai-compatibility:` 行到下一个**顶格**键（列 0 的非注释行）或文件尾。 */
+  const head = lines.findIndex((line) => /^openai-compatibility:[ \t]*$/u.test(line))
+  const stripped =
+    head === -1
+      ? content
+      : (() => {
+          let end = lines.length
+          for (let i = head + 1; i < lines.length; i++) {
+            if (/^[^\s#]/.test(lines[i] ?? '')) {
+              end = i
+              break
+            }
+          }
+          /** 连它前面那个空行一起去掉，避免反复补写时越积越多空行。 */
+          let from = head
+          if (from > 0 && (lines[from - 1] ?? '').trim() === '') from -= 1
+          return [...lines.slice(0, from), ...lines.slice(end)].join('\n')
+        })()
+
+  const base = stripped.endsWith('\n') ? stripped.slice(0, -1) : stripped
+  const next = rendered === '' ? `${base}\n` : `${base}\n${rendered}\n`
+  if (next === content) return false
+  return writeConfig(next)
 }
 
 /**

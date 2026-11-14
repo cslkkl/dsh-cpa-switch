@@ -38,6 +38,7 @@ export const TRAE = {
     autoCheckin: false,
     school: false,
     import: false,
+    login: true,
   },
   aliasPrefix: 'trae',
   creditsPath: '/v0/management/plugins/trae/credits',

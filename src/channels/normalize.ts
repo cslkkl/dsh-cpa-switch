@@ -78,11 +78,21 @@ export function normalizeAccounts(
 
   const payload = accountsPayload as
     { accounts?: AccountPayload[]; results?: AccountPayload[] } | undefined
-  const rawList = Array.isArray(payload?.accounts)
-    ? payload.accounts
-    : Array.isArray(payload?.results)
-      ? payload.results
-      : []
+  /**
+   * `extractAccounts` 只给**形状对不上**的渠道（compat）用；省略时走两条历史形状。
+   *
+   * ⚠️ 顺序是「spec 优先」而不是「先试两条形状再兜底」：compat 的返回里根本
+   * 没有 `accounts` / `results` 键，硬试只会静默得到空数组 —— 而空数组在面板上
+   * 与「这个渠道没有号」同形，看不出是读错了地方。
+   */
+  const rawList =
+    channel.extractAccounts !== undefined
+      ? channel.extractAccounts(accountsPayload)
+      : Array.isArray(payload?.accounts)
+        ? payload.accounts
+        : Array.isArray(payload?.results)
+          ? payload.results
+          : []
 
   return rawList.map((account) => {
     const credit = creditsMap.get(account.auth_index)

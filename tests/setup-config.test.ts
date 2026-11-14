@@ -8,9 +8,11 @@ import {
   CONFIG_VERSION,
   looksLikeBcrypt,
   patchAccessApiKeys,
+  patchOpenAiCompatibility,
   patchServerHost,
   patchStreamHeadTimeout,
   readConfigVersion,
+  renderCompatYaml,
   renderConfig,
 } from '../src/setup/config.ts'
 
@@ -651,5 +653,191 @@ describe('patchStreamHeadTimeout', () => {
     seed(inline)
     expect(patchStreamHeadTimeout()).toBe(false)
     expect(readFileSync(configPath(), 'utf8')).toBe(inline)
+  })
+})
+
+/**
+ * `openai-compatibility` 段 —— **compat 渠道（豆包工作）唯一的接入面**。
+ *
+ * 2026-11-13 把豆包工作接进来时立。那个上游是一个独立 Node 网关，
+ * 不可能长成 CPA 渠道插件，所以只能靠这一段配置声明成 OpenAI 兼容上游。
+ *
+ * ## 这组判据挡的是四条**静默**失效
+ *
+ * 1. **`models` 必须显式列全**：实测省略或空数组时 CPA **一个模型都不注册**
+ *    （它不会去探测上游）。所以「写了这一段」不等于「模型会出现」。
+ * 2. **不写 `prefix`**：与 `alias` 叠加会产出 `dbw/dbw/x` 这种双前缀 id。
+ * 3. **别名前缀必须与渠道 spec 的 `aliasPrefix` 逐字相同**：`channelOfPrefix`
+ *    靠它反查归属，漂了就是「模型进了目录却从选择器里消失」。
+ * 4. **绝不嵌进别的顶层段**：实测管理接口会把它写成 `api-keys.openai-compatibility`，
+ *    那种配置 CPA 下次启动不一定认得。
+ */
+describe('openai-compatibility 段', () => {
+  let home: string
+  const configPath = (): string => join(home, 'cpa-panel', 'runtime', 'cpa', 'config.yaml')
+
+  beforeEach(() => {
+    home = mkdtemp()
+    mkdirSync(join(home, 'cpa-panel', 'runtime', 'cpa'), { recursive: true })
+  })
+  afterEach(() => {
+    delete process.env.DSH_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  function mkdtemp(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'cpa-setup-compat-'))
+    process.env.DSH_HOME = dir
+    return dir
+  }
+
+  const BASE = ['config-version: 8', 'server:', '  port: 8317', ''].join('\n')
+  const seed = (content: string): void => {
+    writeFileSync(configPath(), content, 'utf8')
+  }
+
+  const UPSTREAM = {
+    name: 'doubaowork',
+    baseUrl: 'http://127.0.0.1:43861/v1',
+    apiKey: 'sk-dw-abcdefghijklmnop',
+    models: ['doubao-seed-2.1-pro', 'doubao-seed-evolving'],
+    aliasPrefix: 'dbw',
+  } as const
+
+  describe('renderCompatYaml', () => {
+    it('写的是顶层键，不是嵌进别的段', () => {
+      const yaml = renderCompatYaml([UPSTREAM])
+      expect(yaml.split('\n')[0]).toBe('openai-compatibility:')
+    })
+
+    it('模型逐个列出，alias = <前缀>/<裸名>（prefix 一律不写）', () => {
+      const yaml = renderCompatYaml([UPSTREAM])
+      expect(yaml).toContain('- name: "doubaowork"')
+      expect(yaml).toContain('- name: "doubao-seed-2.1-pro"')
+      expect(yaml).toContain('alias: "dbw/doubao-seed-2.1-pro"')
+      expect(yaml).toContain('alias: "dbw/doubao-seed-evolving"')
+      // ⚠️ prefix 与 alias 叠加会产出双前缀 —— 一个字都不许写
+      expect(yaml).not.toContain('prefix:')
+    })
+
+    it('⚠️ 上游名带引号（YAML 1.1 里 on/off/yes/null 裸写会变成布尔或空值）', () => {
+      const yaml = renderCompatYaml([{ ...UPSTREAM, name: 'on' }])
+      expect(yaml).toContain('- name: "on"')
+    })
+
+    it('密钥与 base-url 都写进去了（否则 CPA 连不上上游）', () => {
+      const yaml = renderCompatYaml([UPSTREAM])
+      expect(yaml).toContain('api-key: "sk-dw-abcdefghijklmnop"')
+      expect(yaml).toContain('base-url: "http://127.0.0.1:43861/v1"')
+    })
+
+    it('模型清单为空时整段省略 models（不伪装成「配了却没生效」）', () => {
+      const yaml = renderCompatYaml([{ ...UPSTREAM, models: [] }])
+      expect(yaml).toContain('keys:')
+      expect(yaml).not.toContain('models:')
+    })
+
+    it('密钥为空 / 含引号 / 含换行 → 整条跳过（不写非法 YAML）', () => {
+      for (const apiKey of ['', 'sk-"abc', 'sk-\nabc']) {
+        expect(renderCompatYaml([{ ...UPSTREAM, apiKey }])).toBe('')
+      }
+    })
+
+    it('没有上游时返回空串', () => {
+      expect(renderCompatYaml([])).toBe('')
+    })
+  })
+
+  describe('⚠️ 别名前缀与渠道 spec 必须同源', () => {
+    /**
+     * 这是整条链最脆的一处：两处各写一次前缀，漂开**不报错**，
+     * 只是模型从选择器里消失（`channelOfPrefix` 认不出 ⇒ 归属算不出来）。
+     * 所以判据直接读 spec，而不是抄一个字面量。
+     */
+    it('写进 alias 的前缀 = 渠道 spec 的 aliasPrefix', async () => {
+      const { aliasPrefixOf } = await import('../src/channels/registry.ts')
+      expect(aliasPrefixOf(UPSTREAM.name)).toBe(UPSTREAM.aliasPrefix)
+      const yaml = renderCompatYaml([UPSTREAM])
+      expect(yaml).toContain(`alias: "${aliasPrefixOf(UPSTREAM.name)}/`)
+    })
+  })
+
+  describe('patchOpenAiCompatibility', () => {
+    it('配置里没有这一段时，追加到文件尾', () => {
+      seed(BASE)
+      expect(patchOpenAiCompatibility([UPSTREAM])).toBe(true)
+      const after = readFileSync(configPath(), 'utf8')
+      expect(after).toContain('openai-compatibility:')
+      expect(after).toContain('doubaowork')
+      // 追加在**文件尾**且是顶格键 —— 不是某个段的子键
+      const lines = after.split('\n')
+      expect(lines.findIndex((line) => line === 'openai-compatibility:')).toBeGreaterThan(
+        lines.findIndex((line) => line === 'server:'),
+      )
+    })
+
+    it('已有这一段时整段替换，不留重复键（重复 = YAML 静默只留一个）', () => {
+      seed(BASE)
+      patchOpenAiCompatibility([UPSTREAM])
+      patchOpenAiCompatibility([{ ...UPSTREAM, models: ['only-one'] }])
+      const after = readFileSync(configPath(), 'utf8')
+      const heads = after.split('\n').filter((line) => line === 'openai-compatibility:')
+      expect(heads).toHaveLength(1)
+      expect(after).toContain('only-one')
+      expect(after).not.toContain('doubao-seed-2.1-pro')
+    })
+
+    it('空清单 = 删除整段（用户在设置里关掉这个渠道）', () => {
+      seed(BASE)
+      patchOpenAiCompatibility([UPSTREAM])
+      expect(patchOpenAiCompatibility([])).toBe(true)
+      expect(readFileSync(configPath(), 'utf8')).not.toContain('openai-compatibility')
+    })
+
+    it('内容没变时不写盘（每次启动都动文件是纯噪音）', () => {
+      seed(BASE)
+      expect(patchOpenAiCompatibility([UPSTREAM])).toBe(true)
+      expect(patchOpenAiCompatibility([UPSTREAM])).toBe(false)
+    })
+
+    it('⚠️ 绝不碰其它段（密钥哈希、plugins、oauth 一个字节不动）', () => {
+      const withOthers = [
+        'config-version: 8',
+        'management:',
+        '  secret-key: "$2a$10$hashed"',
+        'plugins:',
+        '  enabled: true',
+        '',
+      ].join('\n')
+      seed(withOthers)
+      patchOpenAiCompatibility([UPSTREAM])
+      const after = readFileSync(configPath(), 'utf8')
+      expect(after).toContain('secret-key: "$2a$10$hashed"')
+      expect(after).toContain('  enabled: true')
+    })
+
+    it('配置文件不存在时不创建（全新安装路径由 renderConfig 负责）', () => {
+      expect(patchOpenAiCompatibility([UPSTREAM])).toBe(false)
+      expect(() => readFileSync(configPath(), 'utf8')).toThrow()
+    })
+  })
+
+  describe('renderConfig 带上 compat 段', () => {
+    it('全新安装时就把这一段写进去，且是顶层键', () => {
+      const yaml = renderConfig({
+        port: 8317,
+        secretKey: 'x',
+        pluginIds: ['workbuddy'],
+        compat: [UPSTREAM],
+      })
+      expect(yaml).toContain('openai-compatibility:')
+      // 顶格：前面没有缩进（嵌进别的段是错的，实测管理接口就干过这事）
+      expect(yaml.split('\n').some((line) => line === 'openai-compatibility:')).toBe(true)
+    })
+
+    it('不传 compat 时一个字都不写', () => {
+      const yaml = renderConfig({ port: 8317, secretKey: 'x', pluginIds: ['workbuddy'] })
+      expect(yaml).not.toContain('openai-compatibility')
+    })
   })
 })

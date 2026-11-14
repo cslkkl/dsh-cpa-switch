@@ -55,6 +55,34 @@ export const Config = z.object({
    */
   maxOutputTokens: z.natural().max(1_000_000).default(384_000).volatile(),
   startTimeoutSeconds: z.natural().min(3).max(180).default(30).volatile(),
+  /**
+   * 豆包工作网关的 OpenAI 兼容根地址。空串 = **不接这个渠道**。
+   *
+   * 它是[独立的 Node 网关](https://github.com/3294798852/doubao-work-gateway)，
+   * 由用户自己起（`npm start`，默认模型口 43861）。本插件**不托管那个进程** ——
+   * 起停归它自己的 launcher，我们只把它的 base-url 声明成一个 compat 上游
+   * （见 `channels/doubaowork.ts` 与 `setup/config.ts` 的 `CompatUpstream`）。
+   */
+  doubaoworkUrl: z.string().default('').volatile(),
+  /**
+   * 上面那个网关的调用密钥的**凭据引用**（不是明文 —— 明文永不进配置表单）。
+   *
+   * 密钥本身由用户放进 DSH 凭据库（或同名环境变量）；本插件在写 CPA 配置时
+   * 解析它、写进 `config.yaml` 的 `openai-compatibility[].keys[].api-key`。
+   * 判据：`tests/setup-config.test.ts` 的「密钥不进响应」。
+   */
+  doubaoworkKeyRef: z.string().role('credential-ref').default('DOUBAOWORK_API_KEY').volatile(),
+  /**
+   * 上游模型 id 清单（逗号或换行分隔，**裸名**）。
+   *
+   * ⚠️ **必须手填，且没有自动发现**（2026-11-13 实测）：CPA 的
+   * `openai-compatibility` 不会去探测上游的 `/v1/models` —— 省略 `models` 或写空
+   * 数组时，`/v1/models` 里**一条都不会出现**。所以清单只能由这里给。
+   *
+   * 取值来源：那个网关自己的 `GET /v1/models`（面板「接口接入」里也能看到）。
+   * 前缀由插件加（`dbw/`），这里**只写裸名**。
+   */
+  doubaoworkModels: z.string().default('').volatile(),
 })
 
 /** 配置读取面：每个字段一个 `get()`。 */
@@ -69,6 +97,9 @@ export interface ConfigRefs {
   reasoningEfforts: { get: () => boolean }
   maxOutputTokens: { get: () => number }
   startTimeoutSeconds: { get: () => number }
+  doubaoworkUrl: { get: () => string }
+  doubaoworkKeyRef: { get: () => string }
+  doubaoworkModels: { get: () => string }
 }
 
 /** 从 `ConfigRefs` 的一个字段取出它的值类型。 */
@@ -104,5 +135,8 @@ export function makeReadConfig(refs: ConfigRefs): () => PluginConfig {
     reasoningEfforts: refs.reasoningEfforts.get(),
     maxOutputTokens: refs.maxOutputTokens.get(),
     startTimeoutSeconds: refs.startTimeoutSeconds.get(),
+    doubaoworkUrl: refs.doubaoworkUrl.get(),
+    doubaoworkKeyRef: refs.doubaoworkKeyRef.get(),
+    doubaoworkModels: refs.doubaoworkModels.get(),
   })
 }

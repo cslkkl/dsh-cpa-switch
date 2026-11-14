@@ -43,6 +43,17 @@ export interface EmptyHintInput {
   readonly error: string | undefined
   /** 已读到的账号数。 */
   readonly count: number
+  /**
+   * 这个渠道能不能在面板里**自己发起登录**（`capabilities.login`）。
+   *
+   * ⚠️ 不能的话**必须换一句话**：原来的引导句是「点下面的『添加账号』，
+   * 在浏览器里完成登录即可」—— 而对 compat 渠道（豆包工作）那个按钮根本不该存在
+   * （它不经过 CPA 登录，账号在它自己的网关里登）。指着一个没有的按钮说
+   * 「点它」，比什么都不说更糟（2026-11-13 真机截图）。
+   *
+   * 省略按 `true` 处理：老调用点与四个插件渠道的行为一个字不变。
+   */
+  readonly canLogin?: boolean
 }
 
 /** 空渠道该怎么说话。 */
@@ -71,8 +82,17 @@ export function emptyHintOf(input: EmptyHintInput): EmptyHint | undefined {
 
   return {
     title: input.t('emptyNoAccounts'),
-    // 引导句里的按钮名取自文案表，不在文案里硬编「添加账号」——
-    // 按钮改了名，这句话得跟着改（`{action}` 占位符）
-    hint: input.t('emptyNoAccountsHint', { action: input.t('addAccount') }),
+    ...(input.canLogin === false
+      ? /**
+         * compat 渠道：没有「添加账号」那个按钮，所以**不能**指着它说话。
+         * 这句给出真实的那条路（在网关里登录 + 在本插件设置里填三项），
+         * 而不是让用户在一张空页签上找不到北。
+         */
+        { hint: input.t('emptyNoAccountsNoLoginHint') }
+      : {
+          // 引导句里的按钮名取自文案表，不在文案里硬编「添加账号」——
+          // 按钮改了名，这句话得跟着改（`{action}` 占位符）
+          hint: input.t('emptyNoAccountsHint', { action: input.t('addAccount') }),
+        }),
   }
 }
