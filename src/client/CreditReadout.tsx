@@ -25,6 +25,15 @@
  *    「没有上限」不是一个数，旁边挂一个合计会被读成「你还有这么多」。
  * 4. **数据只走本仓自己的 `use-resource.ts` / `read-cache.ts`**（键
  *    `accounts:<渠道>`，与面板**同一份缓存**：面板挂载时已预取四渠道）。
+ * 5. **漂移号按「禁用」算**（`/accounts` 的 `intentDrift`）：那是「用户禁用过、
+ *    上游额度生命周期却把它重新启用」的号。不排除它们的话，漂移窗口里这个读数
+ *    会把**上游偷偷打开的那些号**加进来 —— 用户看到「我只开了一个号，怎么是整个
+ *    渠道的总和」，打开面板修回去之后又变正常（2026-11-14 真机）。
+ *    口径与面板开关**同一条**（`drift-view.ts` 的 `pinnedDisabled`）：用户的选择
+ *    优先于上游那一份读数。
+ * 6. **别人读到的新值必须看得见**（`use-resource.ts` 的 `held.at`）：对话界面这个
+ *    座位**一直挂着**、不会因为面板刷新而重挂，所以「只在挂载时读一次」的写法会让
+ *    它永远停在那一刻的数上。判据在 `tests/read-cache.test.ts`。
  *
  * ⚠️ **绝不用宿主 standard props 里的 `useResource`**：它只认 `dsh-resource://`
  * scheme、读的是 client 包注册的**帧流**，根本不发 HTTP —— 拿它读本插件自己的
@@ -44,7 +53,7 @@
 
 import type { ReactNode } from 'react'
 import { useCallback, useSyncExternalStore } from 'react'
-import { balanceAccountsOf, balanceViewOf } from './channel-balance.ts'
+import { balanceAccountsOf, balanceViewOf, type BalancePayload } from './channel-balance.ts'
 import {
   channelEntryOf,
   channelIndexOf,
@@ -129,13 +138,13 @@ export function CreditReadout(props: CreditReadoutProps): ReactNode {
  * hook 不能写在条件分支里，而「这个渠道的余额」这件事本来就只有认出来才有意义。
  */
 function ChannelBalance({ channel, t }: { channel: ChannelEntry; t: Translate }): ReactNode {
-  const accounts = useResource<readonly unknown[]>({
+  const accounts = useResource<BalancePayload>({
     key: cacheKeys.accounts(channel.id),
     path: paths.accounts(channel.id),
     select: balanceAccountsOf,
   })
 
-  const balance = balanceViewOf(accounts.data)
+  const balance = balanceViewOf(accounts.data?.accounts, accounts.data?.drift)
   // 还没读到 / 读残了 / 一个启用的号都没凑出来：空着，**不画 0**（见模块头）。
   if (balance.kind === 'unknown') return null
 

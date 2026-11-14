@@ -26,6 +26,22 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { cachedGet, readCache, type CachedValue } from './read-cache.ts'
 import type { ApiResult } from './transport.ts'
 
+/**
+ * 组件手里的那一份值，**连同它的归属与年龄**。
+ *
+ * `at` 不是装饰：同一个 key 可能被**多个挂载点**读（面板、对话界面的读数、
+ * 预取），而它们各有各的 `held`。判「该显示哪一个」必须按**时间**比，
+ * 否则先挂上来的那个实例会拿自己那份永不更新的值压住别人读到的新值 ——
+ * 表现是「面板已经刷新了，输入栏那个数还是旧的」（2026-11-14 真机：
+ * 读数只在挂载那一刻读一次，之后一辈子不再变）。
+ */
+export interface Held<T> {
+  readonly key: string
+  readonly value: T
+  /** 这份值读到的时刻（`Date.now()` 口径）；与缓存条目的 `at` 同一把尺子。 */
+  readonly at: number
+}
+
 /** 一个异步资源的对外形状。 */
 export interface Resource<T> {
   /** 最近一次**成功**读到的值。还没成功过是 `undefined`。 */
@@ -84,7 +100,7 @@ export function useResource<T>(options: UseResourceOptions<T>): Resource<T> {
    * 它就是取消 `key` 的代价：跨渠道的状态必须**自己认领归属**。
    * 这里同时兜住「缓存过期被丢掉」的情况（超出 stale 窗口后仍显示最后读到的值）。
    */
-  const [held, setHeld] = useState<{ key: string; value: T } | undefined>(undefined)
+  const [held, setHeld] = useState<Held<T> | undefined>(undefined)
   /**
    * 错误同样**带 key**：切渠道后上一个渠道的报错不该继续显示在当前页签上
    * （那会让人以为「trae 读失败了」，而它其实一次都没试过）。
@@ -142,6 +158,15 @@ export function useResource<T>(options: UseResourceOptions<T>): Resource<T> {
         force: options2.force === true,
       })
 
+      /**
+       * 这份值「读到的时刻」—— 与缓存条目的 `at` 同一把尺子（见 {@link Held}）。
+       *
+       * ⚠️ 取 `await` **之后**的时刻：`cachedGet` 可能是命中（刚刚就拿到了）也可能是
+       * 真发了一次请求，两种都算「这一刻我们手里有它」。取 `await` 之前的时刻会让
+       * 一次慢请求的值比它之后落地的那份缓存**看起来更旧**，于是被别人盖掉。
+       */
+      const readAt = Date.now()
+
       // 迟到的旧响应：不许覆盖更新的数据
       if (!mounted.current || mine !== seq.current) return
 
@@ -171,7 +196,7 @@ export function useResource<T>(options: UseResourceOptions<T>): Resource<T> {
         return
       }
 
-      setHeld({ key, value: picked })
+      setHeld({ key, value: picked, at: readAt })
       setHeldError(undefined)
       setPending(false)
     },
@@ -238,10 +263,21 @@ export function useResource<T>(options: UseResourceOptions<T>): Resource<T> {
    * 所以「有值可看」这件事必须**越过缓存条目本身的生命周期**：谁被渲染过，
    * 谁就进 `held`。之后任何作废都只是「下次读要打网络」，不再清屏。
    *
-   * ## 只在 `held` 缺失时采纳
+   * ## 采纳的判据是「缓存那份更新」，不是「held 空着」
    *
-   * `held` 里的值来自**最近一次成功的读**，比缓存新（缓存可能正是它写进去的）。
-   * 覆盖它会把刚读到的值退回旧值 —— 那正是「数字自己跳回去」，只是换了个入口。
+   * 原先只在 `held` 缺失时采纳，理由是「`held` 比缓存新」。那句话只在**同一个
+   * 实例**里成立：同一个 key 会被多处同时读（面板、对话界面的余额读数、预取），
+   * 而每个实例各有各的 `held`。写成「空着才采纳」的直接后果是 ——
+   * **先挂上来的那个实例永远看不见别人读到的新值**：
+   *
+   * - 对话界面的读数在页面加载那一刻挂上，之后 composer 一直挂着不重挂；
+   * - 面板在它之后才挂、才修漂移、才重读，读到的新值进了缓存；
+   * - 读数那一侧的 `held` 还在，于是**一直画着页面加载那一刻的旧数**，
+   *   直到用户离开面板（读数座位随之重挂）才变对。
+   *
+   * 真机表现就是「输入栏那个数字有时对、有时是把整个渠道加起来，从面板返回就正常」
+   * （2026-11-14）。所以改成**比时间**：缓存那份更新就采纳，一样新就不动
+   * （`>=` 让采纳之后的那一帧立刻稳定，不会自己跟自己反复拉扯）。
    */
   useEffect(() => {
     const adopted = adoptedValue({
@@ -266,18 +302,20 @@ export function useResource<T>(options: UseResourceOptions<T>): Resource<T> {
 }
 
 /**
- * 「渲染哪个值」的判据：**两个来源都按 key 认领**。
+ * 「渲染哪个值」的判据：**两个来源都按 key 认领，按时间取新**。
  *
  * - `held`（上一次成功读到的值）只在还是同一个 key 时才算数 ——
  *   组件不随 key 重挂载，切渠道后它还揣着上一个渠道的数据；
  * - 缓存天然带 key（key 就是查询的一部分），但**只认成功的那一份**；
- * - `held` 认领成功时优先于缓存 —— 它是最新的成功值。
+ * - 两边都算数时**比 `at`**：缓存那份更新就用缓存。这是「同一份数据被多处读」
+ *   的必备条件 —— 否则先挂上来的实例会拿自己那份永不更新的值压住别人读到的新值
+ *   （见 `useResource` 里那段「采纳的判据是缓存那份更新」）。
  *
- * 抽出来是因为它是「切渠道串数据」与「切渠道闪一帧」两条要求的全部判定 ——
- * 埋在 hook 里就只能靠手抄一份来测（那时被测的其实是抄的那份）。
+ * 抽出来是因为它是「切渠道串数据」「切渠道闪一帧」「别处读到的新值要看得见」
+ * 三条要求的全部判定 —— 埋在 hook 里就只能靠手抄一份来测（那时被测的其实是抄的那份）。
  */
 export function shownValue<T>(args: {
-  readonly held: { readonly key: string; readonly value: T } | undefined
+  readonly held: Held<T> | undefined
   readonly cached: CachedValue<ApiResult> | undefined
   readonly key: string
   /** 从**成功**响应里取要渲染的部分；失败的那份由这里挡掉。 */
@@ -285,9 +323,11 @@ export function shownValue<T>(args: {
 }): T | undefined {
   const hit = args.cached
   const fromCache = hit === undefined || !hit.value.ok ? undefined : args.select(hit.value)
-  const fromHeld =
-    args.held !== undefined && args.held.key === args.key ? args.held.value : undefined
-  return fromHeld ?? fromCache
+  const held = args.held !== undefined && args.held.key === args.key ? args.held : undefined
+  if (held === undefined) return fromCache
+  // 缓存那份更新 → 用它（别处刚读到的新值必须看得见）
+  if (fromCache !== undefined && hit !== undefined && hit.at > held.at) return fromCache
+  return held.value
 }
 
 /**
@@ -296,24 +336,30 @@ export function shownValue<T>(args: {
  * 三条都不满足就什么都不做（返回 `undefined`），于是调用方的 effect 不会白写：
  *
  * - **缓存里没有 / 那份是失败的** —— 没东西可采纳；
- * - **`held` 已经认领当前 key** —— 它比缓存新，采纳等于把新值退回旧值；
+ * - **缓存不比手里的新**（`hit.at <= held.at`）—— 采纳等于把新值退回旧值；
  * - **`select` 认不出这份响应** —— 不在渲染阶段抛，也不采纳一个坏值。
  *
  * 为什么必须存在这一条（而不是只在 `reload` 里写 `held`）：缓存能在**别处**
- * 被填满（面板预取、另一个挂载点），那时 `held` 还是空的 —— 于是下一次
- * 写操作作废缓存时，界面没有可退回的值，直接闪回骨架。见 `useResource` 里那段说明。
+ * 被填满（面板预取、另一个挂载点、面板修完漂移后的重读），那时 `held` 还是空的
+ * 或者更旧 —— 于是界面要么闪回骨架，要么**永远停在旧值上**（2026-11-14 真机：
+ * 对话界面的余额读数只在挂载那一刻读一次）。见 `useResource` 里那段说明。
+ *
+ * ⚠️ 采纳之后 `at` 必须**原样带过来**（不是 `Date.now()`）：它就是缓存那边的
+ * 时刻，改成就等于把旧值伪装成新的，下次比时间就永远不再采纳。
  */
 export function adoptedValue<T>(args: {
-  readonly held: { readonly key: string; readonly value: T } | undefined
+  readonly held: Held<T> | undefined
   readonly cached: CachedValue<ApiResult> | undefined
   readonly key: string
   readonly select: (result: ApiResult) => T | undefined
-}): { readonly key: string; readonly value: T } | undefined {
-  if (args.held !== undefined && args.held.key === args.key) return undefined
+}): Held<T> | undefined {
   const hit = args.cached
   if (hit === undefined || !hit.value.ok) return undefined
+  if (args.held !== undefined && args.held.key === args.key && args.held.at >= hit.at) {
+    return undefined
+  }
   const picked = args.select(hit.value)
-  return picked === undefined ? undefined : { key: args.key, value: picked }
+  return picked === undefined ? undefined : { key: args.key, value: picked, at: hit.at }
 }
 
 /** 从宿主响应里取要渲染的部分；失败返回 `undefined`（不抛给渲染阶段）。 */
