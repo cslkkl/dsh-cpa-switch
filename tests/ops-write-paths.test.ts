@@ -352,6 +352,59 @@ describe('漂移恢复写的是「禁用」', () => {
 })
 
 /**
+ * ⚠️ **「禁用的号永远不会被调度」的前提**：把 `disabled` 的所有权从上游手里收回来。
+ *
+ * 只要渠道插件的 `lifecycle_auto` 开着，它就会在 09:00 / 21:00 之后把用户禁用的号
+ * 写回启用 —— 那时我们能做的只是**事后**改回去，而窗口里请求真的会落到那些号上。
+ * 关掉之后这个布尔只有两个写者：用户与本插件。
+ *
+ * 三条都不报错，所以逐条钉：写的是 `false`、已经 `false` 就不重复写、
+ * 渠道没有这个字段时**不算失败**（trae 就没有）。
+ */
+describe('收回 disabled 的所有权（关掉上游额度生命周期）', () => {
+  const CONFIG = (id: string): string => `/v0/management/plugins/${id}/config`
+
+  it('⚠️ PATCH 的是 `lifecycle_auto: false`，且回读到 false 才算收回', async () => {
+    /** 读两次：写前 true、写后 false（模拟 CPA 落盘之后再回读）。 */
+    const reads: unknown[] = [true, false]
+    let index = 0
+    const cpa = makeCpa()
+    cpa.reply(CONFIG('workbuddy'), () => ({ lifecycle_auto: reads[index++] ?? false }))
+
+    const result = await opsFor(cpa.gateway).enable.claimDisabledOwnership('workbuddy')
+    expect(result.ok).toBe(true)
+    expect((result as { owned?: boolean }).owned).toBe(true)
+
+    const patches = cpa.calls.filter((call) => call.init?.method === 'PATCH')
+    expect(patches).toHaveLength(1)
+    expect(JSON.parse(String(patches[0]?.init?.body))).toEqual({ lifecycle_auto: false })
+  })
+
+  it('已经是 false 就不再写（每轮启动都 PATCH 是纯噪音）', async () => {
+    const cpa = makeCpa()
+    cpa.reply(CONFIG('workbuddy'), { lifecycle_auto: false })
+
+    const result = await opsFor(cpa.gateway).enable.claimDisabledOwnership('workbuddy')
+    expect((result as { alreadyOwned?: boolean }).alreadyOwned).toBe(true)
+    expect(cpa.calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(0)
+  })
+
+  it('渠道没有这个字段（trae）→ 跳过，不是失败', async () => {
+    const cpa = makeCpa()
+    const result = await opsFor(cpa.gateway).enable.claimDisabledOwnership('trae')
+    expect(result.ok).toBe(true)
+    expect((result as { skipped?: string }).skipped).toBe('unsupported')
+    expect(cpa.calls).toHaveLength(0)
+  })
+
+  it('未知渠道 → 失败（不猜）', async () => {
+    const cpa = makeCpa()
+    const result = await opsFor(cpa.gateway).enable.claimDisabledOwnership('nope')
+    expect(result.ok).toBe(false)
+  })
+})
+
+/**
  * ⚠️ 漂移清单的**键**必须与意图文件同一套（凭据文件名 = 上游 `/accounts` 的 `auth_id`）。
  *
  * 这条读（`/accounts` 的 `intentDrift`）是整条恢复链路**唯一的触发信号**。

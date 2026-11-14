@@ -95,6 +95,11 @@ describe('runBoot', () => {
       } as unknown as CpaRuntime,
       ops: {
         enable: {
+          /** 收回 `disabled` 所有权：记进序列，判据据此钉顺序。 */
+          claimDisabledOwnership: async (plugin: string) => {
+            calls.push(`claim:${plugin}`)
+            return { ok: true }
+          },
           restoreIntent: async () => {
             calls.push('restoreIntent')
             return { ok: true }
@@ -151,10 +156,22 @@ describe('runBoot', () => {
     )
   })
 
-  it('CPA 在跑时：恢复意图 → 补签 → 推清单（顺序不许反）', async () => {
+  it('CPA 在跑时：收所有权 → 恢复意图 → 补签 → 推清单（顺序不许反）', async () => {
     await runBoot(depsOf(true))
 
-    expect(calls).toEqual(['restoreIntent', 'startupCheckin', 'push:boot'])
+    /**
+     * 收所有权排在恢复之前：先断掉撤销源（上游 `lifecycle_auto`），再应用用户的选择 ——
+     * 反过来会让「刚恢复完又被上游改回去」看起来像恢复失败。
+     */
+    expect(calls).toEqual([
+      'claim:workbuddy',
+      'claim:trae',
+      'claim:qoder',
+      'claim:zcode',
+      'restoreIntent',
+      'startupCheckin',
+      'push:boot',
+    ])
   })
 
   /**

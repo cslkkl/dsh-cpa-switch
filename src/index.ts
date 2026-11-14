@@ -25,6 +25,7 @@ import { AdminKeyStore, resolveApiKey } from './credentials.ts'
 import { attachRouteRegistry } from './route-registry.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import { runBoot } from './boot.ts'
+import { startDriftGuard } from './drift-guard.ts'
 import { CpaProcess } from './process.ts'
 import { CpaRuntime } from './runtime.ts'
 import { CpaGateway } from './gateway.ts'
@@ -191,6 +192,23 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
   // ── 生命周期 effect ────────────────────────────────────────────────────
   ctx.effect(() => {
     let stopped = false
+    /**
+     * **漂移守卫**：上游的额度生命周期会在 09:00 / 21:00 之后把用户禁用的号写回
+     * 启用，而「发现」原来只发生在**面板打开时** —— 面板没开就等于不修，
+     * 那段时间请求真的会被调度到不该用的号上（2026-11-14 真机）。
+     *
+     * ⚠️ 它**只恢复用户早已做过的选择**（判据只有 `intent-drift.ts` 一处，
+     * 经 `ops.enable.restoreDisabled` 落地），不是替用户做新决定；
+     * 每一轮有改动都留一行日志。为什么推翻 2026-10-19 的「宿主侧不许定时恢复」
+     * 见 [决策记录](../.agents/notes/2026-11-14-drift-repair-without-panel.md)。
+     */
+    const stopDriftGuard = startDriftGuard({
+      claim: (plugin) => ops.enable.claimDisabledOwnership(plugin),
+      restore: (plugin) => ops.enable.restoreDisabled(plugin),
+      logger: ctx.logger,
+      isCancelled: () => stopped,
+    })
+
     /** 启动流程整体在 boot.ts —— 装配层只负责把它挂上、并在卸载时收尾。 */
     void runBoot({
       readConfig,
@@ -204,6 +222,7 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
     })
     return () => {
       stopped = true
+      stopDriftGuard()
       cpaProcess.stopIfOwned()
     }
   }, 'cpa-panel: lifecycle')

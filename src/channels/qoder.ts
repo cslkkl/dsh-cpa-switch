@@ -33,6 +33,8 @@ export const QODER = {
     write: '/v0/management/plugins/qoder/config',
     field: 'checkin_auto',
   },
+  /** 与 workbuddy 同款：会撤销用户的禁用，启动时关掉。 */
+  autoLifecycleField: 'lifecycle_auto',
   /** 与 workbuddy 同构。 */
   parseCredits: parseNestedCredits,
   parseCheckin: () => undefined,

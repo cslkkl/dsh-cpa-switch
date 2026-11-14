@@ -20,7 +20,7 @@
  * @module dsh-cpa-switch/ops/enable
  */
 
-import { channelOf } from '../channels/registry.ts'
+import { channelOf, configPathOf } from '../channels/registry.ts'
 import type { LoggerLike } from '../credentials.ts'
 import type { CpaGateway } from '../gateway.ts'
 import { disabledDriftOf } from '../intent-drift.ts'
@@ -48,6 +48,18 @@ export interface EnableOps {
   restoreIntent(): Promise<OpsResult>
   /** 把**被上游重新启用**的用户禁用号禁回去（只往禁用方向，见 `intent-drift.ts`）。 */
   restoreDisabled(plugin: string): Promise<OpsResult>
+  /**
+   * **把 `disabled` 的所有权收回来**：关掉渠道插件自带的额度生命周期。
+   *
+   * 为什么必须做：那个生命周期会把用户禁用的号写回启用，而它**分不清**那个
+   * 禁用是用户点的还是它自己因耗尽禁的（见 `intent-drift.ts`）。只要它开着，
+   * 「禁用的号永远不会被调度」就只是「我们每 5 分钟修一次」—— 修之前那几秒到几分钟
+   * 里，请求**真的**会落到那些号上。关掉之后这个布尔只有两个写者：用户与本插件。
+   *
+   * 代价（维护者 2026-11-14 已知并接受）：额度耗尽的号不再被自动禁用，
+   * 由 CPA 的 cooldown 兜底（失败 → 冷却 → 换号）。
+   */
+  claimDisabledOwnership(plugin: string): Promise<OpsResult>
   /**
    * **便宜的漂移探针**：只读本地 `auth-files`，返回「用户禁用过、现在却启用了」的
    * 凭据文件名。不碰上游计费接口、不写任何东西。
@@ -502,6 +514,69 @@ export function createEnableOps(deps: EnableDeps): EnableOps {
   }
 
   /**
+   * 关掉渠道插件自带的额度生命周期 —— 把 `disabled` 的**所有权**收回来。
+   *
+   * ## 为什么这是「保证」而不是「再加一层兜底」
+   *
+   * 撤销用户选择的那个东西在**上游 DLL 里**（`lifecycle_auto`，默认开，
+   * 09:00 / 21:00 之后的定时任务把「CN + 被禁用 + 额度未耗尽」写回启用）。
+   * 我们两边都插不进判据，只能**事后**改回去 —— 而那总有一个窗口
+   * （守卫 5 分钟一轮、面板打开才修更久），窗口里请求**真的**会被调度到那些号。
+   *
+   * 关掉之后 `disabled` 只有两个写者：用户与本插件。这才是
+   * 「禁用的号不会被用到」能成立的前提。
+   *
+   * ## 代价（2026-11-14 明确接受）
+   *
+   * 它同时管「额度耗尽自动禁用」。关掉后耗尽的号不再被自动禁 —— 由 CPA 自己的
+   * cooldown 兜（失败 → 冷却 → 换号）。换来的是「用户的禁用不会被任何人撤销」。
+   *
+   * ## 写法
+   *
+   * `PATCH /v0/management/plugins/<id>/config` + `{lifecycle_auto: false}`：
+   * 与自动签到同一个接口（CPA 收到就回写进 `config.yaml`，实测 2026-11-14 落盘、
+   * 运行期立即生效，**不需要重启 CPA**）。先读一次：已经是 `false` 就不写 ——
+   * 每轮启动都 PATCH 一次会把 CPA 的配置写入变成噪音。
+   */
+  async function claimDisabledOwnership(plugin: string): Promise<OpsResult> {
+    const channel = channelOf(plugin)
+    if (channel === undefined) return { ok: false, error: 'unknown-plugin' }
+    const field = channel.autoLifecycleField
+    // 渠道没有这个东西（trae）→ 什么都不用做，**不是**错误
+    if (field === undefined) return { ok: true, skipped: 'unsupported' }
+
+    const ready = await requireReady(deps.gateway)
+    if (ready !== undefined) return ready
+
+    const path = configPathOf(plugin)
+    try {
+      const before = (await deps.gateway.fetch(path).catch(() => undefined)) as
+        Record<string, unknown> | undefined
+      if (before?.[field] === false) return { ok: true, alreadyOwned: true }
+
+      await deps.gateway.fetch(path, {
+        method: 'PATCH',
+        body: JSON.stringify({ [field]: false }),
+      })
+      // 回读确认（与自动签到同款：写接口回的不一定可靠）
+      const after = (await deps.gateway.fetch(path).catch(() => undefined)) as
+        Record<string, unknown> | undefined
+      deps.gateway.invalidateChannel(plugin)
+      const owned = after?.[field] === false
+      if (owned) {
+        deps.logger?.info?.(
+          'cpa-panel: 已关闭渠道 %s 的 %s —— 禁用的号从此只由用户与本插件改回',
+          plugin,
+          field,
+        )
+      }
+      return { ok: true, owned }
+    } catch (error) {
+      return { ok: false, error: messageOf(error) }
+    }
+  }
+
+  /**
    * 便宜的漂移探针 —— **只读本地凭据表**，一次管理接口往返。
    *
    * ⚠️ **判定复用的是 `disabledDriftOf`**（与 `/accounts` 的 `intentDrift`
@@ -537,6 +612,7 @@ export function createEnableOps(deps: EnableDeps): EnableOps {
     setPriority,
     restoreIntent,
     restoreDisabled,
+    claimDisabledOwnership,
     driftOf,
   }
 }
