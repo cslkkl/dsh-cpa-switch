@@ -841,3 +841,50 @@ describe('openai-compatibility 段', () => {
     })
   })
 })
+
+/**
+ * ⚠️ **`headers: Authorization` 是必需项，不是冗余**（2026-11-13 真机实测，CPA 8.0.11）。
+ *
+ * 只写 `keys: - api-key:` 时，CPA 转发到上游的请求里**完全没有 `Authorization` 头** ——
+ * 不是报错，是**静默不发**。上游回 401，CPA 再包装成
+ * `auth_unavailable: no upstream auth`，界面上与「密钥填错」完全同形。
+ *
+ * 抓法：拿一个回显服务器顶在上游位置，看它收到的头。
+ * 加 `headers` 之后 `authorization: "Bearer …"` 才出现，整条链路随之打通。
+ *
+ * 所以这一组盯的是「两处都在」：删掉任一处都要红。
+ */
+describe('openai-compatibility 的鉴权要写两处', () => {
+  const UP = [
+    {
+      name: 'doubaowork',
+      baseUrl: 'http://127.0.0.1:43861/v1',
+      apiKey: 'sk-dw-test-0123456789',
+      models: ['5'],
+      aliasPrefix: 'dbw',
+    },
+  ] as const
+
+  it('⚠️ 有 `headers: Authorization: "Bearer <key>"`（真正生效的那处）', () => {
+    const yaml = renderCompatYaml(UP)
+    expect(yaml).toContain('headers:')
+    expect(yaml).toContain('Authorization: "Bearer sk-dw-test-0123456789"')
+  })
+
+  it('`keys: - api-key:` 也保留（格式声明位）', () => {
+    const yaml = renderCompatYaml(UP)
+    expect(yaml).toContain('keys:')
+    expect(yaml).toContain('- api-key: "sk-dw-test-0123456789"')
+  })
+
+  it('headers 在 keys **之前**：两者顺序对调不影响语义，但改了要有人知道', () => {
+    const yaml = renderCompatYaml(UP)
+    expect(yaml.indexOf('headers:')).toBeLessThan(yaml.indexOf('keys:'))
+  })
+
+  /** 密钥里有引号 / 换行时整条跳过 —— 那种值写进 YAML 会把结构弄坏。 */
+  it('密钥非法 → 整条不写（不是写一条坏配置）', () => {
+    expect(renderCompatYaml([{ ...UP[0], apiKey: 'sk-"bad' }])).toBe('')
+    expect(renderCompatYaml([{ ...UP[0], apiKey: 'sk-bad\nkey' }])).toBe('')
+  })
+})

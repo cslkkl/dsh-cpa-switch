@@ -183,6 +183,25 @@ export function renderCompatYaml(upstreams: readonly CompatUpstream[], indent = 
      */
     lines.push(`${indent}    - name: "${upstream.name}"`)
     lines.push(`${indent}      base-url: "${upstream.baseUrl}"`)
+    /**
+     * ⚠️ **鉴权必须写 `headers`，光有 `keys` 不够**（2026-11-13 真机实测，CPA 8.0.11）。
+     *
+     * 拿一个回显服务器顶在上游位置，抓 CPA 实际发出的请求头：
+     *
+     * | 配置 | CPA 发出的头 |
+     * | --- | --- |
+     * | 只有 `keys: - api-key: sk-…` | **完全没有 `Authorization`** |
+     * | 加上 `headers: { Authorization: "Bearer …" }` | `authorization: "Bearer …"` ✅ |
+     *
+     * 前者不是「报错」，而是**静默不发** —— 上游回 401，CPA 再包装成
+     * `auth_unavailable: no upstream auth`，界面上与「密钥填错」完全同形。
+     * 为此排查了很久：网关直连 200、密钥逐字一致、YAML 结构也对，就是 401。
+     *
+     * 所以两处都写：`keys` 保留（那是这个格式的声明位），
+     * `headers` 才是真正让请求带上凭据的那一处。
+     */
+    lines.push(`${indent}      headers:`)
+    lines.push(`${indent}          Authorization: "Bearer ${upstream.apiKey}"`)
     lines.push(`${indent}      keys:`)
     lines.push(`${indent}          - api-key: "${upstream.apiKey}"`)
     /**
