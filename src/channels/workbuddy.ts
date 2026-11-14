@@ -35,6 +35,8 @@ export const WORKBUDDY = {
     write: '/v0/management/plugins/workbuddy/config',
     field: 'checkin_auto',
   },
+  /** 会撤销用户的禁用（09:00 / 21:00 之后），启动时关掉 —— 见 `ops/enable.ts`。 */
+  autoLifecycleField: 'lifecycle_auto',
   schoolPath: '/v0/management/plugins/workbuddy/school/vouchers',
   parseCredits: parseNestedCredits,
   /**

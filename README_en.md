@@ -60,9 +60,11 @@ If it does not show up, or shows as "not running", see the active pitfalls in
 - **Quota cycle reminders**: when the provider gives a cycle end date, expand a notice within the
   last seven days for the details
 - **Check in all / run all tasks**: one click per channel, or per account
-- **Enable / disable accounts**: "Use only this one" disables every other account in the channel
+- **Enable / disable accounts**: "Use only this one" disables every other account in the channel, and a
+  disabled account is **never routed to** (the plugin turns off the channel's own credit-driven
+  auto-enable, so only you change that switch)
 - **Remembers your choice**: after a restart the account you picked is still in use; if something
-  changes it back, the panel restores your choice and says so
+  changes it back, a host-side guard restores your choice within minutes and the panel says so
 - **Automatic check-in**: check-ins missed while DSH was not running are caught up at startup
 - **Process hosting**: CPA starts with DSH (an already-running instance is reused) and stops with it
 - **Says why it will not start**: a taken port, a config-generation mismatch and a bad config each

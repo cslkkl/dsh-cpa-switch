@@ -193,6 +193,15 @@ export interface ChannelSpec {
   readonly actions: Readonly<Record<string, string>>
   /** 自动签到开关；没有这个能力的渠道省略。 */
   readonly autoCheckin?: AutoCheckinPath
+  /**
+   * 上游自带**额度生命周期**的开关字段名（workbuddy / qoder / zcode 是
+   * `lifecycle_auto`，trae 没有）。
+   *
+   * 它会撤销用户的禁用（见 `intent-drift.ts`），所以本插件启动时把它关掉 ——
+   * 关掉之后 `disabled` 这个布尔**只由用户和本插件写**，于是「禁用的号不会被调度」
+   * 才成立。取值说明与代价见 `ops/enable.ts` 的 `claimDisabledOwnership`。
+   */
+  readonly autoLifecycleField?: string
   /** 成长中心券码接口；没有这个能力的渠道省略。 */
   readonly schoolPath?: string
   parseCredits: (payload: unknown) => Map<unknown, CreditEntry>

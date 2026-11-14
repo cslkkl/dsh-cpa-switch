@@ -30,6 +30,8 @@
 | 9   | `Back` 的真机点击             | 高 DPI 缩放下鼠标没命中过；它只有一条路径 `selectPanel(null)`，产物断言里已真调一次 —— 只为补齐「人点得到」这一档                                                                                                                                                                                                                                                                                          | 刷新页面                                      | 本文件「2026-10-19 深夜」一节                                                                                |
 | 10  | 豆包工作接入（compat 渠道）   | ① `cordis.patch.yml` 的第五组 `cpa-doubaowork` 真的注册上（重启后首条消息不报 `no adapter registered`）；② 填了 `doubaoworkUrl` + 凭据 + `doubaoworkModels` 后 `config.yaml` 出现顶层 `openai-compatibility`，且 CPA 重启认它（`/v1/models` 出现 `dbw/xxx`）；③ 选择器出现「CPA Switch · 豆包工作」组、组内只有裸名；④ `doubaoworkModels` 留空时有 warn 且**不出现**模型（这是已知且刻意的行为，不是 bug） | 重启 DSH（+ 手动重启 CPA 一次，配置不热加载） | `src/channels/doubaowork.ts`、`src/compat-upstreams.ts`、`src/setup/config.ts`、`tests/setup-config.test.ts` |
 
+| 11 | `0.23.0` 禁用所有权 | 重启后 `config.yaml` 里 workbuddy / qoder / zcode 三处出现 `lifecycle_auto: false`；把某个号禁用 → 隔一轮（≤5 分钟）仍是禁用；输入栏读数只算启用的号、面板修完漂移后**立刻**跟着变 | 重启 DSH | [所有权与读数](2026-11-14-disable-ownership-and-stale-readout.md) |
+
 判定「这一批算验过」的口径：表里每行都真机看到过，就回来把这一行**删掉**并往下面
 「结论」里补一节当时的证据。**没验的不要勾** —— 这张表的用途是「还欠什么」，不是进度条。
 

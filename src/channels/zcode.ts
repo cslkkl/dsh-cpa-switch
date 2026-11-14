@@ -31,6 +31,8 @@ export const ZCODE = {
     refresh: '/v0/management/plugins/zcode/refresh',
     claim: '/v0/management/plugins/zcode/claim',
   },
+  /** 与 workbuddy 同款：会撤销用户的禁用，启动时关掉。 */
+  autoLifecycleField: 'lifecycle_auto',
   parseCredits: parseNestedCredits,
   parseCheckin: () => undefined,
 } as const satisfies ChannelSpec

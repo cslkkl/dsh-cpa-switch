@@ -135,8 +135,13 @@ describe('切渠道的取值：按 key 认领', () => {
   const cached = (key: string, v: string): void => {
     readCache.put(key, { ok: true, v } as unknown as ApiResult)
   }
+  /**
+   * `held` 的年龄。这里统一给一个**很旧**的时刻：本组判的是「认领哪个 key」，
+   * 不是「谁更新」—— 年龄留给下面那一组（`新值必须看得见`）。
+   */
+  const OLD = 1
   const pick = (
-    held: { key: string; value: string } | undefined,
+    held: { key: string; value: string; at: number } | undefined,
     key: string,
   ): string | undefined =>
     shownValue<string>({
@@ -148,7 +153,7 @@ describe('切渠道的取值：按 key 认领', () => {
 
   it('state 属于别的 key 时不算数（否则渠道串数据）', () => {
     // 上一个渠道的 state 还热着
-    const held = { key: 'accounts:workbuddy', value: 'wb-accounts' }
+    const held = { key: 'accounts:workbuddy', value: 'wb-accounts', at: OLD }
     // 当前看的是 trae，而 trae 还没进过缓存
     expect(pick(held, 'accounts:trae')).toBeUndefined()
   })
@@ -156,14 +161,14 @@ describe('切渠道的取值：按 key 认领', () => {
   it('缓存里有当前 key 的值时直接用它，不等 effect（这就是不闪）', () => {
     cached('accounts:trae', 'trae-accounts')
     // state 还揣着上一个渠道的值
-    const held = { key: 'accounts:workbuddy', value: 'wb-accounts' }
+    const held = { key: 'accounts:workbuddy', value: 'wb-accounts', at: OLD }
     // 认领失败 → 退回缓存
     expect(pick(held, 'accounts:trae')).toBe('trae-accounts')
   })
 
-  it('state 仍属于当前 key 时优先用它（最新值胜过缓存）', () => {
+  it('state 仍属于当前 key 且比缓存新时优先用它（最新值胜过缓存）', () => {
     cached('accounts:trae', 'stale-from-cache')
-    const held = { key: 'accounts:trae', value: 'fresh-from-state' }
+    const held = { key: 'accounts:trae', value: 'fresh-from-state', at: Date.now() }
     expect(pick(held, 'accounts:trae')).toBe('fresh-from-state')
   })
 
@@ -174,6 +179,98 @@ describe('切渠道的取值：按 key 认领', () => {
   it('缓存里那份不是成功响应时不算数（只认 ok 的那份）', () => {
     readCache.put('accounts:qoder', { ok: false, error: 'boom' } as unknown as ApiResult)
     expect(pick(undefined, 'accounts:qoder')).toBeUndefined()
+  })
+})
+
+/**
+ * **「输入栏那个数字不跟着变」的判据**（2026-11-14 真机）。
+ *
+ * 同一个 key 会被**多处同时读**：面板、对话界面的余额读数、预取。它们各有各的
+ * `held`。原先的采纳判据是「`held` 空着才采纳」，于是**先挂上来的那个实例永远
+ * 看不见别人读到的新值** —— 对话界面那个读数座位是常挂的（不会因为面板刷新而
+ * 重挂），所以它会一直画着页面加载那一刻的数，直到用户离开面板再回来。
+ *
+ * 判据改成**比时间**（`held.at` vs 缓存条目的 `at`）之后，两条要求同时成立：
+ * 新值看得见、旧值压不回去。
+ */
+describe('别处读到的新值必须看得见（按时间取新，不按「空不空」）', () => {
+  const api = (v: string): ApiResult => ({ ok: true, v }) as unknown as ApiResult
+  const pick = (result: ApiResult): string | undefined =>
+    typeof (result as unknown as { v?: unknown }).v === 'string'
+      ? ((result as unknown as { v: string }).v as string)
+      : undefined
+
+  it('⚠️ 手里那份更旧 → 采纳缓存那份（这就是「面板刷新了，读数跟着变」）', () => {
+    readCache.put('accounts:workbuddy', api('fresh-4966'))
+    const adopted = adoptedValue<string>({
+      held: { key: 'accounts:workbuddy', value: 'stale-all-23902', at: Date.now() - 60_000 },
+      cached: readCache.peek<ApiResult>('accounts:workbuddy'),
+      key: 'accounts:workbuddy',
+      select: pick,
+    })
+    expect(adopted?.value).toBe('fresh-4966')
+  })
+
+  it('⚠️ 手里那份更新 → 不动（采纳等于把新值退回旧值）', () => {
+    readCache.put('accounts:workbuddy', api('older'))
+    const adopted = adoptedValue<string>({
+      held: { key: 'accounts:workbuddy', value: 'newer', at: Date.now() + 60_000 },
+      cached: readCache.peek<ApiResult>('accounts:workbuddy'),
+      key: 'accounts:workbuddy',
+      select: pick,
+    })
+    expect(adopted).toBeUndefined()
+  })
+
+  it('⚠️ 一样新 → 不动（否则采纳完这一帧又得再采纳一次，自己跟自己拉扯）', () => {
+    readCache.put('accounts:workbuddy', api('v'))
+    const hit = readCache.peek<ApiResult>('accounts:workbuddy')
+    expect(
+      adoptedValue<string>({
+        held: { key: 'accounts:workbuddy', value: 'v', at: hit?.at ?? 0 },
+        cached: hit,
+        key: 'accounts:workbuddy',
+        select: pick,
+      }),
+    ).toBeUndefined()
+  })
+
+  it('采纳过来的 `at` 是**缓存那份的时刻**（改成就等于把旧值伪装成新的）', () => {
+    readCache.put('accounts:workbuddy', api('v'))
+    const hit = readCache.peek<ApiResult>('accounts:workbuddy')
+    const adopted = adoptedValue<string>({
+      held: undefined,
+      cached: hit,
+      key: 'accounts:workbuddy',
+      select: pick,
+    })
+    expect(adopted?.at).toBe(hit?.at)
+  })
+
+  it('渲染判据同样按时间取新（两个来源都对时必须比年龄）', () => {
+    readCache.put('accounts:workbuddy', api('from-cache'))
+    const key = 'accounts:workbuddy'
+    const cached = readCache.peek<ApiResult>(key)
+
+    // 手里的更旧 → 画缓存那份
+    expect(
+      shownValue<string>({
+        held: { key, value: 'stale', at: (cached?.at ?? 0) - 1000 },
+        cached,
+        key,
+        select: pick,
+      }),
+    ).toBe('from-cache')
+
+    // 手里的更新 → 画手里那份
+    expect(
+      shownValue<string>({
+        held: { key, value: 'newer', at: (cached?.at ?? 0) + 1000 },
+        cached,
+        key,
+        select: pick,
+      }),
+    ).toBe('newer')
   })
 })
 
@@ -267,13 +364,17 @@ describe('缓存值被采纳成 held（否则作废缓存会闪回骨架）', ()
       key: 'accounts:workbuddy',
       select: pick,
     })
-    expect(adopted).toEqual({ key: 'accounts:workbuddy', value: 'wb' })
+    expect(adopted).toEqual({
+      key: 'accounts:workbuddy',
+      value: 'wb',
+      at: readCache.peek('accounts:workbuddy')?.at,
+    })
   })
 
-  it('⚠️ held 已认领当前 key 就不动（它是更近的一次读，采纳等于倒退）', () => {
+  it('⚠️ held 已认领当前 key 且不比缓存旧就不动（采纳等于倒退）', () => {
     readCache.put('accounts:workbuddy', api('from-cache'))
     const adopted = adoptedValue<string>({
-      held: { key: 'accounts:workbuddy', value: 'from-read' },
+      held: { key: 'accounts:workbuddy', value: 'from-read', at: Date.now() + 1000 },
       cached: readCache.peek<ApiResult>('accounts:workbuddy'),
       key: 'accounts:workbuddy',
       select: pick,
@@ -284,12 +385,13 @@ describe('缓存值被采纳成 held（否则作废缓存会闪回骨架）', ()
   it('held 属于**别的**渠道 → 采纳当前渠道那一份（切页签不串数据）', () => {
     readCache.put('accounts:trae', api('trae'))
     const adopted = adoptedValue<string>({
-      held: { key: 'accounts:workbuddy', value: 'wb' },
+      held: { key: 'accounts:workbuddy', value: 'wb', at: Date.now() },
       cached: readCache.peek<ApiResult>('accounts:trae'),
       key: 'accounts:trae',
       select: pick,
     })
-    expect(adopted).toEqual({ key: 'accounts:trae', value: 'trae' })
+    expect(adopted?.key).toBe('accounts:trae')
+    expect(adopted?.value).toBe('trae')
   })
 
   it('缓存里没有 / 那份是失败的 → 不采纳（骨架该出现时还是出现）', () => {

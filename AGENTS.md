@@ -169,6 +169,10 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 - **渠道插件会按额度把被禁用的号重新打开** —— 症状「我没动它，号全亮了」。
   口径**单向**：只把用户禁用的号禁回去；判定只有一处 `src/intent-drift.ts`（F51、F52）→
   [决策记录](.agents/notes/2026-10-19-panel-loading-and-drift-ux.md)。
+  ⚠️ **2026-11-14 起根治方式换了**：启动时与漂移守卫每轮 PATCH `lifecycle_auto: false`
+  （`enable.claimDisabledOwnership`）—— 撤销源关掉之后这个布尔只由用户与本插件写。
+  **代价**：额度耗尽的号不再被自动禁用（由 CPA cooldown 兜）→
+  [所有权决策](.agents/notes/2026-11-14-disable-ownership-and-stale-readout.md)。
 - **「磁盘上有 dll」≠「装好了」** —— 换版本走面板「渠道插件 a → b」、判新版用 tag 相等、
   换文件必须先停 CPA（Windows 被加载的 dll 改不了名）→ [决策记录](.agents/notes/2026-10-12-plugin-update-path.md)。
 - **`lib/` 不入库，但它是宿主读的东西** —— clone 后 `pnpm install && pnpm build`；

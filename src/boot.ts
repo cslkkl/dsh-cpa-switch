@@ -1,5 +1,6 @@
 /**
- * 插件的生命周期流程：备凭据 → 补环境 → 拉起 CPA → 恢复账号选择 → 开机补签 → 推模型路由。
+ * 插件的生命周期流程：备凭据 → 补环境 → 拉起 CPA → 收 `disabled` 所有权
+ * → 恢复账号选择 → 开机补签 → 推模型路由。
  *
  * 从 `index.ts` 的 `apply` 闭包里搬出来。它是**一个宿主时机**（进程启动一次），
  * 与装配（造对象、挂 effect、注册路由）不是一回事 —— 混在一起时，
@@ -16,6 +17,7 @@ import { mkdirSync } from 'node:fs'
 import { ensureApiKey, resolveApiKey } from './credentials.ts'
 import type { CredentialsService, LoggerLike } from './credentials.ts'
 import type { PluginConfig } from './config.ts'
+import { PLUGIN_CHANNELS } from './channels/registry.ts'
 import type { CpaRuntime } from './runtime.ts'
 import type { Operations } from './ops/index.ts'
 import type { SyncResult } from './route-registry.ts'
@@ -223,7 +225,26 @@ export async function runBoot(deps: BootDeps): Promise<void> {
   if (cancelled()) return
   if (state.running) {
     /**
-     * 先恢复「用户上次的选择」，再补签。
+     * **先把 `disabled` 的所有权收回来**：关掉渠道插件自带的额度生命周期
+     * （`lifecycle_auto`）。它会在 09:00 / 21:00 之后把用户禁用的号写回启用，
+     * 而只要它开着，「禁用的号不会被用到」就只是「我们事后修得比较快」——
+     * 修之前那一小段时间请求**真的**会落到那些号上（2026-11-14 真机）。
+     *
+     * 放在恢复之前：先断掉撤销源，再应用用户的选择，日志里看到的顺序才是
+     * 「谁在改这个布尔」。
+     *
+     * ⚠️ **遍历的是 `PLUGIN_CHANNELS`，不是全部渠道**：compat 渠道（豆包工作）
+     * 的账号不在 `auth-files` 里，也没有 `/plugins/<id>/config` 这个「插件的配置」
+     * —— 对它调这个函数只会白打一次接口。注册表口径见 `channels/registry.ts`。
+     */
+    for (const channel of PLUGIN_CHANNELS) {
+      const claimed = await ops.enable.claimDisabledOwnership(channel.id)
+      if (!claimed.ok || claimed.skipped === 'unsupported') continue
+      deps.logger?.info?.('cpa-panel: lifecycle ownership (%s) %o', channel.id, claimed)
+    }
+
+    /**
+     * 再恢复「用户上次的选择」，然后补签。
      *
      * 顺序有讲究：恢复要在补签之前 —— 补签是按渠道整体调的，与具体账号无关；
      * 但先恢复能让日志反映真实的调度面。

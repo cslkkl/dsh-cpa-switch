@@ -241,16 +241,77 @@ describe('余额读数：只算启用的号，凑不出来就说不知道，不�
 })
 
 describe('`/accounts` 的线上形状：账号只在 `data.accounts` 里', () => {
-  it('从扁平结果的 `data.accounts` 取数组', () => {
-    expect(balanceAccountsOf({ ok: true, data: { accounts: [{ disabled: false }] } })).toEqual([
-      { disabled: false },
-    ])
+  it('从扁平结果的 `data.accounts` 取数组，并一并取出漂移清单', () => {
+    expect(balanceAccountsOf({ ok: true, data: { accounts: [{ disabled: false }] } })).toEqual({
+      accounts: [{ disabled: false }],
+      drift: [],
+    })
+  })
+
+  it('漂移清单跟着账号一起回来（读数要用它把上游偷开的号排除掉）', () => {
+    expect(
+      balanceAccountsOf({
+        ok: true,
+        data: { accounts: [], intentDrift: ['workbuddy-x.json', '', 7, 'workbuddy-x.json'] },
+      }),
+    ).toEqual({ accounts: [], drift: ['workbuddy-x.json'] })
   })
 
   it('形状认不出时 `undefined`（交给「读残了」，不拿空数组冒充没有账号）', () => {
     expect(balanceAccountsOf({ ok: true })).toBeUndefined()
     expect(balanceAccountsOf({ ok: true, data: {} })).toBeUndefined()
     expect(balanceAccountsOf({ ok: true, data: { accounts: {} } })).toBeUndefined()
+  })
+})
+
+/**
+ * ⚠️ 2026-11-14 真机：「只启用了一个号，输入栏却显示整个渠道的积分总和；
+ * 打开面板（它把漂移的号禁回去）再返回就正常」。
+ *
+ * 机制是**上游额度生命周期**（`lifecycle_auto`，09:00 / 21:00 之后）把用户
+ * 禁用的号写回启用 —— 那一刻后端读数**真的是「全启用」**，于是按后端求和的
+ * 读数就把所有号加起来。修法是让读数与面板开关用**同一条口径**：
+ * 漂移清单里的号按「用户要它禁用」算。
+ */
+describe('读数与面板开关同一口径：漂移号按禁用算', () => {
+  const on = (remain: number, authId?: string): unknown =>
+    authId === undefined
+      ? { disabled: false, credits: { remain } }
+      : { authId, disabled: false, credits: { remain } }
+
+  it('⚠️ 上游偷着启用的号不算进合计（否则「只开一个号」会显示全渠道总和）', () => {
+    const view = balanceViewOf(
+      [on(4966, 'workbuddy-keji.json'), on(4335, 'workbuddy-b.json'), on(5097, 'workbuddy-c.json')],
+      ['workbuddy-b.json', 'workbuddy-c.json'],
+    )
+    expect(view).toEqual({ kind: 'total', total: 4966 })
+  })
+
+  it('⚠️ 漂移清单为空时行为不变（没有漂移是常态，别把正常读数改掉）', () => {
+    expect(balanceViewOf([on(4966, 'a.json'), on(100, 'b.json')], [])).toEqual({
+      kind: 'total',
+      total: 5066,
+    })
+    expect(balanceViewOf([on(4966, 'a.json')])).toEqual({ kind: 'total', total: 4966 })
+  })
+
+  it('⚠️ 漂移的不限额号同样按禁用算（它不会被花到，不能让渠道说成「不限」)', () => {
+    expect(
+      balanceViewOf(
+        [{ authId: 'trae-x.json', disabled: false, credits: { unlimited: true } }, on(5, 'y.json')],
+        ['trae-x.json'],
+      ),
+    ).toEqual({ kind: 'total', total: 5 })
+  })
+
+  it('全渠道的号都被漂移成启用 → `unknown`（读数空着，不画一个「总和」）', () => {
+    expect(balanceViewOf([on(10, 'a.json'), on(20, 'b.json')], ['a.json', 'b.json'])).toEqual({
+      kind: 'unknown',
+    })
+  })
+
+  it('没有 `authId` 的号不会被漂移清单误伤（认不出来就按后端读数算）', () => {
+    expect(balanceViewOf([on(7)], ['whatever.json'])).toEqual({ kind: 'total', total: 7 })
   })
 })
 
