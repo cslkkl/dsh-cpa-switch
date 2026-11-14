@@ -70,23 +70,23 @@
   },
   "engines": {
     "node": ">=20",
-    "dsh": ">=0.1.7-rc.2"
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.1.7-rc.2",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.7-rc.2",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.2",
-    "@deepseek-ai/dsh-credentials": ">=0.1.7-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.4"
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-credentials": ">=0.2.2-rc.3",
+    "@deepseek-ai/schemastery": "~3.19.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.1.7-rc.2",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.7-rc.2",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.2",
-    "@deepseek-ai/dsh-credentials": ">=0.1.7-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.4",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-credentials": ">=0.2.2-rc.3",
+    "@deepseek-ai/schemastery": "~3.19.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
