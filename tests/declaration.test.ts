@@ -9,10 +9,9 @@
  * 因此规则只钉**一个方向**：每个 peer 都必须在 dev 里出现。dev 多带工具（eslint 那批）
  * 不算缺陷 —— 那不是同一条规则。
  *
- * ⚠️ 判据**不是字符串相等**。`@deepseek-ai/cordis` 的 peer 是 `^4.0.4`、dev 是 `4.1.0`：
- * 两者指向同一批版本（`4.1.0` 本身就是 `^4.0.4` 里的一个点），只是写法不同 ——
- * 宿主那一侧只保证「4.0.4 及以上」，本机这一侧**锁具体一版**以便类型检查与宿主实际跑的
- * 那一版对齐（宿主 `0.2.2-rc.2` 带的是 cordis `4.1.0`），这个差异是**有意的**。
+ * ⚠️ 判据**不是字符串相等**。`@deepseek-ai/cordis` 的 peer 是 `^4.0.4`、dev 是 `4.0.4`：
+ * 两者指向同一批版本（`4.0.4` 本身就是 `^4.0.4` 里的一个点），只是写法不同 ——
+ * 宿主那一侧要把它锁到具体一版，本机这一侧按 caret 收补丁，这个差异是**有意的**。
  * 拿字符串相等去判，这一条会被冤枉，而它偏偏是全仓唯一的这种键。
  * 所以判据取正确的那句读法：「**dev 的范围必须整个落在 peer 的范围之内**」
  * （`satisfies(dev, peer)`），即「本机装的这一版，宿主也接受」。
@@ -232,7 +231,7 @@ describe('清单的 peer / dev 对齐', () => {
             'peer 说的是「宿主会提供」，dev 说的是「本机装一份来编译 / 跑测试」；\n' +
             '只声明 peer 时，本机那份是 autoInstallPeers 隐式装上的，没有任何人声明过那个版本。\n' +
             '补 dev 时把 peer 的范围抄过去 —— 唯一允许写法不同但必须仍**落在 peer 之内**的是\n' +
-            '@deepseek-ai/cordis（peer ^4.0.4 / dev 4.1.0），理由见本文件头部。',
+            '@deepseek-ai/cordis（peer ^4.0.4 / dev 4.0.4），理由见本文件头部。',
     ).toEqual([])
   })
 
@@ -253,8 +252,8 @@ describe('清单的 peer / dev 对齐', () => {
 
     expect(differing).toEqual(['@deepseek-ai/cordis'])
     expect(peers['@deepseek-ai/cordis']).toBe('^4.0.4')
-    expect(dev['@deepseek-ai/cordis']).toBe('4.1.0')
-    expect(within('4.1.0', '^4.0.4')).toBe(true)
+    expect(dev['@deepseek-ai/cordis']).toBe('4.0.4')
+    expect(within('4.0.4', '^4.0.4')).toBe(true)
   })
 
   /** 反向控制一：dev 里整个缺一项时必须被抓到 —— 同时那一处正当的差异不许被误伤。 */
