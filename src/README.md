@@ -93,6 +93,16 @@
     实际侧 `=== false`（上游没给字段 = 不知道，不动手）
   - 判据在 `tests/intent-drift.test.ts`，决策见
     [决策记录](../.agents/notes/2026-10-15-user-disabled-intent-is-authoritative.md)
+- **`drift-guard.ts`** —— **漂移守卫**：宿主侧常驻，每 5 分钟逐渠道问一次，
+  有漂移就改回用户的选择。
+  - 导出：`startDriftGuard` / `driftGuardPass` / `DRIFT_GUARD_MS`
+  - 为什么需要：判定与写回早就有（`intent-drift.ts` + `ops/enable.ts` 的
+    `restoreDisabled`），缺的是**发现时机** —— 原来只有面板打开时才修，
+    面板没开的那段时间请求真的会被调度到不该用的号上（2026-11-14 真机）
+  - ⚠️ **只恢复、不重判**：判据仍只在 `intent-drift.ts` 一处；**不抛**（抛了会断链，
+    而断链是静默的）；有改动才记日志
+  - 判据 `tests/drift-guard.test.ts`，决策见
+    [决策记录](../.agents/notes/2026-11-14-drift-repair-without-panel.md)
 - **`select-plan.ts`** —— 「设为唯一」的**目标状态计算 + 回读验证**（纯函数，不碰 IO）。
   - 导出：`planSelect` / `verifySelect` / 类型 `SelectableFile` / `SelectChange` / `SelectPlan`
   - 为什么需要：`accountSelect` 要改同渠道**多个**账号，而上游
@@ -527,6 +537,7 @@
 | 写操作（`ops/**` 里改 CPA 状态的那些）                      | 成功后必须 `gateway.invalidateChannel(plugin)`（跨渠道用空串）；**界面值取回读**（F33）；改启用态要回读确认 + 逐个容错（F43）；判据 `tests/ops-write-paths.test.ts`                                                                                                                                                                                                                                                                                |
 | [select-plan.ts](select-plan.ts)                            | 「设为唯一」的目标状态计算与回读验证（纯函数）；同步[决策记录](../.agents/notes/2026-10-05-account-status-readback.md) + `tests/select-plan.test.ts`                                                                                                                                                                                                                                                                                               |
 | [intent-drift.ts](intent-drift.ts)                          | 「用户禁用被上游撤销」的判定（纯函数，**只往禁用方向**）；改它要同步 [ops/README.md](ops/README.md) 与 [client/README.md](client/README.md)（两侧共用这一份判据）+ `tests/intent-drift.test.ts`                                                                                                                                                                                                                                                    |
+| [drift-guard.ts](drift-guard.ts)                            | 漂移守卫（宿主常驻，每 5 分钟一轮）：**只恢复、不重判**、**不抛**（抛了会静默断链）、有改动才记日志。判据 `tests/drift-guard.test.ts`                                                                                                                                                                                                                                                                                                              |
 | [channels/**](channels/README.md)                           | 渠道知识**唯一来源**：新增渠道 = 加一个 spec + 在注册表挂上，面板 / 路由 / 别名 / 生成配置全部派生（[手册](channels/README.md)）                                                                                                                                                                                                                                                                                                                   |
 | [contracts/**](contracts/README.md)                         | 两半共享的**纯类型**：只有 `import type`、零运行时依赖；改字段同批改两半，`pnpm check:layering` 与两半 typecheck 会红                                                                                                                                                                                                                                                                                                                              |
 | [ids.ts](ids.ts) / [paths.ts](paths.ts)                     | 标识与路径的**唯一登记处**：包名必须与 `package.json` 一致（`verify-artifacts` 对照）、家目录必须认 `DSH_HOME`（`tests/paths.test.ts`）                                                                                                                                                                                                                                                                                                            |
