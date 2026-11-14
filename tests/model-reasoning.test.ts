@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import * as capsModule from '../src/model-caps.ts'
-import { REASONING_EFFORTS, offSpellingOf, reasoningEffortsOf } from '../src/model-caps.ts'
+import {
+  REASONING_EFFORTS,
+  offSpellingOf,
+  reasoningEffortsOf,
+  reasoningSupportedOn,
+} from '../src/model-caps.ts'
 import { CHANNEL_IDS } from '../src/channels/registry.ts'
 
 /**
@@ -131,8 +136,10 @@ describe('关的拼写按渠道给', () => {
     }
   })
 
-  it('⚠️ 每个托管渠道都要能取到「关」的值，且不许是空串', () => {
+  it('⚠️ 每个**声明档位**的托管渠道都要能取到「关」的值，且不许是空串', () => {
     for (const channel of CHANNEL_IDS) {
+      // 词汇表对不上的渠道整条不发（见下面「不认 off 的渠道」那条），不参与这条断言
+      if (!reasoningSupportedOn(channel)) continue
       const declared = reasoningEffortsOf(true, channel) ?? {}
       expect(typeof declared.off).toBe('string')
       expect((declared.off as string).length).toBeGreaterThan(0)
@@ -142,6 +149,28 @@ describe('关的拼写按渠道给', () => {
 
   it('⚠️ zcode 的 off 绝不能是 off —— 那是唯一会让整轮对话失败的组合', () => {
     expect(offSpellingOf('zcode')).not.toBe('off')
+  })
+
+  /**
+   * ⚠️ **词汇表对不上的渠道整条不发**（2026-11-13 实测，豆包工作网关 v0.6.1）。
+   *
+   * 那个上游只认 `low` / `medium` / `high`，没有 `off`；而本仓的「关」就发 `off`。
+   * 发过去是**每一轮 400**，界面只显示一句 invalid_request，看不出是档位的问题。
+   * 判据是「一个字段都不发」——发一半（比如只 `high`）会让宿主认为这个模型有档位，
+   * 用户切到「关」时照样 400。
+   */
+  it('⚠️ 不认 off 的渠道整条不发档位（豆包工作）', () => {
+    expect(reasoningSupportedOn('doubaowork')).toBe(false)
+    expect(reasoningEffortsOf(true, 'doubaowork')).toBeUndefined()
+    // 对调开关也不许把它救回来
+    expect(reasoningEffortsOf(true, 'doubaowork', true)).toBeUndefined()
+  })
+
+  it('⚠️ 名单外的渠道照旧两档（这条修复不许误伤别的渠道）', () => {
+    for (const channel of CHANNEL_IDS.filter((id) => id !== 'doubaowork')) {
+      expect(reasoningSupportedOn(channel)).toBe(true)
+      expect(Object.keys(reasoningEffortsOf(true, channel) ?? {})).toEqual(['off', 'high'])
+    }
   })
 })
 

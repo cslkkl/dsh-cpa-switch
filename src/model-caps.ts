@@ -355,6 +355,13 @@ export function reasoningEffortsOf(
   swapped = false,
 ): Readonly<Record<string, string>> | undefined {
   if (!enabled) return undefined
+  /**
+   * ⚠️ **不认本仓两档词汇表的渠道，整条不发**（见 `NO_REASONING_CHANNELS`）。
+   *
+   * 豆包工作网关只认 `low` / `medium` / `high`，而本仓的「关」发的是 `off` ——
+   * 发过去是每一轮 400，界面上只看得到一句 invalid_request。
+   */
+  if (!reasoningSupportedOn(channel)) return undefined
   const off = offSpellingOf(channel)
   /**
    * 对调后仍是**同样的两个键**（界面文案不变），只是把值换过来：
@@ -376,6 +383,40 @@ const THIRD_PARTY_CHANNELS: readonly string[] = ['qoder', 'trae']
 
 /** 第三方档的说明文案（一处写，判据与调用方都读它）。 */
 const THIRD_PARTY_NOTE = '第三方仓库映射，未官方确认；拿到官方来源时替换'
+
+/**
+ * **不认 `off` 这个词、且四个档位都比它自己更细**的渠道。
+ *
+ * ⚠️ 2026-11-13 实测（豆包工作网关 v0.6.1）：
+ *
+ * ```
+ * 400: {"message":"level \"off\" not supported, valid levels: low, medium, high"}
+ * ```
+ *
+ * 本仓的档位只有「关 / 开」两个键，`off` 是不可省的那一端 —— 而这个上游**没有
+ * `off`**，它的最低档是 `low`、最高是 `high`。把 `off` 发过去是**每一轮都 400**，
+ * 而界面上看不出来是档位的问题（只显示一句 invalid_request）。
+ *
+ * 所以这类渠道**整条不发档位声明**：宿主落 `reasoning: false`，界面不给 Effort 行，
+ * 请求里也就不带 `reasoning_effort` —— 用它自己的默认档。
+ *
+ * ⚠️ 这与「渠道填错词」（如 zcode 的 `none`）不是一类问题：那种**换个词**就行，
+ * 这种是**词汇表根本对不上本仓的两档模型**，只能不声明。
+ */
+const NO_REASONING_CHANNELS: readonly string[] = ['doubaowork']
+
+/**
+ * 这个渠道要不要发思考档位（`false` = 整条不发）。
+ *
+ * 判据 [tests/model-reasoning.test.ts](../tests/model-reasoning.test.ts) 同时钉住两件事：
+ * 名单里的渠道**一个字段都不发**，以及名单外的渠道**照旧两档**（不许被这条误伤）。
+ */
+export function reasoningSupportedOn(channel: string): boolean {
+  const key = String(channel ?? '')
+    .trim()
+    .toLowerCase()
+  return !NO_REASONING_CHANNELS.includes(key)
+}
 
 /**
  * 渠道 → 模型 → 能力。
