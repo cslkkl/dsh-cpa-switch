@@ -102,7 +102,7 @@
   - ⚠️ **只恢复、不重判**：判据仍只在 `intent-drift.ts` 一处；**不抛**（抛了会断链，
     而断链是静默的）；有改动才记日志
   - 判据 `tests/drift-guard.test.ts`，决策见
-    [决策记录](../.agents/notes/2026-11-14-drift-repair-without-panel.md)
+    [决策记录](../.agents/notes/2026-11-14-disable-ownership-and-stale-readout.md)
 - **`select-plan.ts`** —— 「设为唯一」的**目标状态计算 + 回读验证**（纯函数，不碰 IO）。
   - 导出：`planSelect` / `verifySelect` / 类型 `SelectableFile` / `SelectChange` / `SelectPlan`
   - 为什么需要：`accountSelect` 要改同渠道**多个**账号，而上游
