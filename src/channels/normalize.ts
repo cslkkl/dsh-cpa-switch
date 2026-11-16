@@ -79,20 +79,18 @@ export function normalizeAccounts(
   const payload = accountsPayload as
     { accounts?: AccountPayload[]; results?: AccountPayload[] } | undefined
   /**
-   * `extractAccounts` 只给**形状对不上**的渠道（compat）用；省略时走两条历史形状。
+   * 四种渠道插件的 `/accounts` 有两种历史形状（`accounts` / `results`），
+   * 两种都要认。
    *
-   * ⚠️ 顺序是「spec 优先」而不是「先试两条形状再兜底」：compat 的返回里根本
-   * 没有 `accounts` / `results` 键，硬试只会静默得到空数组 —— 而空数组在面板上
-   * 与「这个渠道没有号」同形，看不出是读错了地方。
+   * ⚠️ 形状认不出来时**返回空数组**是这里唯一的兜底，而空数组在面板上与
+   * 「这个渠道没有号」同形 —— 所以形状知识必须留在 spec 那一侧，
+   * 不许在这里靠「多猜几种」补。
    */
-  const rawList =
-    channel.extractAccounts !== undefined
-      ? channel.extractAccounts(accountsPayload)
-      : Array.isArray(payload?.accounts)
-        ? payload.accounts
-        : Array.isArray(payload?.results)
-          ? payload.results
-          : []
+  const rawList = Array.isArray(payload?.accounts)
+    ? payload.accounts
+    : Array.isArray(payload?.results)
+      ? payload.results
+      : []
 
   return rawList.map((account) => {
     const credit = creditsMap.get(account.auth_index)

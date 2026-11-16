@@ -120,7 +120,7 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
     try {
       const accountsPath = accountsPathOf(plugin)
       /**
-       * ⚠️ 余额端点**可能不存在**（compat 渠道没有这个接口）。
+       * ⚠️ 余额端点**可能不存在**。
        * 判据是「`capabilities.credits` 为真**且** spec 给了路径」，两条都成立才算有 ——
        * 只看能力位会 fetch `undefined`，只看路径会漏掉「有端点但界面不该显示」的渠道。
        */
@@ -193,10 +193,10 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
           unit: channel.unit,
           capabilities: channel.capabilities,
           /**
-           * 登录走哪条路（`cpa` / `gateway` / `none`）—— 面板据此选流程。
+           * 这个渠道能不能自己发起登录（`cpa` / `none`）—— 面板据此给不给入口。
            *
            * ⚠️ 从**注册表**派生（`loginViaOf`），不在浏览器半边按渠道名分叉：
-           * 猜错的两种症状都是静默的（`provider_not_found` / `ECONNREFUSED`）。
+           * 猜错时的症状是静默的（`provider_not_found`）。
            */
           loginVia: loginViaOf(channel.id),
           serverTime: baseRecord?.server_time,
@@ -221,20 +221,15 @@ export function createAccountsOps(deps: AccountsDeps): AccountsOps {
     try {
       const payload = await deps.gateway.fetch(channel.modelsPath)
       /**
-       * ⚠️ **形状由 spec 决定**（2026-11-13）：`{groups:[…]}` 只是
-       * `/models/groups?refresh=1` 那一套的形状。compat 渠道的 `modelsPath` 指向
-       * `openai-compatibility`，返回里没有 `groups` —— 硬套会静默得到空列表，
-       * 而面板上「一个模型都不列」与「这渠道确实没模型」完全同形。
-       *
-       * 所以走 `parseModelGroups` 这条 spec 钩子，与 `extractAccounts` 同一个思路：
-       * 形状知识归渠道，搬运与兜底归这里。
+       * ⚠️ `{groups:[…]}` 只是 `/models/groups?refresh=1` 那一套的形状 ——
+       * 形状对不上时静默得到空列表，而面板上「一个模型都不列」与
+       * 「这渠道确实没模型」完全同形。
        */
-      const groups: ModelGroup[] =
-        channel.parseModelGroups !== undefined
-          ? channel.parseModelGroups(payload)
-          : Array.isArray((payload as { groups?: unknown } | undefined)?.groups)
-            ? ((payload as { groups: ModelGroup[] }).groups as ModelGroup[])
-            : []
+      const groups: ModelGroup[] = Array.isArray(
+        (payload as { groups?: unknown } | undefined)?.groups,
+      )
+        ? ((payload as { groups: ModelGroup[] }).groups as ModelGroup[])
+        : []
       return {
         ok: true,
         groups: groups.map((group) => ({

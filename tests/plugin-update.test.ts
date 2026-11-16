@@ -43,9 +43,6 @@ const CONFIG: PluginConfig = {
   reasoningEfforts: true,
   maxOutputTokens: 384000,
   startTimeoutSeconds: 30,
-  doubaoworkUrl: '',
-  doubaoworkKeyRef: 'DOUBAOWORK_API_KEY',
-  doubaoworkModels: '',
 }
 
 const readConfig = (): PluginConfig => CONFIG

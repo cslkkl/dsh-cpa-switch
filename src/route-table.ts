@@ -284,37 +284,6 @@ export function buildRoutes(deps: RouteDeps): RouteSpec[] {
       },
     },
     {
-      /**
-       * 豆包工作（compat 渠道）的登录。
-       *
-       * ## 为什么不是复用 `/auth` 那条
-       *
-       * `/auth` 走 CPA 的 OAuth（`?provider=<渠道>`）。豆包工作**不在 CPA 里登录** ——
-       * 它的账号是那个独立网关用「独立浏览器 + CDP 抓 cookie」登的，
-       * 所以 `?provider=doubaowork` 只会得到 `provider_not_found`（真机实证）。
-       *
-       * 这条打到**网关自己的**面板接口（见 `doubaowork-gateway.ts` 的三道门），
-       * 登录成功后才把密钥与模型记下来 —— 那才是 `openai-compatibility` 需要的东西。
-       *
-       * 三段语义合在一个 path 上（与 `/auth` 同款）：
-       * - `GET` 无参 → 网关在不在 + 这次登录的进度；
-       * - `GET ?poll=1` → **轮询**（`success` 的那一刻会落盘并回模型数）；
-       * - `POST` → 起一次登录（body `{action:'cancel'}` 则是取消）。
-       */
-      path: '/api/v1/cpa/doubaowork-login',
-      methods: ['GET', 'POST'],
-      handle: async (request) => {
-        if (request.method === 'POST') {
-          const body = await readBody(request)
-          if (body.action === 'cancel') return json(await ops.doubaoworkLogin.cancel())
-          return json(await ops.doubaoworkLogin.start())
-        }
-        const url = new URL(request.url)
-        if (url.searchParams.get('poll') === '1') return json(await ops.doubaoworkLogin.poll())
-        return json(await ops.doubaoworkLogin.status())
-      },
-    },
-    {
       path: '/api/v1/cpa/priority',
       methods: ['GET', 'POST'],
       handle: async (request) => {

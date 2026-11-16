@@ -61,10 +61,8 @@
 - **`config.ts`** —— `config.yaml` 生成与密钥派生。
   - 导出：`CONFIG_VERSION` / `STREAM_HEAD_TIMEOUT` / `readConfigVersion` / `renderConfig` /
     `patchModelAlias` / `patchServerHost` / `patchStreamHeadTimeout` /
-    `patchAccessApiKeys` / **`renderCompatYaml` / `patchOpenAiCompatibility`** /
-    `writeConfig` / `generateSecretKey` /
-    `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`；
-    类型 **`CompatUpstream`**
+    `patchAccessApiKeys` / `writeConfig` / `generateSecretKey` /
+    `generateApiKey` / `looksLikeBcrypt` / `readSecretKeyFromConfig`
   - ⚠️ `CONFIG_VERSION` 是上游的**硬校验**值（不是 `8` 就拒绝启动，没有降级兼容）。
     它与 CPA 的**软件版本号没有映射关系** —— 上游不存在「版本 → 代际」的表，
     所以代际只能**读对端声明的那个数**，推不出来。`readConfigVersion` 就是那个读法
@@ -92,15 +90,6 @@
     会被宿主当凭据故障，轮换 + 冷却整个账号池（级联 503，2026-10-21 workbuddy
     11-128 实例）。补齐路纪律同上：只补 `workbuddy:` 子段内缺失的键、已有值
     （含显式 0）一字节不动、`configs:` / `workbuddy:` 找不到就放弃
-  - ⚠️ **`renderCompatYaml` / `patchOpenAiCompatibility` 是 compat 渠道唯一的接入面**
-    （2026-11-13 接豆包工作）。三条实测约束**必须**先读 `CompatUpstream` 的注释：
-    ① `models` 要显式列全（CPA 不探测上游，空 ⇒ 0 个模型）；
-    ② **不写 `prefix`**（与 `alias` 叠加会产出 `dbw/dbw/x` 双前缀 id）；
-    ③ **绝不用管理接口写这一段** —— `PUT /v0/management/openai-compatibility`
-    会丢掉 `keys`，还把整块嵌进相邻顶层键（真机落盘成 `api-keys.openai-compatibility`）
-  - ⚠️ `patchOpenAiCompatibility` 与其它 patch 的**唯一不同**：它按「整段替换」处理。
-    理由是这一段完全由我们生成（含密钥），不像 `api-keys` 那样是用户手写的清单。
-    纪律不变：只动这一段、内容没变时不写盘、绝不重写整份文件
 - **`download.ts`** —— 下载 / 校验 / 解压 / 就位探测。
   - 导出：`findAsset` / `readOfflineArchive` / `download` / `verify` / `extract` /
     `findFile` / `countDlls` / `listPluginIds` / `sourcePresent` / `removeDir` /

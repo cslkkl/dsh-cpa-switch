@@ -39,9 +39,6 @@ const CONFIG: PluginConfig = {
   reasoningEfforts: true,
   maxOutputTokens: 384000,
   startTimeoutSeconds: 30,
-  doubaoworkUrl: '',
-  doubaoworkKeyRef: 'DOUBAOWORK_API_KEY',
-  doubaoworkModels: '',
 }
 
 const readConfig = (): PluginConfig => CONFIG
@@ -61,9 +58,6 @@ function makeDeps(): RouteDeps {
       manageLifecycle: CONFIG.manageLifecycle,
       openControlPanel: CONFIG.openControlPanel,
       startTimeoutSeconds: CONFIG.startTimeoutSeconds,
-      doubaoworkUrl: CONFIG.doubaoworkUrl,
-      doubaoworkKeyRef: CONFIG.doubaoworkKeyRef,
-      doubaoworkModels: CONFIG.doubaoworkModels,
     }),
   })
   const gateway = new CpaGateway({

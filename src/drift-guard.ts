@@ -34,7 +34,7 @@
  * @module dsh-cpa-switch/drift-guard
  */
 
-import { PLUGIN_CHANNEL_IDS } from './channels/registry.ts'
+import { CHANNEL_IDS } from './channels/registry.ts'
 import type { LoggerLike } from './credentials.ts'
 
 /** 守卫一轮里某个渠道的结果（只取它要报的那点数）。 */
@@ -70,11 +70,7 @@ export interface DriftGuardDeps {
     readonly error?: string | undefined
   }>
   /**
-   * 要盯的渠道。默认取注册表里的**插件渠道**（`PLUGIN_CHANNEL_IDS`）—— 别再抄一份清单。
-   *
-   * ⚠️ **不含 compat 渠道**：豆包工作的「账号」不是 `auth-files` 里的文件，判不出
-   * `disabled` 漂移，问它只会白打一次 `/v0/management/openai-compatibility`。
-   * 注册表口径见 `channels/registry.ts`。
+   * 要盯的渠道。默认取注册表里的全部托管渠道（`CHANNEL_IDS`）—— 别再抄一份清单。
    */
   readonly channels?: readonly string[] | undefined
   readonly logger?: LoggerLike | undefined
@@ -113,7 +109,7 @@ export const DRIFT_GUARD_FIRST_MS = 60_000
  * @returns 每个渠道的结果（`fixed` 为 0 的也在里面 —— 调用方据此判断要不要说话）。
  */
 export async function driftGuardPass(deps: DriftGuardDeps): Promise<DriftGuardPass[]> {
-  const channels = deps.channels ?? PLUGIN_CHANNEL_IDS
+  const channels = deps.channels ?? CHANNEL_IDS
   const out: DriftGuardPass[] = []
 
   for (const plugin of channels) {

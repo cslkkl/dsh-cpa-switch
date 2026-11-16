@@ -45,16 +45,13 @@ export {
   looksLikeBcrypt,
   patchAccessApiKeys,
   patchModelAlias,
-  patchOpenAiCompatibility,
   patchServerHost,
   patchStreamHeadTimeout,
   readConfigVersion,
   readSecretKeyFromConfig,
-  renderCompatYaml,
   renderConfig,
   writeConfig,
 } from './config.ts'
-export type { CompatUpstream } from './config.ts'
 export { prepare } from './prepare.ts'
 export type { PrepareInput, PrepareResult } from './prepare.ts'
 export { SetupSession } from './session.ts'

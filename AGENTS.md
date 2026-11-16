@@ -190,42 +190,6 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 - **上游一次报错 ≠ 模型常性，单次测量 ≠ 可分类** —— 判模型行为看多次请求的响应内容 →
   [决策记录](.agents/notes/2026-10-12-reasoning-effort-retriage.md)
 
-**compat 渠道（豆包工作）的零信号坑**（2026-11-13 实测，逐条都踩过；条数不写死）
-
-- ⚠️ **`keys: - api-key:` 不会生成 `Authorization` 头 —— 必须另写 `headers`**
-  （2026-11-13，CPA 8.0.11）。拿一个回显服务器顶在上游位置抓 CPA 实际发出的请求：
-  只写 `keys` 时**完全没有 `Authorization`**；加上
-  `headers: { Authorization: "Bearer <key>" }` 才出现。前者不报错、**静默不发**，
-  上游回 401 → CPA 包成 `auth_unavailable: no upstream auth` → 界面显示「API 密钥无效」，
-  与「密钥填错」完全同形。为此排查很久：网关直连 200、密钥逐字一致、YAML 也对，就是 401。
-  渲染侧两处都写（`setup/config.ts` 的 `renderCompatYaml`），判据钉住「两处都在」。
-- ⚠️ **那个网关的默认 Key 会变** —— 重启 / 状态重建后 `POST /api/key` 会返回**另一把**
-  （实测同一台机器两次拿到 `sk-dw-PuBY…` 与 `sk-dw-ErpD…`）。而写进 `config.yaml` 的是
-  **登录那一刻的快照** ⇒ 网关一重启就变成「API 密钥无效」。所以「写配置」那一步必须
-  **现读**网关的 key，不能信任何缓存（`scripts/apply-compat-once.mjs` 就是现读的）。
-- ⚠️ **它的 `/v1/chat/completions` 请求体上限是 256 KB**（`native/model-api.mjs` 的
-  `readJson(req, limit = 262144)`，模型口调用时不传第二个参数）。超了直接
-  `413 请求体过大`，请求到不了豆包。DSH 的长会话（几十轮、上百 M token 的历史）
-  必然超限 ⇒ 这个上游只适合**短会话**。别把它当成能承载长上下文的后端。
-- **`openai-compatibility` 只能走文件写，不能走管理接口** ——
-  `PUT /v0/management/openai-compatibility` 会**丢掉 `keys`**（落盘成 `keys: []`），
-  还把整块嵌进相邻的顶层键（真机落盘成 `api-keys.openai-compatibility`）。
-  那份配置 CPA 下次启动不一定认得，而**写的那一刻返回的是 `{"status":"ok"}`**。
-  唯一正确的路是 `setup/config.ts` 的 `patchOpenAiCompatibility`（CPA 未运行时）。
-- **`prefix` 与 `alias` 会叠加** —— 设 `prefix: dbw` + `alias: dbw/x` 时，
-  目录里同时出现 `dbw/x` 与 `dbw/dbw/x` 两个 id。现在统一「`alias` 自带 `<别名前缀>/`、
-  `prefix` 留空」，且**前缀必须与渠道 spec 的 `aliasPrefix` 逐字相同**
-  （漂开 ⇒ `channelOfPrefix` 认不出 ⇒ 归属算不出来 ⇒ 模型从选择器里消失，不报错）。
-- **compat 凭据不进 `auth-files`** —— 那份清单只收**文件型**凭据（返回里带
-  `source: "file"` 与 `.cli-proxy-api\*.json` 的 `path`）。配置型的
-  `openai-compatibility` key **永远不在里面**，而 `auth-files/models?name=<任意串>`
-  对它只回 `{"models":[]}` —— 拿它当空结果，模型就**永远进不了选择器**。
-  读法在 `route-registry.ts` 的 `readCompatChannelModels`，且**只在用户配了才去读**
-  （无条件读会让每轮记一条失败 ⇒ `complete: false` ⇒ 清单永久退化）。
-- **`ensureProviders` 的期望集合不能是「全部托管渠道」** —— 没有模型的渠道**不该有行**
-  （宿主对空 `models` 是硬错误），拿全量去比会让「不该有行」被当成「行丢了」，
-  于是每次事件都重推一次、日志一直报「provider 行不见了」。期望集合取自 `lastGood.groups`。
-
 **模型路由的三条不变量（一条因果链，改任一条先读另两条）**
 
 1. **「就绪」是统一判据**，门不通过必须回退上一份 → [统一就绪判据](.agents/notes/2026-10-06-unified-readiness-gate.md)

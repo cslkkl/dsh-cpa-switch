@@ -61,15 +61,3 @@
         displayName: CPA Switch · ZCode
         apiKeyEnv: CPA_API_KEY
         api: openai-completions
-      #
-      # ⚠️ 第五组：**豆包工作**（2026-11-13）。它不是 CPA 渠道插件，而是
-      # `openai-compatibility` 声明的一个 OpenAI 兼容上游 —— 但推给宿主的
-      # provider 骨架与其余四组**逐字同构**，因为「一个渠道一个 provider」这条
-      # 只跟渠道注册表有关，与渠道的管理面长什么样无关。
-      #
-      # 组名里的渠道展示名来自 `channels/doubaowork.ts` 的 `label`（豆包工作），
-      # 由 `tests/route-registry.test.ts` 的「骨架与推送的分组一致」钉住。
-      cpa-doubaowork:
-        displayName: CPA Switch · 豆包工作
-        apiKeyEnv: CPA_API_KEY
-        api: openai-completions
