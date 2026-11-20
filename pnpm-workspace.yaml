@@ -27,3 +27,7 @@ packages:
 # 上限仍允许同 major 的后续补丁。设置必须住在这里，package.json 的 pnpm 字段不生效。
 overrides:
   vite: ^8.3.3
+
+permissions:
+  tsdown:
+    skills: false

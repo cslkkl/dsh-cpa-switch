@@ -144,7 +144,8 @@ export default [
     entry: { client: 'src/client/index.tsx' },
     outDir: 'lib',
     format: ['cjs'],
-    platform: 'browser',
+    // tsdown 0.23 的 CJS 输出忽略顶层 platform；浏览器平台必须在输入侧声明。
+    inputOptions: { platform: 'browser' },
     target: 'es2024',
     dts: false,
     clean: false,
