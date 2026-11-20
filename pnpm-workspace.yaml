@@ -22,3 +22,8 @@ packages:
 # `strictDepBuilds` 默认开着，`pnpm install` 会以 `ERR_PNPM_IGNORED_BUILDS`
 # **失败**（本机实测：exit 1）。走到那一步再决定放行哪一个，而不是现在先写一张
 # 猜出来的表。
+
+# Vitest 允许 Vite 6 / 7 / 8；下限钉在修复 6 条安全公告的 8.3.3，
+# 上限仍允许同 major 的后续补丁。设置必须住在这里，package.json 的 pnpm 字段不生效。
+overrides:
+  vite: ^8.3.3
