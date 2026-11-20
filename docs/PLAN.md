@@ -93,6 +93,10 @@
 - ⚠️ **Release 正文里的「除 `.github/` 外的源码差异条数」不为 0 时要去查** ——
   正常应当是 0（fork 只带发布脚手架）。不为 0 说明 fork 有意带了源码补丁，
   或上游那个 tag 被移动过；两者都该在发版前弄明白。
+- ⚠️ **TypeScript 7 等 typescript-eslint 的 peer 范围接入后再升** —— 当前 8.73.0
+  声明 `>=4.8.4 <6.1.0`，不能用 override 假装兼容；tsdown 已支持 7。
+  Vitest 5 已独立完成升级与全量验证。版本边界与重估条件见
+  [工具链大版本评估](../.agents/notes/2026-11-20-toolchain-major-evaluation.md)。
 
 ### 2.6 研究方向（未立项，先记录）
 
