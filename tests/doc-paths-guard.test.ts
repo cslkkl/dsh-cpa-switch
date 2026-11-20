@@ -1,5 +1,5 @@
 /**
- * 文档路径门禁（[`scripts/check-doc-paths.cjs`](../scripts/check-doc-paths.cjs)）的**自证判据**。
+ * 文档路径与控制字符门禁（[`scripts/check-doc-paths.cjs`](../scripts/check-doc-paths.cjs)）的**自证判据**。
  *
  * 为什么给一个门禁写判据：它第一次跑就报出 7 处「死路径」，全是**假**的 ——
  * 扩展名交替写成 `ts|tsx`，而正则交替是首次匹配获胜，于是 `.tsx` 被截成 `.ts`，
@@ -24,12 +24,23 @@ interface Stale extends Ref {
   readonly doc: string
 }
 
+interface ControlChar {
+  readonly line: number
+  readonly column: number
+  readonly code: string
+}
+
+interface Control extends ControlChar {
+  readonly doc: string
+}
+
 interface Guard {
   ALLOWED: readonly { readonly target: string; readonly reason: string }[]
   ALLOWLIST_MAX: number
   ROOT: string
   SKIP_DIRS: ReadonlySet<string>
   refsIn: (text: string) => Ref[]
+  controlCharsIn: (text: string) => ControlChar[]
   trimTrailing: (value: string) => string
   walkDocs: (dir: string, out?: string[]) => string[]
   resolveRef: (root: string, docAbs: string, ref: string) => string | null
@@ -37,6 +48,7 @@ interface Guard {
     docCount: number
     refCount: number
     stale: Stale[]
+    controls: Control[]
   }
   main: (root?: string) => number
 }
@@ -138,6 +150,33 @@ describe('文档里的路径抽取', () => {
   it('剥不成文件名的引用直接丢掉 —— 宁可不报，也不报假违规', () => {
     expect(guard.trimTrailing('src/a.ts。')).toBe('src/a.ts')
     expect(guard.trimTrailing('src/a')).toBe('')
+  })
+})
+
+describe('文档里的控制字符', () => {
+  it('用可见的 Unicode 编码报告行列，不合法字符一个不漏', () => {
+    expect(guard.controlCharsIn('# 标题\n甲\u0007乙\u001f丙\n')).toEqual([
+      { line: 2, column: 2, code: 'U+0007' },
+      { line: 2, column: 4, code: 'U+001F' },
+    ])
+  })
+
+  it('Tab、LF 与成对 CRLF 是合法文本形状', () => {
+    expect(guard.controlCharsIn('\t甲\r\n乙\n')).toEqual([])
+  })
+
+  it('控制字符拦门禁，修掉后放行', () => {
+    const root = makeRepo({
+      'docs/a.md': '见 src/real.ts\n\u0007\n',
+      'src/real.ts': 'export {}\n',
+    })
+
+    const failed = runMain(root)
+    expect(failed.code).toBe(1)
+    expect(reasonOf(failed.errors, 'U+0007')).toBe(true)
+
+    writeFileSync(join(root, 'docs/a.md'), '见 src/real.ts\n')
+    expect(runMain(root).code).toBe(0)
   })
 })
 
@@ -258,11 +297,12 @@ describe('白名单纪律', () => {
    * 集成自证：本仓现在必须是干净的。这条会在搬运 / 改名漏改文档时红 ——
    * 那正是门禁存在的意义。
    */
-  it('本仓没有白名单之外的死路径', () => {
-    const { docCount, stale } = guard.collectStale({ root: guard.ROOT })
+  it('本仓没有白名单之外的死路径或控制字符', () => {
+    const { docCount, stale, controls } = guard.collectStale({ root: guard.ROOT })
     const allowed = new Set(guard.ALLOWED.map((entry) => entry.target))
 
     expect(docCount).toBeGreaterThan(20)
     expect(stale.filter((item) => !allowed.has(item.ref))).toEqual([])
+    expect(controls).toEqual([])
   })
 })

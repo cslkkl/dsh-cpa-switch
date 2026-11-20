@@ -1,16 +1,18 @@
 /**
- * 文档路径检查：文档里提到的 `src/**` / `tests/**` / `scripts/**` 路径必须真实存在。
+ * 文档路径与控制字符检查：文档里提到的 `src/**` / `tests/**` / `scripts/**`
+ * 路径必须真实存在，正文不得混入 C0 控制字符（Tab 与换行除外）。
  *
  * 为什么需要它：搬运、改名、删除模块之后，**代码里**的旧路径当场编译报错，
  * 而**文档里**的旧路径零信号 —— 只有人恰好翻到那一句才会发现。
  * 2026-10-05 的一次人工审查抓到 4 处死路径（如域拆分后删掉的 `src/adapters.ts`），
  * 靠的还是临时探针；探针用完就没了，所以把这条落成门禁。
+ * 控制字符同样没有格式或链接检查信号，却会让标识符与路径悄悄缺字。
  *
  * 范围有意收窄成三类**代码路径**：`docs/**` 与 `.agents/notes/**` 之间的引用通常写成
  * Markdown 链接，那由链接校验管（维护工作流 skill 的 `check-markdown-links.py`）；
  * 这里只管散在正文、表格、代码块里的**裸路径** —— 那种写法没有任何机器兜底。
  *
- * 退出码是契约：0 = 通过，1 = 有死路径或前提不成立。
+ * 退出码是契约：0 = 通过，1 = 有死路径、控制字符或前提不成立。
  * 只用 `node:fs` / `node:path`，不装任何依赖（frozen 安装后要能直接跑）。
  *
  * 用法：`node scripts/check-doc-paths.cjs`（`pnpm check:doc-paths`）
@@ -76,6 +78,33 @@ function refsIn(text) {
   return out
 }
 
+/**
+ * 找出文档里的 C0 控制字符与 DEL；Tab、LF、成对 CRLF 是合法文本形状。
+ *
+ * 行列按 Unicode 码点计，错误值统一写成 `U+XXXX`，不把不可见字节直接打进日志。
+ */
+function controlCharsIn(text) {
+  const out = []
+  const lines = text.split(/\r?\n/u)
+
+  lines.forEach((line, lineIndex) => {
+    let column = 0
+    for (const char of line) {
+      column += 1
+      const value = char.codePointAt(0) ?? 0
+      if ((value <= 31 && value !== 9) || value === 127) {
+        out.push({
+          line: lineIndex + 1,
+          column,
+          code: `U+${value.toString(16).toUpperCase().padStart(4, '0')}`,
+        })
+      }
+    }
+  })
+
+  return out
+}
+
 /** 剥掉句末标点；剥完不像文件名的丢掉（宁可不报，也不报假违规）。 */
 function trimTrailing(value) {
   let ref = value
@@ -115,22 +144,25 @@ function resolveRef(root, docAbs, ref) {
   return null
 }
 
-/** 扫全部文档，返回死路径清单（不含白名单过滤）。 */
+/** 扫全部文档，返回死路径与控制字符清单（不含白名单过滤）。 */
 function collectStale({ root }) {
   const docs = walkDocs(root)
   const stale = []
+  const controls = []
   let refCount = 0
 
   for (const doc of docs) {
     const rel = path.relative(root, doc).split(path.sep).join('/')
+    const text = fs.readFileSync(doc, 'utf8')
 
-    for (const { ref, line } of refsIn(fs.readFileSync(doc, 'utf8'))) {
+    for (const hit of controlCharsIn(text)) controls.push({ doc: rel, ...hit })
+    for (const { ref, line } of refsIn(text)) {
       refCount += 1
       if (resolveRef(root, doc, ref) === null) stale.push({ doc: rel, line, ref })
     }
   }
 
-  return { docCount: docs.length, refCount, stale }
+  return { docCount: docs.length, refCount, stale, controls }
 }
 
 function main(root = process.argv[2] ?? ROOT) {
@@ -144,7 +176,7 @@ function main(root = process.argv[2] ?? ROOT) {
     return 1
   }
 
-  const { docCount, refCount, stale } = collectStale({ root: resolvedRoot })
+  const { docCount, refCount, stale, controls } = collectStale({ root: resolvedRoot })
 
   // 扫到 0 个文档与「全部通过」在输出上长得一样，所以前者算失败。
   if (docCount === 0) {
@@ -159,9 +191,9 @@ function main(root = process.argv[2] ?? ROOT) {
   const referenced = new Set(stale.map((item) => item.ref))
   const dead = ALLOWED.filter((entry) => !referenced.has(entry.target))
 
-  if (failures.length === 0 && dead.length === 0) {
+  if (failures.length === 0 && dead.length === 0 && controls.length === 0) {
     console.log(
-      `文档路径检查通过：${String(docCount)} 个文档，${String(refCount)} 条路径引用` +
+      `文档路径与控制字符检查通过：${String(docCount)} 个文档，${String(refCount)} 条路径引用` +
         `（白名单 ${String(ALLOWED.length)}/${String(ALLOWLIST_MAX)}）`,
     )
     return 0
@@ -169,6 +201,11 @@ function main(root = process.argv[2] ?? ROOT) {
 
   for (const failure of failures) {
     console.error(`FAIL ${failure.doc}:${String(failure.line)} —— 路径不存在：${failure.ref}`)
+  }
+  for (const hit of controls) {
+    console.error(
+      `FAIL ${hit.doc}:${String(hit.line)}:${String(hit.column)} —— 文档含控制字符 ${hit.code}`,
+    )
   }
   for (const entry of dead) {
     console.error(`FAIL 白名单空条目：${entry.target} —— 已经没有任何文档提它了，删掉这一条`)
@@ -195,6 +232,7 @@ module.exports = {
   ROOT,
   SKIP_DIRS,
   collectStale,
+  controlCharsIn,
   main,
   refsIn,
   resolveRef,

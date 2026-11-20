@@ -64,7 +64,7 @@ node node_modules/typescript/bin/tsc --noEmit -p tsconfig.client.json   # 只查
 node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json          # 只查宿主半端
 node node_modules/prettier/bin/prettier.cjs --write <文件…>              # 只格式化改过的
 pnpm verify:artifacts        # 产物断言（lib 里该有什么、不该有什么）
-pnpm check:doc-paths         # 文档里提到的 src/tests/scripts 裸路径
+pnpm check:doc-paths         # 文档裸路径 + C0 控制字符
 ```
 
 `node_modules/.bin` 可能为空 —— 上面按直接路径调用；其余脚本同构
