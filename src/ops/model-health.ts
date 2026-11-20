@@ -20,11 +20,26 @@
  * 3. **一次探测只回「这一轮看到什么」，不缓存、不落盘**：上游恢复得比我们的
  *    记录快，把结论写进状态文件只会变成新的腐烂源（见 `model-caps.ts` 的教训）。
  *
+ * ## 「两把钥匙」——第一条真机事故（2026-11-18）
+ *
+ * 探测发的是 `/v1/chat/completions`，而本插件对 CPA 的**默认通道带的是管理密钥**
+ * （`CpaGateway` 拼 `Bearer <adminKey>`，那是给 `/v0/management/*` 的）。
+ * CPA 在 `/v1/*` 上只认 `access.api-keys`（调用密钥 `CPA_API_KEY`），于是管理密钥
+ * 换来一份 **401 `{"error":"Invalid API key"}`** —— 而那一侧的错误被 `probeOne`
+ * 收成「这个模型 `failed`」，界面上一整列「请求失败」。
+ *
+ * 症状为什么极具误导性：面板把 35 个模型的探测结论逐行画出来，看起来像
+ * 「上游全挂了」，实际是**一个前置条件不成立**。所以本域现在做两件事：
+ *
+ * 1. 发包**必须**带调用密钥（由 `ops/index.ts` 的 `send` 落实，见那里的注释）；
+ * 2. 一旦收到 401/403，**中断整轮**并返回一条 `ok: false`（`reason: 'unauthorized'`），
+ *    而不是把同一份 401 复制 35 行 —— 那既误导用户，也白烧 34 次往返。
+ *
  * @module dsh-cpa-switch/ops/model-health
  */
 
 import { emptyCompletionOf } from '../health-probe.ts'
-import type { OpsResult } from './result.ts'
+import { messageOf, type OpsResult } from './result.ts'
 
 /** 探测用的那一条消息 —— 固定、最短，尽量少烧 token。 */
 const PROBE_PROMPT = 'hi'
@@ -47,16 +62,32 @@ export interface ModelHealthReport {
   readonly counts: { readonly healthy: number; readonly empty: number; readonly failed: number }
 }
 
+/** 一次发包要对方满足的东西（`send` 的入参）。 */
+export interface ProbeRequest {
+  readonly method: string
+  readonly body: string
+  /**
+   * 单次超时（毫秒）—— **必须一路传到 HTTP 层**（`CpaRequestInit.timeoutMs`）。
+   *
+   * ⚠️ 只在本域做 `Promise.race` 是不够的：通道层默认 20 秒会先 `AbortSignal`
+   * 掐断，于是「允许逐次超时」变成一句空话，慢模型一律被判失败。
+   */
+  readonly timeoutMs: number
+}
+
 /** 本域的依赖。 */
 export interface ModelHealthDeps {
   /**
    * 对 CPA 发包 —— 走 `gateway.fetch`（唯一通道、连接参数现取）。
    *
+   * ⚠️ **必须带调用密钥**（`CPA_API_KEY`），不能带管理密钥：CPA 的 `/v1/*` 只认
+   * `access.api-keys`，管理密钥在那一侧回 **401 `Invalid API key`**。这条错法的
+   * 症状极其误导 —— 见文件头「两把钥匙」一节。
+   *
    * ⚠️ **必须允许逐次超时**：探测要的是「它到底答不答」，答得慢本身也是结论；
    * 拿默认 20 秒会把慢模型一律判成失败。
    */
-  readonly send?:
-    ((path: string, init: { method: string; body: string }) => Promise<unknown>) | undefined
+  readonly send?: ((path: string, init: ProbeRequest) => Promise<unknown>) | undefined
   /** 候选行（`id` / `bare`）从哪来 —— 与面板勾选清单**同一份数据**。 */
   readonly candidateRows?:
     ((channel: string) => readonly { id: string; bare: string }[]) | undefined
@@ -89,6 +120,26 @@ function lanes<T>(items: readonly T[], size: number): T[][] {
   return out
 }
 
+/**
+ * 这次失败是不是**鉴权被拒**（而不是「这个模型答不出来」）。
+ *
+ * 判据是 HTTP 状态码，不匹配上游那句话 —— 文案会变（`Invalid API key` /
+ * `Unauthorized` / 中文改写），而 401/403 是契约。取 `status` 用**鸭子类型**：
+ * 本层不引传输层的错误类（`ops/` 不碰传输，见 [AGENTS.md](AGENTS.md)）。
+ *
+ * ⚠️ 只用于「要不要中断整轮」这一个决定，不参与任何模型结论：判错的代价是
+ * 这一轮少探几个，而不是把健康模型标成坏的。
+ */
+function isAuthRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | undefined)?.status
+  return status === 401 || status === 403
+}
+
+/** 一轮探测里「前置不成立」的记录位（由 `probeOne` 写、`probe` 读）。 */
+interface RefusalSink {
+  message?: string
+}
+
 /** 组装模型健康探测域。 */
 export function createModelHealthOps(deps: ModelHealthDeps = {}): ModelHealthOps {
   const timeoutMs = deps.timeoutMs ?? 30_000
@@ -102,7 +153,10 @@ export function createModelHealthOps(deps: ModelHealthDeps = {}): ModelHealthOps
   }
 
   /** 探一个模型。**任何异常都收敛成一行结论**，不许让整轮挂掉。 */
-  async function probeOne(row: { id: string; bare: string }): Promise<ModelHealthRow> {
+  async function probeOne(
+    row: { id: string; bare: string },
+    refusal: RefusalSink,
+  ): Promise<ModelHealthRow> {
     const send = deps.send
     if (send === undefined) {
       return { id: row.id, bare: row.bare, verdict: 'failed', detail: '没有配置发包通道' }
@@ -114,8 +168,13 @@ export function createModelHealthOps(deps: ModelHealthDeps = {}): ModelHealthOps
     })
 
     try {
+      /**
+       * 两道的分工：`send` 那一路的 HTTP 超时比本域的 `race` **宽 3 秒**，
+       * 于是「真的超时」总是由这里给出可读的那句话，而不是一句
+       * `This operation was aborted`（上游 AbortError 的原文）。
+       */
       const payload = await Promise.race([
-        send('/v1/chat/completions', { method: 'POST', body }),
+        send('/v1/chat/completions', { method: 'POST', body, timeoutMs }),
         new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error(`超时（${timeoutMs}ms）`)), timeoutMs)
         }),
@@ -130,8 +189,14 @@ export function createModelHealthOps(deps: ModelHealthDeps = {}): ModelHealthOps
           }
         : { id: row.id, bare: row.bare, verdict: 'healthy' }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return { id: row.id, bare: row.bare, verdict: 'failed', detail: message }
+      /**
+       * ⚠️ **鉴权被拒不是「这个模型坏了」** —— 它是整轮的前置不成立：每个模型
+       * 都会得到同一份 401。所以这里记下那句原因、由 `probe()` 中断整轮，
+       * 免得把「钥匙不对」显示成「35 个模型全坏」，也免得白烧 34 次往返
+       * （2026-11-18 实机：面板上一整列「请求失败」，detail 是 `Invalid API key`）。
+       */
+      if (isAuthRefusal(error)) refusal.message ??= messageOf(error)
+      return { id: row.id, bare: row.bare, verdict: 'failed', detail: messageOf(error) }
     }
   }
 
@@ -145,11 +210,26 @@ export function createModelHealthOps(deps: ModelHealthDeps = {}): ModelHealthOps
     if (id === undefined) return { ok: false, error: '缺少渠道。', reason: 'bad-shape' }
     const rows = deps.candidateRows?.(id) ?? []
 
+    /** 每轮独立：并发的两次探测不许互相把对方「已经失败」传染过来。 */
+    const refusal: RefusalSink = {}
     const collected: ModelHealthRow[] = []
     for (const lane of lanes(rows, concurrency)) {
       // 逐路串行、路间并行：并发上限就是这样落实的（一口气全放会把渠道打挂）
-      const done = await Promise.all(lane.map((row) => probeOne(row)))
+      const done = await Promise.all(lane.map((row) => probeOne(row, refusal)))
       collected.push(...done)
+      /**
+       * 前置不成立就**立刻停**：再跑几路只是用同一份 401 刷更多行。
+       * 剩下的模型**不写进结果**（不伪造「失败」）—— 整轮以一条可读的错误返回。
+       */
+      if (refusal.message !== undefined) break
+    }
+
+    if (refusal.message !== undefined) {
+      return {
+        ok: false,
+        error: `探测被 CPA 拒绝（${refusal.message}）：/v1 要调用密钥 CPA_API_KEY，管理密钥不被接受`,
+        reason: 'unauthorized',
+      }
     }
 
     // 顺序按**名**稳定下来，别让并发完成顺序影响界面（同一份清单两轮长得不一样）

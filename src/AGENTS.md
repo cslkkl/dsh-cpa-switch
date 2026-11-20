@@ -20,6 +20,14 @@ src/ 特有约束：
   漏了不报错，只是用户点完看到的还是旧值。判据在 `tests/ops-write-paths.test.ts`。
 - **对 CPA 只有一个通道**：读写一律 `gateway.fetch(path, init)`，
   不要自己拼 `cpaFetch(options(), …)`；就绪前置用 `requireRunning` / `requireReady`。
+- ⚠️ **两把钥匙不同轴，通道的默认那把只对 `/v0/management/*` 有效**：
+  `gateway.fetch` 拼的是**管理密钥**，而 CPA 的 `/v1/*`（`/v1/models`、
+  `/v1/chat/completions`）只认 `access.api-keys`（调用密钥 `CPA_API_KEY`）——
+  拿管理密钥去问会得到 **401 `{"error":"Invalid API key"}`**。
+  要打 `/v1` 就在 `init.headers` 里覆盖 `authorization`（`cpaFetch` 把它铺在管理密钥
+  之后，于是它赢），**且没有调用密钥时不许退回管理密钥**。这条错法的症状是
+  「功能看起来跑了、结论全是坏的」（2026-11-18：探测 35 个模型全「请求失败」），
+  见[决策记录](../.agents/notes/2026-11-18-probe-uses-call-key.md)。
 - **「CPA 在不在跑」只有三个名字**：只是想知道用 `runtime.status()`（**绝不起进程**），
   要确保可用用 `runtime.ensure()`，要停掉**自己启的**那个用 `runtime.stop()`。
   别再自己 `probePort`（那会另开一条探活路径），也别自己拿 `CpaProcess` ——

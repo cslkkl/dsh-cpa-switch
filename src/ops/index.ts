@@ -64,6 +64,15 @@ export interface OpsDeps {
    */
   readonly candidateModelRows?: ((channel: string) => readonly CandidateModelRow[]) | undefined
   /**
+   * **调用密钥**（`CPA_API_KEY`，CPA `access.api-keys` 里那个）—— 与
+   * {@link gateway} 带的**管理密钥不是同一把**。
+   *
+   * 用途只有一个：模型健康探测要打 `/v1/chat/completions`，而 CPA 在 `/v1/*`
+   * 上只认调用密钥。少这条，探测会拿到 401 `Invalid API key`，界面表现为
+   * 「35 个模型全部请求失败」（2026-11-18 实机）。
+   */
+  readonly resolveApiKey?: (() => Promise<string>) | undefined
+  /**
    * 运行态：只有更新域用（换 dll 前要停 CPA）。其余各域一律经 `gateway`。
    *
    * ⚠️ 这里**没有** `process` / `processOptions` —— 那两个名字在 `CpaRuntime`
@@ -155,8 +164,34 @@ export function createOperations(deps: OpsDeps): Operations {
        * 发包走唯一通道 `gateway.fetch`（连接参数现取）—— 与其余各域同一口径。
        * 探测要的是「它到底答不答」，所以用 `POST /v1/chat/completions`，
        * 而不是只读一个目录。
+       *
+       * ⚠️ **授权必须换成调用密钥**（`resolveApiKey`）：`gateway.fetch` 默认拼的是
+       * 管理密钥，那是 `/v0/management/*` 的钥匙；`/v1/*` 只认 `access.api-keys`，
+       * 拿管理密钥去问会得到 401 `Invalid API key`，而症状是**面板上整列「请求失败」**
+       * —— 看起来像上游全挂了（2026-11-18 实机，见
+       * [决策记录](../../.agents/notes/2026-11-18-probe-uses-call-key.md)）。
+       * 覆盖方式与 `readStableCatalog` 读 `/v1/models` 同款：`init.headers` 里
+       * 写 `authorization`，`cpaFetch` 把它铺在管理密钥**之后**，于是它赢。
+       *
+       * ⚠️ 没有调用密钥时**不许退回管理密钥** —— 那必然 401，只会把
+       * 「没配钥匙」伪装成「模型全坏」。直接抛一条带 `status: 401` 的错误，
+       * 让探测域中断整轮并给出可读原因（401 与 CPA 自己的鉴权失败同一个信号）。
        */
-      send: (path, init) => deps.gateway.fetch(path, init),
+      send: async (path, init) => {
+        const apiKey = deps.resolveApiKey === undefined ? '' : await deps.resolveApiKey()
+        if (apiKey === '') {
+          const error = new Error('缺少调用密钥 CPA_API_KEY（/v1 不接受管理密钥）')
+          ;(error as Error & { status?: number }).status = 401
+          throw error
+        }
+        return await deps.gateway.fetch(path, {
+          method: init.method,
+          body: init.body,
+          headers: { authorization: `Bearer ${apiKey}` },
+          /** 逐次超时要一路传到 HTTP 层，否则 20 秒默认值会把慢模型一律判失败。 */
+          timeoutMs: init.timeoutMs + 3000,
+        })
+      },
       /**
        * 候选行**复用**勾选清单那一份（`candidateModelRows`）：
        * 探的就是用户能选到的那些，两份清单漂开会让「探测说好的、选到却是坏的」。

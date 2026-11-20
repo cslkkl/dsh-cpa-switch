@@ -21,6 +21,7 @@ import { AdminKeyStore } from '../src/credentials.ts'
 import type { CpaGateway } from '../src/gateway.ts'
 import { createOperations, type Operations } from '../src/ops/index.ts'
 import { CpaProcess } from '../src/process.ts'
+import type { CandidateRow } from '../src/route-registry.ts'
 import { CpaRuntime } from '../src/runtime.ts'
 import { SetupSession } from '../src/setup/index.ts'
 
@@ -42,8 +43,15 @@ const CONFIG: PluginConfig = {
  * 用给定的通道造一份业务层。
  *
  * @param gateway - 用例自己的假通道（真实现要连 CPA，这里不碰）。
+ * @param options.apiKey - 假通道里的**调用密钥**（`/v1` 那一把，不是管理密钥）。
+ *   默认给一个可辨识的值，于是「探测拿错了钥匙」在用例里一眼看得出来；
+ *   给 `''` 表达「没配调用密钥」。
+ * @param options.candidateRows - 面板勾选清单 / 探测候选行的来源（路由侧那份）。
  */
-export function opsFor(gateway: CpaGateway): Operations {
+export function opsFor(
+  gateway: CpaGateway,
+  options: { apiKey?: string; candidateRows?: (channel: string) => readonly CandidateRow[] } = {},
+): Operations {
   const readConfig = (): PluginConfig => CONFIG
   const adminKey = new AdminKeyStore({
     credentials: { resolve: async () => undefined, set: async () => undefined },
@@ -65,5 +73,12 @@ export function opsFor(gateway: CpaGateway): Operations {
     apiKey: async () => '',
     onPrepared: () => {},
   })
-  return createOperations({ gateway, runtime, setup })
+  const apiKey = options.apiKey ?? 'sk-call-key'
+  return createOperations({
+    gateway,
+    runtime,
+    setup,
+    resolveApiKey: async () => apiKey,
+    ...(options.candidateRows === undefined ? {} : { candidateModelRows: options.candidateRows }),
+  })
 }

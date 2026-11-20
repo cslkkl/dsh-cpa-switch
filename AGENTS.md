@@ -152,6 +152,14 @@ Get-Item "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-cpa-switch"   # �
 
 **跨模块的静默失败**
 
+- **两把钥匙不同轴：`gateway.fetch` 默认带管理密钥，`/v1/*` 只认调用密钥** ——
+  `CPA_API_KEY` 与 `CPA_ADMIN_KEY` 互不通用（本机实测：管理密钥 200 管理接口 /
+  401 推理接口，调用密钥反之）。要打 `/v1`（`/v1/models`、`/v1/chat/completions`）
+  就在 `init.headers` 里覆盖 `authorization`，**没有调用密钥时不许退回管理密钥**。
+  症状是「功能跑了、结论全是坏的」：2026-11-18 面板「探测一下」35 个模型全
+  「请求失败」，实为一个 401 `Invalid API key` 被复制成 35 行。
+  规则在 [src/AGENTS.md](src/AGENTS.md)，判据 `tests/ops-model-health.test.ts`，
+  见[决策记录](.agents/notes/2026-11-18-probe-uses-call-key.md)。
 - **测试隔离要隔在「被读的那一层」** —— `src/paths.ts` 的优先链是「`$DSH_HOME` > `~/.dsh`」，
   所以只 mock `node:os` 的 `homedir` **在设了 `DSH_HOME` 的机器上完全无效**，测试会直写
   用户的真实状态（2026-10-24 实踩：覆盖掉 9 条账号意图，**而 CI 全绿** —— CI 没设

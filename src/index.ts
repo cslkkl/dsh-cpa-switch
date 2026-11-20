@@ -184,6 +184,11 @@ export async function apply(ctx: EffectContext, refs: ConfigRefs): Promise<void>
      * 用户勾了 18 个、选择器里 9 行一个没少，而**零报错**。
      */
     candidateModelRows: (channel) => ensureRoutesFresh.candidatesOf(channel),
+    /**
+     * 探测要打 `/v1/chat/completions`，那一侧只认**调用密钥**（不是管理密钥）。
+     * 现读不缓存：`CPA_API_KEY` 可能刚被「一键准备」写进凭据库。
+     */
+    resolveApiKey: () => resolveApiKey({ credentials: ctx.credentials }),
     runtime,
     setup,
   })
